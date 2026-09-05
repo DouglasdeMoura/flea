@@ -11,7 +11,10 @@ Item {
 
     signal activated()
 
-    readonly property color ink: root.primary ? Theme.color.accent : Theme.color.muted
+    // The canvas draws a secondary button as a hairline rule carrying live text, so only the frame
+    // takes muted, the role ThemeRoles.html gives borders and inactive controls; the label is alive.
+    readonly property color frame: root.primary ? Theme.color.accent : Theme.color.muted
+    readonly property color ink: root.primary ? Theme.color.accent : Theme.color.foreground
 
     implicitWidth: Math.max(Theme.hitMin, text.implicitWidth + 2 * Theme.spacing.gap + 2 * Theme.spacing.hairline)
     implicitHeight: Math.max(Theme.hitMin, text.implicitHeight + Theme.spacing.gap + 2 * Theme.spacing.hairline)
@@ -30,7 +33,7 @@ Item {
         anchors.fill: parent
         color: "transparent"
         border.width: Theme.spacing.hairline
-        border.color: root.ink
+        border.color: root.frame
     }
 
     Text {
