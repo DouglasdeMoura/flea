@@ -128,13 +128,14 @@ function run(check) {
     check("an nfs line and an nfs mount are one row however 2049 is spelled",
           Mounts.normalize("nfs://h:2049/export") === Mounts.normalize("nfs://h/export"), true)
     // Built by the form's own uri(), so the check cannot drift from what the dialog writes: WebDAV
-    // picked, the box as given, the prefilled port left alone, which is the shape the operator gets.
+    // picked, the box as given, and the prefilled port dropped back off because it is the one that
+    // scheme would have used anyway, which is the shape the operator gets.
     function formUri(tls) {
         return Protocols.uri({ protocol: "WebDAV", host: "nas.local", path: "/dav", user: "",
                                domain: "", tls: tls, port: String(Protocols.defaultPort("WebDAV", tls)) })
     }
-    check("the form spells the port the scheme it built prefilled, either way the box is set",
-          formUri(false) + "|" + formUri(true), "dav://nas.local:80/dav|davs://nas.local:443/dav")
+    check("the form omits a port the scheme it built already uses, either way the box is set",
+          formUri(false) + "|" + formUri(true), "dav://nas.local/dav|davs://nas.local/dav")
     // Each is now its own scheme's default, so gio drops it from the mount it reports and the
     // dedup drops it from the line; the bookmark and the live mount are one row on both spellings.
     check("so plain WebDAV's bookmark and gio's own report of it are one rail row",
