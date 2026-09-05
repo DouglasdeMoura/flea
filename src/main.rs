@@ -1,4 +1,5 @@
 mod backend;
+mod chooser;
 mod defaults;
 mod error;
 mod gui;
@@ -27,6 +28,7 @@ fn usage(message: &str) -> ! {
     eprintln!("flea: {}", message);
     eprintln!("usage: flea [--tui|--gui] [--select <uri|path>] [path]");
     eprintln!("       flea --default [off]");
+    eprintln!("       flea --picker [off]");
     eprintln!("       flea --ui-state [<json patch>]");
     eprintln!("       flea --version");
     exit(2)
@@ -120,6 +122,22 @@ fn main() {
     }
     if args.get(1).map(String::as_str) == Some("--default") {
         usage("--default takes nothing, or off");
+    }
+
+    // flea --picker [off]: the chooser routing, the other per-user step, see docs/install.md.
+    if args.len() == 2 && args[1] == "--picker" {
+        exit(chooser::claim());
+    }
+    if args.len() == 3 && args[1] == "--picker" && args[2] == "off" {
+        exit(chooser::release());
+    }
+    if args.get(1).map(String::as_str) == Some("--picker") {
+        usage("--picker takes nothing, or off");
+    }
+
+    // flea --pick <reply>: one portal request's picker window, opened by tools/flea-portal.
+    if args.len() == 3 && args[1] == "--pick" {
+        exit(gui::pick(&args[2]));
     }
 
     // flea --ui-state [<json patch>]: the shared ui.json read and update path, see AGENTS.md "The state file".

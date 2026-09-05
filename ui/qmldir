@@ -42,6 +42,10 @@ PreviewMedia 1.0 PreviewMedia.qml
 PreviewText 1.0 PreviewText.qml
 Row 1.0 Row.qml
 Pane 1.0 Pane.qml
+PickerChrome 1.0 PickerChrome.qml
+PickerList 1.0 PickerList.qml
+PickerPlaces 1.0 PickerPlaces.qml
+PickerSave 1.0 PickerSave.qml
 PaneWire 1.0 PaneWire.qml
 ShareBrowser 1.0 ShareBrowser.qml
 Sidebar 1.0 Sidebar.qml
