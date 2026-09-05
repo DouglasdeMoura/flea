@@ -7,9 +7,6 @@
 // The five the canvas draws, in the order it draws them.
 var PROTOCOLS = ["SMB", "SFTP", "FTPS", "WebDAV", "NFS"]
 
-// Default ports, from the canvas: SMB 445, SFTP 22, FTPS 21, WebDAV 443, NFS 2049.
-var PORTS = { "SMB": 445, "SFTP": 22, "FTPS": 21, "WebDAV": 443, "NFS": 2049 }
-
 // Which fields each protocol asks for. "path" is the label the canvas gives that row, which differs
 // per protocol because the thing it names differs: a share, a remote path, an export.
 var FIELDS = {
@@ -37,8 +34,10 @@ function fieldsFor(protocol) {
     return FIELDS[protocol] || FIELDS["SMB"]
 }
 
-function defaultPort(protocol) {
-    return PORTS[protocol] || 0
+// The port the form prefills. It belongs to the scheme, never to the protocol: WebDAV builds two
+// schemes and SCHEME_PORTS below is the one table both this and the rail's dedup read it out of.
+function defaultPort(protocol, tls) {
+    return defaultPortFor(scheme(protocol, tls))
 }
 
 // The exact URI gio mount will be handed. Empty when there is not enough to build one, so the
@@ -99,13 +98,13 @@ function complete(form) {
 }
 
 // The port each scheme drops, which is a property of the scheme and not of the protocol the form
-// picked: WebDAV builds two schemes whose ports differ, and deriving one number from PORTS for both
-// stripped a real ":443" off "dav://" and left its real ":80" on, the duplicate rail row below
-// exists to remove. Measured on this box against gvfs 1.60.2 by round-tripping each spelling
-// through Gio.File, the uri mapper "gio mount -l" prints through: gio drops smb 445, sftp 22,
-// ftp 21, ftps 21 (not IANA's 990) and davs 443, and keeps every other port it is given. It drops
-// no nfs port at all, so 2049 is here for the other half of the job: the port an nfs client uses
-// when the line omits one, so the two spellings of one export still make one row.
+// picked: WebDAV builds two schemes whose ports differ, and one number for both stripped a real
+// ":443" off "dav://" and left its real ":80" on, the duplicate rail row this exists to remove.
+// Measured on this box against gvfs 1.60.2 and glib2 2.88.3 by round-tripping each spelling through
+// Gio.File, the uri mapper "gio mount -l" prints through: gio drops smb 445, sftp 22, ftp 21,
+// ftps 21 (not IANA's 990), dav 80 and davs 443, and keeps every other port it is given, ftps 990
+// and dav 443 included. It drops no nfs port at all, so 2049 is here for the other half of the job:
+// the port an nfs client uses when the line omits one, so two spellings of one export make one row.
 var SCHEME_PORTS = {
     "smb": 445, "sftp": 22, "ftp": 21, "ftps": 21, "dav": 80, "davs": 443, "nfs": 2049
 }

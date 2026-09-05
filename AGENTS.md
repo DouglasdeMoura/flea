@@ -3655,17 +3655,26 @@ scanned for the last `@` in the whole URI: `sftp://u@h:22/inbox@2026` made `2026
 the next `/`, so a `:` or an `@` in the path is never read as a port or a host, and a bracketed IPv6
 literal cannot match because it ends in `]`. `defaultPortFor()` reads `SCHEME_PORTS`, one row per
 scheme, because the port gio omits belongs to the scheme and not to the protocol the form picked:
-deriving one number from `PORTS` gave `dav` and `davs` the same 443, which stripped a real `:443` off
-a `dav://` URI and left a real `:80` on it, the exact duplicate rail row `stripDefaultPort()` exists
-to remove. Every row is measured against gvfs 1.60.2 on this box by round-tripping each spelling
-through `Gio.File`, the uri mapper `gio mount -l` prints a mount through: it drops smb 445, sftp 22,
-ftp 21, ftps 21 and davs 443, and keeps every other port it is given, so `ftps` is 21 here and not
-IANA's 990. It canonicalises no `nfs` port at all, which is why 2049 is still in the table for the
-other half of the job: it is the port an nfs client uses when the line omits one, so the two
-spellings of one export still make one row. Where the form's prefill is not the scheme's own port,
-`dav://host:443/path`, gio keeps it and the bookmark and the mount already agree.
+one number for `dav` and `davs` both stripped a real `:443` off a `dav://` URI and left a real `:80`
+on it, the exact duplicate rail row `stripDefaultPort()` exists to remove. Every row is measured
+against gvfs 1.60.2 and glib2 2.88.3 on this box by round-tripping each spelling through `Gio.File`,
+the uri mapper `gio mount -l` prints a mount through: it drops smb 445, sftp 22, ftp 21, ftps 21,
+dav 80 and davs 443, and keeps every other port it is given, so `ftps` is 21 here and not IANA's
+990, and a `dav://host:443` keeps its 443. It canonicalises no `nfs` port at all, which is why 2049
+is still in the table for the other half of the job: it is the port an nfs client uses when the line
+omits one, so the two spellings of one export still make one row.
 `Mounts.normalize()` runs it, so the dedup key, `ui/NetworkDialog.qml`'s
 stored bookmark line and `Places.relabel`'s matching all agree with what `gio mount -l` reports.
+
+**And the form prefills out of that same table**, which is the half advloop round 2 found still
+open. `SCHEME_PORTS` said `dav` was 80 while `Protocols.defaultPort()` read a second table keyed by
+protocol and prefilled 443 for both WebDAV spellings, so unticking the TLS box built
+`dav://host:443/path`: a port the scheme does not use, offered by the dialog, on the one code path
+that exists to keep the dialog and the dedup agreeing. `defaultPort(protocol, tls)` now returns
+`defaultPortFor(scheme(protocol, tls))` and the protocol-keyed `PORTS` table is gone, so there is
+one table again. `ui/NetworkForm.qml` re-prefills on `onTlsChanged` as well as on `pick()`, because
+the box picks half the scheme and the chip picks the other half; without it the number the chip left
+behind survives the tick. `tests/ui.sh case_network` drives the tick and reads the port back.
 
 **The two rows.** `ui/js/Mounts.js rowMenu(entry)` is what the rail's right click opens: the release
 row, then `Rename` and `Remove` for any network share, mounted or not. It is deliberately not

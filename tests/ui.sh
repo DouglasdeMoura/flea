@@ -2364,6 +2364,33 @@ case_network() {
     settle
     printf 'NETWORK unreadable-file-writes-nothing=ok\n'
 
+    # Plain WebDAV is port 80, so the tick that picks the scheme has to pick the number with it, or
+    # the dialog offers a port that scheme does not use while the rail dedups against the one it
+    # does. The arm above closed its own dialog, so this one opens a fresh one.
+    rail_focus
+    key a >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == "true" ]] || fail "network: a from the rail did not reopen the dialog for the TLS pass"
+    click_chip WebDAV
+    settle
+    [[ "$(ipc networkPort)" == "443" ]] || fail "network: WebDAV opened on port $(ipc networkPort), not 443"
+    key "wd.example" >/dev/null
+    # Host, port, Path, Username, the TLS row: Domain is hidden under WebDAV and the walk skips it.
+    key -k Tab >/dev/null
+    key -k Tab >/dev/null
+    key -k Tab >/dev/null
+    key -k Tab >/dev/null
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc networkPort)" == "80" ]] \
+        || fail "network: unticking TLS left the port at $(ipc networkPort), not plain dav's own 80"
+    [[ "$(ipc networkUri)" == "dav://wd.example:80/" ]] \
+        || fail "network: the Mounts-as line reads $(ipc networkUri) after the tick"
+    printf 'NETWORK tls-port=ok\n'
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == "false" ]] || fail "network: escape did not close the dialog after the TLS pass"
+
     printf 'NETWORK empty=ok a-scoped=ok dialog=ok submit-path=ok keyboard-after=ok\n'
     kill_flea
     sandbox_remove "$fixture_home"

@@ -128,18 +128,18 @@ function run(check) {
     check("an nfs line and an nfs mount are one row however 2049 is spelled",
           Mounts.normalize("nfs://h:2049/export") === Mounts.normalize("nfs://h/export"), true)
     // Built by the form's own uri(), so the check cannot drift from what the dialog writes: WebDAV
-    // picked, TLS unticked, the prefilled port left alone, which is the shape the operator gets.
+    // picked, the box as given, the prefilled port left alone, which is the shape the operator gets.
     function formUri(tls) {
         return Protocols.uri({ protocol: "WebDAV", host: "nas.local", path: "/dav", user: "",
-                               domain: "", tls: tls, port: String(Protocols.defaultPort("WebDAV")) })
+                               domain: "", tls: tls, port: String(Protocols.defaultPort("WebDAV", tls)) })
     }
-    check("the form spells the port it prefilled, whichever way the TLS box is set",
-          formUri(false) + "|" + formUri(true), "dav://nas.local:443/dav|davs://nas.local:443/dav")
-    // 443 is not plain dav's default, so gio keeps it on both spellings and only the trailing slash
-    // separates them; the bookmark and the live mount are still one row.
+    check("the form spells the port the scheme it built prefilled, either way the box is set",
+          formUri(false) + "|" + formUri(true), "dav://nas.local:80/dav|davs://nas.local:443/dav")
+    // Each is now its own scheme's default, so gio drops it from the mount it reports and the
+    // dedup drops it from the line; the bookmark and the live mount are one row on both spellings.
     check("so plain WebDAV's bookmark and gio's own report of it are one rail row",
-          Mounts.normalize(formUri(false)) === Mounts.normalize("dav://nas.local:443/dav/"), true)
-    check("and a line spelling plain dav's real default is that same one row",
+          Mounts.normalize(formUri(false)) === Mounts.normalize("dav://nas.local/dav/"), true)
+    check("and a hand-written line still spelling 80 is that same one row",
           Mounts.normalize("dav://nas.local:80/dav") === Mounts.normalize("dav://nas.local/dav/"), true)
     check("and so are TLS WebDAV's, which was already the case",
           Mounts.normalize(formUri(true)) === Mounts.normalize("davs://nas.local/dav/"), true)
