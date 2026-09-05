@@ -2327,6 +2327,32 @@ case_network() {
         || fail "network: the rename dropped the line the second Add wrote, the file reads: $(cat "$bookmarks")"
     printf 'NETWORK rename-after-add=ok\n'
 
+    # The append re-reads this file before it writes, and a read that failed empties FileView.text():
+    # the write that followed left a bookmarks file holding one line and destroyed the rest. Mode 200
+    # is the exact shape, unreadable and still writable, because taking write away too would hide the
+    # defect behind a second failure. The mode is restored before the tick arm below reads
+    # anything. See AGENTS.md "A failed FileView read".
+    local before
+    before=$(cat "$bookmarks")
+    [[ -n "$before" ]] || fail "network: the unreadable-file arm needs saved places to lose, and the file is empty"
+    chmod 200 "$bookmarks"
+    rail_focus
+    key a >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == "true" ]] || fail "network: a from the rail did not reopen the dialog for the unreadable-file arm"
+    key "198.51.100.4" >/dev/null
+    key -k Return >/dev/null
+    settle
+    chmod 600 "$bookmarks"
+    [[ "$(cat "$bookmarks")" == "$before" ]] \
+        || fail "network: a read that failed still wrote, and the file now reads: $(cat "$bookmarks")"
+    # And the refusal is visible rather than silent: the dialog stays open over its own sentence.
+    [[ "$(ipc dialogOpen)" == "true" ]] \
+        || fail "network: the dialog closed on an append it could not read a body for"
+    key -k Escape >/dev/null
+    settle
+    printf 'NETWORK unreadable-file-writes-nothing=ok\n'
+
     printf 'NETWORK empty=ok a-scoped=ok dialog=ok submit-path=ok keyboard-after=ok\n'
     kill_flea
     sandbox_remove "$fixture_home"
@@ -3409,7 +3435,13 @@ if ! ( kill_flea ); then
 fi
 
 printf '\nLOG_CHECK_BEGIN %s\n' "$run_log"
-if grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open' "$run_log"; then
+# case_network makes its own bookmarks file unreadable on purpose, and Quickshell correctly reports
+# that it cannot watch a file it cannot read. This drops that one line and nothing else: the path
+# carries this run's own pid and names one fixture home, so no product warning can ever match it.
+# The reader has no -q, so it drains the pipe and takes no SIGPIPE; pipefail then reports its own
+# status, which is what says whether anything but that one line matched.
+expected_warning="inotify_add_watch($fixture_root/network-home/.config/gtk-3.0/bookmarks) failed: (Permission denied)"
+if grep -F -v "$expected_warning" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
     printf 'FAIL log\n'
     failures=$((failures + 1))
 fi

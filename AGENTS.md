@@ -3253,6 +3253,29 @@ looks: nothing reloads it, `ui/NetworkDialog.qml` creates the file through its o
 `watchChanges` would not help because a watch set up before its parent directory existed never
 fires.
 
+### A failed FileView read still reports loaded, and empties the text it had
+
+`FileView` has three things that look like a way to ask whether a read worked and none of them is
+one. `waitForJob()` returns `true` for every job it waited on, success or not. `loaded` is
+`isLoadedOrAsync`, so it reads **true** after a permission-denied read and after a read of a path
+that is a directory; only `FileNotFound` leaves it false. And a `reload()` that fails **clears the
+text the view already held**, so `text()` answers `""` where a moment before it answered the file.
+Measured on quickshell 0.3.1 under `QT_QPA_PLATFORM=offscreen qs -p`, one view on one path: a first
+read of a two-line file gave `err=Success textLen=36`, a `chmod 200` and a second `reload()` gave
+`err=PermissionDenied loaded=true textLen=0`, and the append that followed left the file holding one
+line. `onLoadFailed(error)` is the only report there is, and `FileViewError` is
+`Success, Unknown, FileNotFound, PermissionDenied, NotAFile`.
+
+This is the whole of a defect this release's own fix round introduced. `ui/NetworkDialog.qml`
+`appendBookmark()` re-reads before it appends, because a view that is not watched still carries a
+place the rail has since removed; the re-read closed a duplicate-one-line defect and opened a
+delete-the-file one, because a read that failed made `body` empty and the blocking `setText()` that
+followed wrote a bookmarks file containing only the new line. The view records the error in
+`onLoadFailed` now and the append refuses on anything but `Success` or `FileNotFound`, an absent
+file being the one read that is legitimately empty: the dialog stays open over "Saved places could
+not be read, so nothing was written." and nothing is written at all. `tests/ui.sh case_network`
+drives it with the fixture's own bookmarks file at mode 200, and asserts the file byte-for-byte.
+
 ### A server root with no share segment mounts, but GVFS gives it no FUSE path
 
 The operator's own real NAS bookmark (`smb://192.168.1.10/`, no share name) is exactly the "browse
