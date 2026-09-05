@@ -43,8 +43,24 @@ var LABELS = {
 var PRESETS = ["mac", "windows"]
 var PRESET_LABELS = { mac: "Mac", windows: "Windows" }
 
+// Every board row carries a left mark, and a switch wears the mark of the row it governs: these are
+// ui/js/Menu.js's own glyphs by action id, which tests/js/settings.js asserts the two agree on.
+var GLYPHS = {
+    cut: "scissors", copy: "copy", paste: "clipboard", duplicate: "file-plus", rename: "rename",
+    trash: "trash", copypath: "file-text", compress: "archive", extract: "archive-out",
+    convert: "sliders", sharelink: "network", open: "folder-open", toggleHidden: "eye"
+}
+
+// Taildrop and Dropbox are brand reproductions rather than cut glyphs, so they name a component the
+// way a menu entry does; ui/SettingsRow.qml draws the pair exactly as ui/MenuRow.qml does.
+var MARKS = { taildrop: "tailscale", dropbox: "dropbox" }
+
 function label(id) {
     return LABELS[id] || id
+}
+
+function glyph(id) {
+    return GLYPHS[id]
 }
 
 function contains(list, id) {
@@ -113,7 +129,10 @@ function toggleId(hidden, id) {
 
 // One row per line of the panel's pane. kind decides what ui/SettingsPanel.qml draws and whether the
 // row is a focus stop: group, hint, fact and lock rows are read-only and the cursor steps over them.
+// A ruler reports the effective size while Omarchy owns it and only becomes a control on an override.
 function focusable(row) {
+    if (row.kind === "ruler")
+        return row.on === true
     return row.kind === "check" || row.kind === "master" || row.kind === "choice"
 }
 
@@ -133,18 +152,23 @@ function displayRows(state) {
     var follows = TextSize.following(state.textSize)
     var out = [
         { kind: "group", label: "Text size" },
-        { kind: "choice", id: "textMode", label: "Text size",
-          value: follows ? "Follow Omarchy" : "Override" }
+        // Two named values and no more, so the board draws them side by side rather than as a walk.
+        { kind: "choice", id: "textMode", label: "Text size", glyph: "type",
+          options: ["Follow Omarchy", "Override"],
+          value: follows ? "Follow Omarchy" : "Override" },
+        // The board's seven-stop ruler, the override's own control and the one place the effective
+        // size is read; a size Omarchy invented that is not a stop fills to the nearest one.
+        { kind: "ruler", id: "textStop", label: "Effective", value: state.baseSize + "px",
+          stops: TextSize.STOPS, on: !follows,
+          index: TextSize.STOPS.indexOf(TextSize.nearest(state.baseSize)) }
     ]
-    if (!follows)
-        out.push({ kind: "choice", id: "textStop", label: "Size", value: state.baseSize + "px" })
-    out.push({ kind: "fact", label: "Effective", value: state.baseSize + "px" })
     out.push({ kind: "hint", label: "Omarchy owns the size until you override it, and an override "
                                     + "takes one of its own stops, " + TextSize.STOPS.join(", ")
                                     + " px. Ctrl+Shift+Plus and Ctrl+Shift+Minus walk them, and "
                                     + "Ctrl+Shift+0 follows Omarchy again." })
     out.push({ kind: "group", label: "Scale" })
-    out.push({ kind: "fact", label: "Scale", value: scaleLabel(state.monitorScale) })
+    out.push({ kind: "fact", label: "Scale", glyph: "maximize",
+               value: scaleLabel(state.monitorScale) })
     out.push({ kind: "hint",
                label: "Flea follows the compositor value and does not step or cycle it." })
     out.push({ kind: "group", label: "Appearance" })
@@ -167,18 +191,19 @@ function menuRows(hidden) {
         var group = MENU_GROUPS[g]
         out.push({ kind: "group", label: group.label })
         if (group.master) {
-            out.push({ kind: "master", id: "basic", label: "All basic file actions",
+            out.push({ kind: "master", id: "basic", label: "All basic file actions", glyph: "list",
                        state: masterState(hidden),
                        value: basicEnabled(hidden) + " of " + BASIC.length })
         }
         for (var i = 0; i < group.ids.length; i++) {
             out.push({ kind: "check", id: group.ids[i], label: label(group.ids[i]),
+                       glyph: GLYPHS[group.ids[i]], mark: MARKS[group.ids[i]],
                        on: !isHidden(hidden, group.ids[i]) })
         }
     }
     out.push({ kind: "group", label: "Always shown" })
     for (var l = 0; l < LOCKED.length; l++)
-        out.push({ kind: "lock", id: LOCKED[l], label: label(LOCKED[l]) })
+        out.push({ kind: "lock", id: LOCKED[l], label: label(LOCKED[l]), glyph: GLYPHS[LOCKED[l]] })
     return out
 }
 
@@ -188,7 +213,7 @@ function menuRows(hidden) {
 function keyRows(state) {
     var out = [
         { kind: "group", label: "Preset" },
-        { kind: "choice", id: "preset", label: "Keybinding preset",
+        { kind: "choice", id: "preset", label: "Keybinding preset", glyph: "keyboard",
           value: PRESET_LABELS[state.preset] || state.preset },
         { kind: "hint", label: "Mac and Windows, over the one key table. Every other binding is "
                                + "shared, and the change lands in this window at once." },

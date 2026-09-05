@@ -19,6 +19,7 @@ function run(check) {
 // because Move to Dropbox and Copy share link cannot appear on one row and Extract needs an archive.
 function runInventory(check) {
     var built = {}
+    var builtMark = {}
     var shapes = [
         { rowInDropbox: false, rowIsArchive: true, rowIsImage: true },
         { rowInDropbox: true, rowIsArchive: false, rowIsImage: false }
@@ -31,8 +32,10 @@ function runInventory(check) {
             rowIsImage: shapes[s].rowIsImage, hiddenActions: []
         })
         for (var i = 0; i < rows.length; i++) {
-            if (rows[i].separator !== true)
-                built[rows[i].action] = rows[i].label
+            if (rows[i].separator === true)
+                continue
+            built[rows[i].action] = rows[i].label
+            builtMark[rows[i].action] = rows[i].glyph !== undefined ? rows[i].glyph : rows[i].mark
         }
     }
     var switched = []
@@ -42,6 +45,12 @@ function runInventory(check) {
           switched.filter(function (id) { return built[id] === undefined }).join(","), "")
     check("and each switch carries that row's own wording, so the two cannot drift",
           switched.filter(function (id) { return Settings.label(id) !== built[id] }).join(","), "")
+    // A switch wears the mark of the row it governs, which is the only way a reader can pair the two.
+    check("and each row wears the mark the menu draws for that action",
+          switched.concat(Settings.LOCKED).filter(function (id) {
+              var mine = Settings.GLYPHS[id] !== undefined ? Settings.GLYPHS[id] : Settings.MARKS[id]
+              return mine === undefined || mine !== builtMark[id]
+          }).join(","), "")
     // New folder is a row the board gives no switch and the two locked ones are drawn locked;
     // anything else without a switch would be a row the panel cannot reach.
     var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
@@ -114,10 +123,18 @@ function runRows(check) {
     // The board's Display card: the text-size mode over its effective size, then the compositor's
     // two read-only facts. No monitor-scale control, because Flea does not step or cycle that one.
     check("the Display section is text size, then Scale, then Appearance",
-          kinds(display), "group|choice|fact|hint|group|fact|hint|group|fact")
+          kinds(display), "group|choice|ruler|hint|group|fact|hint|group|fact")
     check("its one control opens on Follow Omarchy", find(display, "textMode").value,
           "Follow Omarchy")
-    check("and the effective row reports Omarchy's own size", display[2].value, "14px")
+    // The board draws the mode as both names side by side, so the row names them rather than
+    // leaving ui/SettingsRow.qml to invent a second list that could disagree with the writer.
+    check("and it names both its values, in the board's own order",
+          find(display, "textMode").options.join("|"), "Follow Omarchy|Override")
+    check("the ruler reports Omarchy's own size", display[2].value, "14px")
+    check("and fills to that stop, five of the seven", display[2].index, 4)
+    // An Omarchy size that is not one of the seven still fills the ruler, at the nearest stop below.
+    check("a size between two stops fills to the nearer one",
+          Settings.rows("display", displayState(TextSize.follow(), 13))[2].index, 3)
     check("the hint names every stop the override can take",
           display[3].label.indexOf("9, 10, 11, 12, 14, 16, 20 px") >= 0, true)
     check("the monitor scale is drawn as the compositor reports it", display[5].value, "1x")
@@ -131,12 +148,14 @@ function runRows(check) {
 
     // Switching to Override adds the stop row, and nothing else about the section moves.
     var pinned = Settings.rows("display", displayState({ mode: 16 }, 16))
-    check("an override adds one row and one only", pinned.length, display.length + 1)
+    check("an override adds no row, it turns the ruler into the control", pinned.length,
+          display.length)
     check("the mode row says which mode it is in", find(pinned, "textMode").value, "Override")
-    check("the stop row carries the pinned size", find(pinned, "textStop").value, "16px")
-    check("and the effective row agrees with it", pinned[3].value, "16px")
-    check("while following draws no stop row at all",
-          find(display, "textStop").id === undefined, true)
+    check("the ruler carries the pinned size", find(pinned, "textStop").value, "16px")
+    check("and fills one stop further along", pinned[2].index, 5)
+    check("the ruler is live only while the override is", find(pinned, "textStop").on, true)
+    check("and while following it reports rather than sets",
+          find(display, "textStop").on, false)
 
     var menus = Settings.rows("menus", { hidden: ["paste"] })
     check("the Menus section leads with the master row under its own heading",

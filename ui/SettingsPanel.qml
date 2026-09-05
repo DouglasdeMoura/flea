@@ -19,9 +19,10 @@ Item {
     // "rail" or "pane", which side Tab last gave the cursor to.
     property string side: "pane"
 
-    // Border-box 560 wide with a 150 rail, the board's own two numbers, in the scaled space token.
-    readonly property int panelWidth: Theme.space(560)
-    readonly property int railWidth: Theme.space(150)
+    // Border-box 560 wide with a 150 rail and a 408 pane, the board's resolved geometry at base 14;
+    // ui/Theme.qml holds the derivation and the seam reports all three.
+    readonly property int panelWidth: Theme.settings.panelWidth
+    readonly property int railWidth: Theme.settings.railWidth
     // The Menus board's work-area clamp: a floating surface never renders taller than its bounds
     // less this margin, and the pane scrolls inside that while the rail stays put.
     readonly property int clampMargin: 8
@@ -88,7 +89,7 @@ Item {
     // Ctrl+Shift chords reach, so a keystroke and a control can never hold two different sizes.
     function stepRowValue(index, direction) {
         var row = root.rows[index]
-        if (!row || row.kind !== "choice")
+        if (!row || !Settings.focusable(row))
             return
         if (row.id === "textMode") {
             ViewState.toggleTextFollow()
@@ -98,9 +99,21 @@ Item {
             ViewState.stepTextSize(direction)
             return
         }
+        // A check or a master is toggled by activate(), never walked, so h and l stop here.
+        if (row.kind !== "choice")
+            return
         var at = Settings.PRESETS.indexOf(ViewState.keysPreset)
         var next = (at + direction + Settings.PRESETS.length) % Settings.PRESETS.length
         ViewState.setKeysPreset(Settings.PRESETS[next])
+    }
+
+    // A tick on the ruler names a stop outright. It lands in the same ViewState writer stepTextSize
+    // itself calls, so a click, an h and a Ctrl+Shift+Plus cannot leave two different sizes stored.
+    function pickRowStop(index, stop) {
+        var row = root.rows[index]
+        if (!row || !Settings.focusable(row))
+            return
+        ViewState.setTextSize({ mode: stop })
     }
 
     function moveCursor(delta) {
@@ -147,7 +160,7 @@ Item {
         anchors.centerIn: parent
         width: root.panelWidth
         height: Math.min(Theme.chromeHeight + Math.max(rail.implicitHeight, pane.implicitHeight)
-                         + 2 * Theme.spacing.rowPaddingY,
+                         + 2 * Theme.spacing.rowPaddingY + 2 * Theme.spacing.hairline,
                          root.height - root.clampMargin)
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
@@ -156,104 +169,149 @@ Item {
         radius: Style.cornerRadius
         clip: true
 
+        // The board's border-box panel: the card's own border is the two outer hairlines, so the
+        // 558 they leave is what the chrome, the rail and the pane are laid out inside.
         Item {
-            id: chrome
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            height: Theme.chromeHeight
+            anchors.fill: parent
+            anchors.margins: Theme.spacing.hairline
 
-            Text {
+            Item {
+                id: chrome
                 anchors.left: parent.left
-                anchors.leftMargin: Theme.spacing.rowPaddingX
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Settings"
-                color: Theme.color.foreground
-                font.family: Theme.font.family
-                font.pixelSize: Theme.font.bodySmall
-                font.bold: true
-                textFormat: Text.PlainText
-            }
-
-            Text {
                 anchors.right: parent.right
-                anchors.rightMargin: Theme.spacing.rowPaddingX
-                anchors.verticalCenter: parent.verticalCenter
-                text: "esc"
-                color: Theme.color.muted
-                font.family: Theme.font.family
-                font.pixelSize: Theme.font.caption
-                textFormat: Text.PlainText
+                anchors.top: parent.top
+                height: Theme.chromeHeight
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.spacing.rowPaddingX
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Settings"
+                    color: Theme.color.foreground
+                    font.family: Theme.font.family
+                    font.pixelSize: Theme.font.bodySmall
+                    font.bold: true
+                    textFormat: Text.PlainText
+                }
+
+                // The board's own header mark, the one surface control a pointer has for closing the panel.
+                Item {
+                    id: closeMark
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.spacing.rowPaddingX
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Theme.hitMin
+                    height: Theme.hitMin
+
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Close settings"
+                    Accessible.onPressAction: root.close()
+
+                    Flea.Glyph {
+                        anchors.centerIn: parent
+                        width: Theme.chromeMarkSize
+                        height: Theme.chromeMarkSize
+                        name: "x"
+                        color: Theme.color.foreground
+                    }
+
+                    HoverHandler {
+                        cursorShape: Qt.PointingHandCursor
+                    }
+
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: root.close()
+                    }
+                }
+
+                Text {
+                    anchors.right: closeMark.left
+                    anchors.rightMargin: Theme.spacing.gap
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "esc"
+                    color: Theme.color.muted
+                    font.family: Theme.font.family
+                    font.pixelSize: Theme.font.caption
+                    textFormat: Text.PlainText
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: Theme.spacing.hairline
+                    color: Theme.color.muted
+                    opacity: 0.4
+                }
             }
 
+            Flea.SettingsRail {
+                id: rail
+                anchors.left: parent.left
+                anchors.top: chrome.bottom
+                anchors.topMargin: Theme.spacing.rowPaddingY
+                width: root.railWidth
+                section: root.section
+                focused: root.side === "rail"
+                onChosen: function (id) {
+                    root.side = "rail"
+                    root.showSection(id)
+                }
+            }
+
+            // Inside the rail's own 150, not beside it: the board's rail is a border-box whose right
+            // edge is this line, which is what leaves the pane the 408 the anatomy note names.
             Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
+                anchors.right: rail.right
+                anchors.top: chrome.bottom
                 anchors.bottom: parent.bottom
-                height: Theme.spacing.hairline
+                width: Theme.spacing.hairline
                 color: Theme.color.muted
                 opacity: 0.4
             }
-        }
 
-        Flea.SettingsRail {
-            id: rail
-            anchors.left: parent.left
-            anchors.top: chrome.bottom
-            anchors.topMargin: Theme.spacing.rowPaddingY
-            width: root.railWidth
-            section: root.section
-            focused: root.side === "rail"
-            onChosen: function (id) {
-                root.side = "rail"
-                root.showSection(id)
-            }
-        }
+            Flickable {
+                id: flick
+                anchors.left: rail.right
+                anchors.right: parent.right
+                anchors.top: chrome.bottom
+                anchors.bottom: parent.bottom
+                anchors.topMargin: Theme.spacing.rowPaddingY
+                contentWidth: width
+                contentHeight: pane.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
-        Rectangle {
-            anchors.left: rail.right
-            anchors.top: chrome.bottom
-            anchors.bottom: parent.bottom
-            width: Theme.spacing.hairline
-            color: Theme.color.muted
-            opacity: 0.4
-        }
+                Column {
+                    id: pane
+                    width: flick.width
 
-        Flickable {
-            id: flick
-            anchors.left: rail.right
-            anchors.right: parent.right
-            anchors.top: chrome.bottom
-            anchors.bottom: parent.bottom
-            anchors.topMargin: Theme.spacing.rowPaddingY
-            contentWidth: width
-            contentHeight: pane.implicitHeight
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
+                    Repeater {
+                        id: rowItems
+                        model: root.rows
 
-            Column {
-                id: pane
-                width: flick.width
-
-                Repeater {
-                    id: rowItems
-                    model: root.rows
-
-                    delegate: Flea.SettingsRow {
-                        required property var modelData
-                        required property int index
-                        width: pane.width
-                        row: modelData
-                        current: root.side === "pane" && root.cursor === index
-                        onActivated: {
-                            root.side = "pane"
-                            root.cursor = index
-                            root.activate(index)
-                        }
-                        onStepped: function (direction) {
-                            root.side = "pane"
-                            root.cursor = index
-                            root.stepRowValue(index, direction)
+                        delegate: Flea.SettingsRow {
+                            required property var modelData
+                            required property int index
+                            width: pane.width
+                            row: modelData
+                            current: root.side === "pane" && root.cursor === index
+                            onActivated: {
+                                root.side = "pane"
+                                root.cursor = index
+                                root.activate(index)
+                            }
+                            onStepped: function (direction) {
+                                root.side = "pane"
+                                root.cursor = index
+                                root.stepRowValue(index, direction)
+                            }
+                            onStopPicked: function (stop) {
+                                root.side = "pane"
+                                root.cursor = index
+                                root.pickRowStop(index, stop)
+                            }
                         }
                     }
                 }
