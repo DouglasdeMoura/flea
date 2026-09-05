@@ -3623,9 +3623,16 @@ locale makes it English and reading it at all was the defect. `isAlreadyMountedQ
 `mountProcess`'s `stderr` collector are both gone. `mountProcess.onExited` now records the exit code
 in `_mountFailed` and always runs `gio info`, under the same 15 s deadline the mount leg has (see
 "A single-flight guard needs a deadline" below), and the info result is the whole decision: a FUSE path
-opens the share whatever the mount attempt reported, a bare root with a clean `gio info` lists its
-shares, and only a location `gio info` could not describe either reports the mount failure or the
-dead-end sentence. The case still proves the same two behaviours; its stub now speaks Spanish.
+opens the share whatever the mount attempt reported, a bare root lists its shares, and only a
+location `gio info` could not describe either reports the mount failure or the dead-end sentence.
+The case still proves the same two behaviours; its stub now speaks Spanish.
+
+**The bare-root branch reads no exit code, decided in the 0.1.4 composition.** The round that wrote
+this also gated the listing on `exitCode === 0`, so a server root whose `gio info` refuses would
+never have its shares listed. `gio info` on a reachable root refuses on some servers and answers on
+others, and `tests/ui.sh case_network` drives the refusing shape, so the gate cost the share browser
+those servers. It is gone: the listing leg carries its own deadline (below), which is what the gate
+was really protecting against, and the listing itself is what answers.
 
 ### Issue #36: no network decision reads a translated sentence
 
@@ -3634,8 +3641,10 @@ locale-dependent decisions, not the two the issue named, and each takes a differ
 strings come from two different processes.
 
 **The gio client's own output is pinned, not parsed in every language.** `ui/NetworkMounts.qml` sets
-`readonly property var gioEnvironment: ({ "LC_ALL": "C" })` on its own four `Process` objects and
-hands the same object to `ui/MountListing.qml`, whose listing is the fifth.
+`readonly property var gioEnvironment: ({ "LC_ALL": "C" })` on its own five `Process` objects and
+hands the same object to `ui/MountListing.qml`, whose listing is the sixth. Counted off the merged
+file, not remembered: `authProcess` is the fifth, the credentialed leg the 0.1.4 base added, and the
+locale reaches the `gio` its helper runs through the same property.
 `Process.environment` merges into the inherited environment rather than replacing it, measured live
 on this box (a probe run under `QT_QPA_PLATFORM=offscreen qs -p` printed `LC_ALL=C PATH_SET=yes
 PROBE=yes HOME=/home/gm`), so `PATH` and `HOME` survive and only the locale is added. GNU gettext
@@ -3767,6 +3776,12 @@ that exists to keep the dialog and the dedup agreeing. `defaultPort(protocol, tl
 one table again. `ui/NetworkForm.qml` re-prefills on `onTlsChanged` as well as on `pick()`, because
 the box picks half the scheme and the chip picks the other half; without it the number the chip left
 behind survives the tick. `tests/ui.sh case_network` drives the tick and reads the port back.
+
+**And that prefill has to run before the port, not after**, which the 0.1.4 composition found: the
+base reopens the form on a saved URI, and `NetworkForm.load()` set the port and then the box, so
+`onTlsChanged` overwrote a real `:443` on a `dav://` place with the scheme default. `load()` assigns
+`root.tls` before the port now, so the tick's prefill is the fallback and the saved number wins.
+`tests/ui.sh case_networkauth` reparses both spellings and prints `dav-default=80 dav-explicit=443`.
 
 **The two rows.** `ui/js/Mounts.js rowMenu(entry)` is what the rail's right click opens: the release
 row, then `Rename` and `Remove` for any network share, mounted or not. It is deliberately not
