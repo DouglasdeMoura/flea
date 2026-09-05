@@ -2,6 +2,7 @@
 
 .import "DirSizes.js" as DirSizes
 .import "Filter.js" as Filter
+.import "Kinds.js" as Kinds
 .import "Thumbs.js" as Thumbs
 
 // Where the pane has been and how it gets back, taking ui/Pane.qml's root the way Search.js and
@@ -116,8 +117,8 @@ function applyPendingSelect(pane) {
     }
 }
 
-// Enter on the cursor row: a directory is navigated into, a file is handed to the opener. The
-// in-flight guard is what stops a second Enter queueing a listing behind one already asked for.
+// Enter on the cursor row: a directory navigates, an archive opens Flea's own view, anything else
+// goes to the opener. The in-flight guard is what stops a second Enter queueing a second listing.
 function openCursor(pane, opener) {
     if (pane.listInFlight) {
         pane.message("A directory is already loading.", false)
@@ -131,6 +132,11 @@ function openCursor(pane, opener) {
     var path = pane.join(pane.path, row.n)
     if (row.d) {
         pane.open(path)
+        return
+    }
+    // Handing an archive on opens another file manager, and this is ui/Preview.qml's own classifier.
+    if (Kinds.quickLookKind(row.i, path) === Kinds.ARCHIVE) {
+        pane.preview.open(path, row.i, row.s)
         return
     }
     opener.open(path)
