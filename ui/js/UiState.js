@@ -1,8 +1,9 @@
 .pragma library
 
-// ui/ViewState.qml's one-writer bookkeeping, and nothing else: `saved` is what the state file is
-// known to hold, `inflight` is what the running `flea --ui-state` carries, and `pending` is the
-// newest patch waiting behind it. Imports no QML, so tests/js/uistate.js can redden on a mutation.
+// ui/ViewState.qml's one-writer bookkeeping, and nothing else: `saved` is the newest patch a writer
+// landed, `inflight` is what the running `flea --ui-state` carries, and `pending` is the newest patch
+// waiting behind it. All three are patch bytes and not the state file's, because a patch names only
+// the settings that window changed. Imports no QML, so tests/js/uistate.js can redden on a mutation.
 
 // The window's own read of ui.json. main() leaves a document it cannot read as a JSON object
 // exactly as the operator wrote it, so `unreadable` is what makes the pane say the file was not used;
@@ -22,7 +23,8 @@ function fromFile(text) {
 // A copy of the document with one top-level key replaced, and the nested version of the same. QML
 // notifies on assignment and not on a mutation, so every writer rebuilds rather than reaching in;
 // the nested one merges into the group beside it, because a whole-group assignment would take the
-// half a writer holds as the whole of it.
+// half a writer holds as the whole of it. ui/ViewState.qml runs both over two documents at once:
+// the state it draws from, and the patch it owes the state file.
 function withKey(state, key, value) {
     var out = {}
     for (var s in state)
@@ -41,15 +43,16 @@ function withGroup(state, key, next) {
     return withKey(state, key, group)
 }
 
-// The book a window starts with: what the file it has just read already holds, and no writer running.
-function book(saved) {
-    return { saved: saved || "", inflight: "", pending: "" }
+// The book a window starts with: nothing of its own written yet, and no writer running. Its own read
+// of the file is not a patch it sent, so `saved` starts empty rather than holding what it read.
+function book() {
+    return { saved: "", inflight: "", pending: "" }
 }
 
 // A change asks for a write. The answer is the next book plus `start`, the patch to launch now.
 function asked(b, patch) {
-    // The bytes the file will hold once everything already on its way has landed, so a toggle back
-    // to what a running writer is carrying sends nothing and a refused one is never short-circuited.
+    // The newest patch this window has landed or has on its way, so asking for exactly those bytes
+    // again sends nothing and a refused one is never short-circuited.
     if (patch === (b.pending || b.inflight || b.saved)) {
         return { saved: b.saved, inflight: b.inflight, pending: b.pending, start: "" }
     }

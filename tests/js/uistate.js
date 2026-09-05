@@ -1,23 +1,27 @@
 .import "../../ui/js/UiState.js" as UiState
 
-// ui/ViewState.qml's writer bookkeeping. The window shows the column change the instant it is made
-// and the state file learns about it through a process, so the only thing that can tell the two
-// apart is the writer's own exit status. A book that records the patch before the process runs
-// reports a save that never happened, and then refuses the retry that would have fixed it.
+// ui/ViewState.qml's writer bookkeeping and the patch it builds. The window shows the column change
+// the instant it is made and the state file learns about it through a process, so the only thing
+// that can tell the two apart is the writer's own exit status. A book that records the patch before
+// the process runs reports a save that never happened, and then refuses the retry that would have
+// fixed it.
 
 var OLD = "{\"columns\":[\"name\",\"size\",\"date\"]}"
 var NEW = "{\"columns\":[\"name\",\"date\"]}"
 var THIRD = "{\"columns\":[\"name\"]}"
 
 function run(check) {
-    check("a fresh book holds what the file it read already has", UiState.book(OLD).saved, OLD)
-    check("and nothing is in flight behind it", UiState.book(OLD).inflight, "")
+    check("a fresh book has landed nothing of its own", UiState.book().saved, "")
+    check("and nothing is in flight behind it", UiState.book().inflight, "")
+    check("so the first change a window makes starts a write", UiState.asked(UiState.book(), NEW).start, NEW)
 
-    // The state file already holds this, so ui/shell.qml's scale step writes nothing.
-    var same = UiState.asked(UiState.book(OLD), OLD)
-    check("a patch the file already holds starts nothing", same.start, "")
+    // A book whose last writer landed OLD, which is what the short-circuit compares against. A fresh
+    // book cannot stand in for it: a window's own read of ui.json is not a patch that window sent.
+    var held = { saved: OLD, inflight: "", pending: "" }
+    var same = UiState.asked(held, OLD)
+    check("a patch the last landed write already stored starts nothing", same.start, "")
 
-    var asked = UiState.asked(UiState.book(OLD), NEW)
+    var asked = UiState.asked(held, NEW)
     check("a change starts a write", asked.start, NEW)
     check("and the change is in flight, not saved", asked.inflight, NEW)
     check("the file is still known to hold what it held", asked.saved, OLD)
@@ -69,6 +73,37 @@ function run(check) {
           '{"display":{"textSize":{"mode":16}}}')
     check("and neither writer mutates the document it was handed",
           JSON.stringify(held), '{"columns":["name"],"display":{"textSize":{"mode":"system"}}}')
+
+    // The lost update this whole file exists to keep out. Two windows read one document; window A
+    // changes the keys preset and window B, still holding the read from before that change, saves a
+    // text size. What B owes the state file is built over an EMPTY document rather than over its own
+    // read, so the patch names what B changed and nothing else: src/uistate.rs merges key by key and
+    // keeps every key a patch leaves out, and no lock can protect a key the caller overwrites by name.
+    var owed = UiState.withGroup({}, "display", { textSize: { mode: 16 } })
+    check("a text-size change owes the text size alone",
+          JSON.stringify(owed), '{"display":{"textSize":{"mode":16}}}')
+    check("and the patch cannot name keys at all", JSON.stringify(owed).indexOf("keys"), -1)
+    check("nor columns", JSON.stringify(owed).indexOf("columns"), -1)
+    check("nor the hidden menu set", JSON.stringify(owed).indexOf("hidden"), -1)
+    check("a window that has changed nothing owes an empty patch", JSON.stringify({}), "{}")
+
+    // The coalesce the old whole-document snapshot used to provide: a second change behind a running
+    // writer joins the patch already owed rather than replacing it, so neither is dropped.
+    check("a second change joins the patch already owed",
+          JSON.stringify(UiState.withKey(owed, "keys", "windows")),
+          '{"display":{"textSize":{"mode":16}},"keys":"windows"}')
+    check("and a second change to the same group joins it too",
+          JSON.stringify(UiState.withGroup(owed, "display", { hidden: ["paste"] })),
+          '{"display":{"textSize":{"mode":16},"hidden":["paste"]}}')
+
+    // The two documents differ, and that is the point of running the rebuild over both. A sub-key a
+    // newer Flea left in `display` stays in what this window DRAWS, and never enters the patch: this
+    // Flea has no rule for it, and src/uistate.rs refuses a whole patch that names one.
+    var read = { display: { textSize: { mode: "system" }, aKeyThisBuildHasNeverHeardOf: true } }
+    check("the document keeps a newer Flea's own sub-key",
+          JSON.stringify(UiState.withGroup(read, "display", { textSize: { mode: 16 } })),
+          '{"display":{"textSize":{"mode":16},"aKeyThisBuildHasNeverHeardOf":true}}')
+    check("and the patch beside it never carries one", JSON.stringify(owed).indexOf("NeverHeardOf"), -1)
 
     var drained = UiState.exited(queued, 0)
     check("the queued patch starts when the writer exits", drained.start, THIRD)

@@ -333,6 +333,23 @@ and every refusal, a patch that is not JSON, a key or value this Flea does not t
 could not write, or more than one argument, prints one `flea: ` sentence on stderr, prints nothing
 on stdout at all, and exits 2. Pinned in `tests/uistate.sh`, both streams for each of the four.
 
+**A patch names what that window changed, and nothing else.** `ui/ViewState.qml` holds a second
+document beside the one it draws from, `unsaved`, built by the same two rebuilds and starting empty;
+`patch()` is that document. It used to render a snapshot of all four keys the window owns, and the
+lock cannot save that: the merge in `src/uistate.rs` protects a key the caller leaves OUT, and a
+snapshot names every key explicitly, so a window that changed only the text size wrote its startup
+read of `keys` back over a change another window made after that read. The lock was working
+correctly and the data was still lost. Running the rebuild over both documents is what keeps them
+honest in the other direction too: `changeLeaf` merges a leaf into the group the window DRAWS, so a
+sub-key a newer Flea left in `display` or `menu` stays on screen, and owes the leaf alone, because
+this Flea has no rule for that sub-key and `check()` refuses a whole patch that names one. The owed
+document is a union rather than the newest change alone, so a change made while a writer runs
+coalesces with whatever is queued behind it; a refused write keeps it owed so the next patch carries
+it again, and a landed one with nothing queued behind it empties it, because what is kept after a
+write lands is exactly the stale read the snapshot used to send. A setter that lands the value
+already held owes nothing at all. `tests/uiwriter.sh` drives two windows over one state file both
+ways round, and `tests/js/uistate.js` pins the patch bytes.
+
 **The window's read is the settled file, and not a raw one.** `main()` calls `Store::settle` before
 it hands off to `qs`: an empty patch through the same lock and the same per-key validation, so
 whenever that settle succeeded on a document it could read, a value a hand edit left in a key this
@@ -592,10 +609,11 @@ huge pages" below for what it is worth and what it cost.
   `thumb` and `thumbcancel` out and `thumbed` in alongside `list`, `window` and `sort`.
 - `ui/ViewState.qml` reads `ui.json` once at startup with a blocking `FileView` and writes nothing
   itself: every change, the header menu's columns and all three settings sections alike, goes back
-  out through `flea --ui-state`, see "The state file".
+  out through `flea --ui-state` as a patch naming that change alone, see "The state file".
 - `ui/js/UiState.js` is `ViewState`'s writer bookkeeping and the two pure rebuilds every writer goes
-  through: what the state file is known to hold, what the running writer carries and what waits
-  behind it. It imports no QML, so
+  through: the newest patch a writer landed, what the running writer carries and what waits behind
+  it, and the key and group rebuilds `ViewState` runs over both the state it draws and the patch it
+  owes. It imports no QML, so
   `tests/js/uistate.js` can redden on a mutation of the rule that only a zero exit proves a save.
 - `ui/Theme.qml` owns the singleton palette, type and spacing tokens from the Omarchy
   theme plus the user override.

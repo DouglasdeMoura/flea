@@ -70,11 +70,35 @@ QtObject {
     // and every lookup: it fires on load and on a settings change alike, and rebinds in this process.
     onKeysPresetChanged: Keymap.setPreset(root.keysPreset)
 
+    // A whole top-level ui.json key this window changed: the same value goes into the document and
+    // into the patch, because nothing else lives under it.
+    function changeKey(key, value) {
+        root.owe(key, UiState.withKey(root.state, key, value), UiState.withKey(root.unsaved, key, value))
+    }
+
+    // One leaf inside a group. The leaf merges into whatever else the group holds so the document
+    // keeps a sub-key a newer Flea left there, and the patch carries the leaf ALONE: a sub-key this
+    // Flea has no rule for is one src/uistate.rs refuses, and it refuses the whole patch with it.
+    function changeLeaf(key, leaf) {
+        root.owe(key, UiState.withGroup(root.state, key, leaf), UiState.withGroup(root.unsaved, key, leaf))
+    }
+
+    // Both writers' last move: hold the new document, and when the named key is not the value it
+    // already held, owe the state file what changed and ask for a write. A setter that lands the
+    // value already on screen owes nothing, so a chord clamped at the end of its range writes nothing.
+    function owe(key, next, owed) {
+        var before = JSON.stringify(root.state[key])
+        root.state = next
+        if (JSON.stringify(next[key]) === before)
+            return
+        root.unsaved = owed
+        root.save()
+    }
+
     // The Display section's writers. ui/shell.qml routes keys.toml's textSizeUp, textSizeDown and
     // textSizeReset into the same three, so a chord and a control cannot hold two different sizes.
     function setTextSize(next) {
-        root.state = UiState.withGroup(root.state, "display", { textSize: TextSize.parse(next) })
-        root.save()
+        root.changeLeaf("display", { textSize: TextSize.parse(next) })
     }
 
     function followTextSize() {
@@ -93,8 +117,7 @@ QtObject {
     // The Menus section's own two writers. Both write the hidden set alone, because the master row
     // over the six basic actions is Settings.masterState of that set rather than a value of its own.
     function setMenuHidden(hidden) {
-        root.state = UiState.withGroup(root.state, "menu", { hidden: hidden })
-        root.save()
+        root.changeLeaf("menu", { hidden: hidden })
     }
 
     function toggleMenuAction(id) {
@@ -106,8 +129,7 @@ QtObject {
     }
 
     function setKeysPreset(name) {
-        root.state = UiState.withKey(root.state, "keys", name)
-        root.save()
+        root.changeKey("keys", name)
     }
 
     // Flipped by ui/Pane.qml's onChosen, when a header-menu row answers "col:<key>".
@@ -118,8 +140,7 @@ QtObject {
             shown.splice(at, 1)
         else
             shown.push(key)
-        root.state = UiState.withKey(root.state, "columns", shown)
-        root.save()
+        root.changeKey("columns", shown)
     }
 
     // A patch flea refused, or a state file it could not write. The pane turns it into the status
@@ -132,21 +153,22 @@ QtObject {
     // ever set true, because the read that would clear it is the one that could not be taken.
     property bool unreadable: false
 
-    // ui/js/UiState.js's book: what the state file holds, what the writer carries, what waits behind
-    // it. A save that would change nothing writes nothing.
-    property var writeBook: UiState.book("")
+    // What this window has changed and no write has landed for yet, in the shape of a ui.json patch.
+    // Emptied when a write carrying it lands with nothing queued behind it, so a refusal keeps it and
+    // the next patch carries it again.
+    property var unsaved: ({})
 
-    // Everything this window owns, in one patch. src/uistate.rs merges it onto whatever the file
-    // holds, so a key neither front end here writes is preserved; and one patch rather than four
-    // means the newest one carries every change, including any the book is still holding behind an
-    // inflight writer.
+    // ui/js/UiState.js's book: the newest patch a writer landed, what the running writer carries,
+    // what waits behind it. A save that would change nothing writes nothing.
+    property var writeBook: UiState.book()
+
+    // Only what this window has changed, because src/uistate.rs merges a patch key by key: a key
+    // left out is one the file keeps, so saving a text size here cannot write this window's own read
+    // of `keys` over a change another window or the CLI made after that read. It is the union of
+    // every change since the last write landed rather than the newest one alone, so a patch built
+    // while a writer runs still carries whatever the book is holding behind it.
     function patch() {
-        return JSON.stringify({
-            columns: root.columns,
-            keys: root.keysPreset,
-            display: { textSize: root.textSize },
-            menu: { hidden: root.menuHidden }
-        })
+        return JSON.stringify(root.unsaved)
     }
 
     function save() {
@@ -171,7 +193,6 @@ QtObject {
         root.state = read.state
         if (read.unreadable)
             root.unreadable = true
-        root.writeBook = UiState.book(root.patch())
     }
 
     // blockLoading, because the first list draws from this: an async read would paint one column
@@ -194,6 +215,9 @@ QtObject {
     function wrote(exitCode) {
         var next = UiState.exited(root.writeBook, exitCode)
         root.writeBook = next
+        // What changed stays owed until a write carrying it lands with nothing queued behind it.
+        if (exitCode === 0 && next.inflight.length === 0)
+            root.unsaved = ({})
         if (next.failed)
             root.saveFailed()
         if (next.start.length > 0)
