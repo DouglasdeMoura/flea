@@ -3785,7 +3785,7 @@ and `_listTimedOut` is `_timedOut`, so a grep for the old names finds `ui/Device
 
 ### A single-flight guard needs a deadline, and a refusal the user can see
 
-`ui/NetworkMounts.qml openShare()` is single flight over two children and only one of them was
+`ui/NetworkMounts.qml openShare()` is single flight over its children and only one of them was
 bounded. `mountProcess` had a 15 s `Timer`; `infoProcess` had nothing, and issue #36's fix made
 `mountProcess.onExited` run `gio info` on **every** exit, the dead-server path included, which is
 exactly where `gio info` never returns. So one hung info left `infoProcess.running` true and the
@@ -3798,6 +3798,16 @@ the bar gets the same "did not respond" sentence a hung mount already produced. 
 now says so too: "Another network location is still opening; give it a moment." `tests/ui.sh`
 `case_hangshare` drives all three against a `gio` stub that hangs `info` on one share and answers
 for the other, and it went red on the guard's own silence before the fix.
+
+**There are three legs, not two**, which advloop round 2 caught against the very commit subject that
+claimed otherwise. A bare server root ends in `listShares()`, and `gio list` on a server gvfs cannot
+reach hangs exactly the way `gio info` does: it had no `mountTimeout.restart()` and nothing else in
+the chain was left to end it, so the share browser waited for a listing that never came, forever and
+in silence. `listShares()` restarts the same timer, `mountTimeout` gains a third branch and
+`_listSharesTimedOut` its own consume-once flag, and `openShare()`'s guard now counts
+`listSharesProcess.running` too, because otherwise a new open started over a hung listing would
+restart the timer onto itself and leave the listing unbounded again. `case_hangshare` drives it
+against a stub whose bare root's `gio list` hangs; it went red on the deadline that never fired.
 
 The rule this follows, and it holds for anything written after it: **a single-flight guard needs a
 deadline on the thing it guards, and a refusal the user can see.** A guard that returns in silence

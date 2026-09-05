@@ -448,6 +448,17 @@ wait_message() {
     fail "the status bar never said: $want (the last thing it said was: $seen)"
 }
 
+# A stub that hangs on purpose is the only thing that can say when it started hanging, so a case
+# waits for its marker rather than sleeping and hoping the guard it is testing has closed.
+wait_marker() {
+    local marker="$1" why="$2"
+    for _attempt in $(seq 1 300); do
+        [[ -f "$marker" ]] && return 0
+        sleep 0.05
+    done
+    fail "$why"
+}
+
 # Tab toggles between the list and the rail, so a case that does not know which one it is on asks.
 rail_focus() {
     [[ "$(ipc focusView)" == "rail" ]] && return 0
@@ -2570,27 +2581,41 @@ case_hangshare() {
 
     local hang_uri="smb://stubhost/hang/"
     local good_uri="smb://stubhost/good/"
+    local root_uri="smb://stubhost/"
     cat > "$dir/bin/gio" <<EOS
 #!/bin/sh
+# Every call is logged, because a case that hangs on purpose has no other way to say which leg it
+# reached; the fail messages below quote it. Same idea as case_unmount's own stub log.
+printf '%s\n' "\$*" >> "$dir/bin/calls"
 if [ "\$1 \$2" = "mount -l" ]; then
   printf 'Mount(0): hang en stubhost -> $hang_uri\n  Type: GDaemonMount\n'
   printf 'Mount(1): good en stubhost -> $good_uri\n  Type: GDaemonMount\n'
   exit 0
 fi
 if [ "\$1" = info ]; then
+  # A bare server root has no FUSE path of its own, so the product goes on to gio list.
+  [ "\$2" = "$root_uri" ] && exit 0
   # The dead-server shape ui/NetworkMounts.qml documents: gio info on a location gvfs cannot reach
-  # never returns. exec so the product's own terminate reaches the sleep and leaves nothing behind.
-  [ "\$2" = "$hang_uri" ] && exec sleep 25
+  # never returns. The marker is what tells the test the guard has actually closed, so the busy
+  # refusal below is never asserted against an open that has not started. exec so the product's own
+  # terminate reaches the sleep and leaves nothing behind.
+  if [ "\$2" = "$hang_uri" ]; then : > "$dir/bin/info-started"; exec sleep 25; fi
   printf 'local path: %s\n' "$good_dir"
 fi
+# gio list on a server gvfs cannot reach hangs the same way gio info does, and this is the third
+# leg of an open: without its own deadline nothing in the chain is left to end the share browser.
+if [ "\$1" = list ]; then : > "$dir/bin/list-started"; exec sleep 25; fi
 exit 0
 EOS
     chmod +x "$dir/bin/gio"
 
     local fixture_home="$fixture_root/hangshare-home"
     fixture_home_make "$fixture_home"
+    mkdir -p "$fixture_home/.config/gtk-3.0"
+    printf '%s StubRoot\n' "$root_uri" > "$fixture_home/.config/gtk-3.0/bookmarks"
     local real_home="$HOME" saved_path="$PATH"
 
+    local want_rail="hang|network|share|true"$'\n'"good|network|share|true"$'\n'"StubRoot|network|share|false"
     export PATH="$dir/bin:$PATH"
     export HOME="$fixture_home"
     launch "$dir"
@@ -2598,13 +2623,13 @@ EOS
     export PATH="$saved_path"
     # bin/ is the gio stub's own fixture entry, alongside the one file under test.
     wait_listing 2
-    wait_rail 3
+    wait_rail 4
     for _attempt in $(seq 1 100); do
-        [[ "$(ipc networkEntries)" == "hang|network|share|true"$'\n'"good|network|share|true" ]] && break
+        [[ "$(ipc networkEntries)" == "$want_rail" ]] && break
         sleep 0.05
     done
-    [[ "$(ipc networkEntries)" == "hang|network|share|true"$'\n'"good|network|share|true" ]] \
-        || fail "hangshare: the two stub mounts did not reach the rail, got $(ipc networkEntries)"
+    [[ "$(ipc networkEntries)" == "$want_rail" ]] \
+        || fail "hangshare: the stub mounts and bare root did not reach the rail, got $(ipc networkEntries)"
 
     # Home(0), hang(1), good(2). Opening hang starts the info that never answers.
     key -k Tab >/dev/null
@@ -2615,9 +2640,10 @@ EOS
     settle
     [[ "$(ipc railCursor)" == "1" ]] || fail "hangshare: expected the rail cursor on hang, got $(ipc railCursor)"
     key l >/dev/null
-    settle
+    wait_marker "$dir/bin/info-started" "hangshare: the hang share's gio info never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" | sort -u | tr '\n' ';')"
 
-    # The guard is closed now, and a second share must say so rather than swallow the keypress.
+    # The guard is closed now, proven by the marker above rather than by a sleep, and a second share
+    # must say so rather than swallow the keypress.
     key j >/dev/null
     settle
     [[ "$(ipc railCursor)" == "2" ]] || fail "hangshare: expected the rail cursor on good, got $(ipc railCursor)"
@@ -2626,17 +2652,57 @@ EOS
     [[ "$(ipc path)" == "$dir" ]] || fail "hangshare: the refused open navigated to $(ipc path)"
 
     # And the deadline is what reopens it, with the same sentence a mount that never answers gets.
+    # The sentence is emitted in the same handler that terminates the leg, and Process.running only
+    # clears when onExited is delivered (measured on quickshell 0.3.1), so an l pressed the instant
+    # it appears can still meet the guard. Press until it takes: with no deadline none ever does.
     wait_message "That network location did not respond; check the address and try again."
-    key l >/dev/null
     for _attempt in $(seq 1 200); do
         [[ "$(ipc path)" == "$good_dir" ]] && break
+        key l >/dev/null
         sleep 0.05
     done
     [[ "$(ipc path)" == "$good_dir" ]] \
         || fail "hangshare: good never opened after the deadline, path is $(ipc path)"
     [[ "$(ipc total)" == "1" ]] || fail "hangshare: good's own listing did not load, total is $(ipc total)"
 
-    printf 'HANGSHARE busy-refusal=ok deadline=ok next-share-opens=ok\n'
+    # The third leg, driven from a fresh window: the deadline's sentence is the same one the info
+    # leg already produced, and lastMessage still carries it, so a stale match would green this arm
+    # against a product that never ended the listing at all. A bare server root ends in gio list,
+    # which hangs here exactly as gio info did, and nothing else in the chain is left to end it.
+    # The stub and the fixture home are exported around this launch exactly as they were around the
+    # first: a relaunch that inherits the restored HOME starts Flea on the operator's own rail.
+    export PATH="$dir/bin:$PATH"
+    export HOME="$fixture_home"
+    launch "$dir"
+    export HOME="$real_home"
+    export PATH="$saved_path"
+    wait_listing 2
+    wait_rail 4
+    for _attempt in $(seq 1 100); do
+        [[ "$(ipc networkEntries)" == "$want_rail" ]] && break
+        sleep 0.05
+    done
+    [[ "$(ipc networkEntries)" == "$want_rail" ]] \
+        || fail "hangshare: the fresh window's rail is $(ipc networkEntries)"
+    [[ -z "$(ipc lastMessage)" ]] || fail "hangshare: the fresh window already says $(ipc lastMessage)"
+    # Home(0), hang(1), good(2), StubRoot(3).
+    rail_focus
+    key g >/dev/null
+    key j >/dev/null
+    key j >/dev/null
+    key j >/dev/null
+    settle
+    [[ "$(ipc railCursor)" == "3" ]] || fail "hangshare: expected the rail cursor on StubRoot, got $(ipc railCursor)"
+    key l >/dev/null
+    wait_marker "$dir/bin/list-started" "hangshare: the bare root's gio list never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" | sort -u | tr '\n' ';')"
+    wait_message "That network location did not respond; check the address and try again."
+    [[ "$(ipc shareBrowserOpen)" == "false" ]] \
+        || fail "hangshare: the overlay opened on a listing that never answered"
+    # The relaunch above started this window at $dir, so that is where a listing that ended in the
+    # deadline has to leave it.
+    [[ "$(ipc path)" == "$dir" ]] || fail "hangshare: the timed-out listing navigated to $(ipc path)"
+
+    printf 'HANGSHARE busy-refusal=ok deadline=ok next-share-opens=ok list-deadline=ok\n'
     kill_flea
     sandbox_remove "$fixture_home"; sandbox_remove "$good_dir"
 }

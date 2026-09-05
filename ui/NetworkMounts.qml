@@ -37,6 +37,7 @@ Item {
     // also report a second, redundant failure for the exact same open attempt.
     property bool _mountTimedOut: false
     property bool _infoTimedOut: false
+    property bool _listSharesTimedOut: false
     // Set from "gio mount"'s own exit code and consumed by the "gio info" that follows it, which is
     // what actually decides whether the location is mounted; this only colours the failure message.
     property bool _mountFailed: false
@@ -117,7 +118,9 @@ Item {
     }
 
     function openShare(uri, alreadyMounted, label) {
-        if (mountProcess.running || infoProcess.running) {
+        // The share listing is the third leg of an open, so a new one must not start over it and
+        // hand its deadline to itself; see "listShares" below.
+        if (mountProcess.running || infoProcess.running || listSharesProcess.running) {
             // A guard that returns in silence names nothing at all, and the bound above is 15 s.
             root.message("Another network location is still opening; give it a moment.", false)
             return
@@ -146,10 +149,13 @@ Item {
         return /^[a-z][a-z0-9+.-]*:\/\/[^\/]+\/?$/i.test(uri)
     }
 
-    // Client-side only, never writes bookmarks; see AGENTS.md "The share browser overlay".
+    // Client-side only, never writes bookmarks; see AGENTS.md "The share browser overlay". This is
+    // the third leg of an open and takes the same bound: "gio list" on a server gvfs cannot reach
+    // hangs exactly the way "gio info" does, with nothing else in the chain left to end it.
     function listShares(uri) {
         listSharesProcess.command = ["gio", "list", uri]
         listSharesProcess.running = true
+        mountTimeout.restart()
     }
 
     // Right click unmounts directly, no confirmation popup: see AGENTS.md "A second ContextMenu
@@ -179,6 +185,9 @@ Item {
             } else if (infoProcess.running) {
                 root._infoTimedOut = true
                 infoProcess.running = false
+            } else if (listSharesProcess.running) {
+                root._listSharesTimedOut = true
+                listSharesProcess.running = false
             } else {
                 return
             }
@@ -240,6 +249,10 @@ Item {
         environment: root.gioEnvironment
         stdout: StdioCollector { id: listSharesOut; waitForEnd: true; onStreamFinished: root._listSharesOutput = text }
         onExited: function (exitCode) {
+            mountTimeout.stop()
+            var timedOut = root._listSharesTimedOut
+            root._listSharesTimedOut = false
+            if (timedOut) return
             var body = String(listSharesOut.text || root._listSharesOutput || "")
             var names = body.split("\n").map(function (s) { return s.trim() }).filter(function (s) { return s.length > 0 })
             if (exitCode !== 0 || names.length === 0) {
