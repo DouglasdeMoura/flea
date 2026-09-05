@@ -4113,8 +4113,11 @@ case_settings() {
     settle
     [[ "$(ipc settingsRows)" == *"choice|Size|${pinned_base}px"* ]] \
         || fail "settings: a restart brought the panel back on a different stop"
-    # The master is derived from the stored set, so a restart that read only menu.hidden must still
-    # draw the five of six the panel left behind, and the six rows under it must agree with it.
+    # settingsRows draws the section the panel is ON and a new process always opens on Display, so
+    # the master row is not reachable until the rail has been walked. The master is derived from the
+    # stored set, so a restart that read only menu.hidden must still draw the five of six the panel
+    # left behind, and the six rows under it must agree with it.
+    settings_section menus
     [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
         || fail "settings: a restart did not derive the master back to five of six, got $(ipc settingsRows)"
     key -k Escape >/dev/null
@@ -4208,6 +4211,8 @@ settings_write_refused() {
     chmod 500 "$state/flea" || fail "settings: the state directory could not be made read-only"
     key , >/dev/null
     settle
+    # The stop row is Display's, and the panel reopens on whatever section the last block left it on.
+    settings_section display
     key j >/dev/null
     settle
     key h >/dev/null
@@ -4421,14 +4426,7 @@ assert_monitor_scale_row() {
 settings_menus() {
     key , >/dev/null
     settle
-    key -k Tab >/dev/null
-    settle
-    [[ "$(ipc settingsSide)" == "rail" ]] || fail "settings: Tab did not give the cursor to the rail"
-    key j >/dev/null
-    settle
-    [[ "$(ipc settingsSection)" == "menus" ]] || fail "settings: j on the rail did not reach Menus"
-    key -k Tab >/dev/null
-    settle
+    settings_section menus
     [[ "$(ipc settingsRows)" == *"master|All basic file actions|6 of 6"* ]] \
         || fail "settings: the master row does not start at six of six, got $(ipc settingsRows)"
     shot settings-menus
@@ -4489,6 +4487,37 @@ settings_menus() {
     settle
 }
 
+# The rail walk to a named section, with the panel already open, from wherever it was last left. The
+# section outlives a close, so a block that needs one says so rather than inheriting it: leaving the
+# panel on Menus after the restart check sent the whole refusal block's h presses to a menu row.
+# ui/SettingsPanel.qml clamps the rail rather than wrapping it, so two k presses reach the top row
+# from any of the three and j walks down from there.
+settings_section() {
+    local want="$1" down step
+    case "$want" in
+        keys) down=0 ;;
+        display) down=1 ;;
+        menus) down=2 ;;
+        *) fail "settings: $want is not a rail section" ;;
+    esac
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc settingsSide)" == "rail" ]] || fail "settings: Tab did not give the cursor to the rail"
+    key k >/dev/null
+    key k >/dev/null
+    settle
+    [[ "$(ipc settingsSection)" == "keys" ]] \
+        || fail "settings: two k presses did not reach the top of the rail, it is on $(ipc settingsSection)"
+    for (( step = 0; step < down; step++ )); do
+        key j >/dev/null
+        settle
+    done
+    [[ "$(ipc settingsSection)" == "$want" ]] \
+        || fail "settings: the rail did not reach $want, it is on $(ipc settingsSection)"
+    key -k Tab >/dev/null
+    settle
+}
+
 # Opens the row menu and refuses a label that should not be in it, delimiters included so Copy path
 # cannot answer for Copy.
 settings_menu_lacks() {
@@ -4505,12 +4534,7 @@ settings_menu_lacks() {
 settings_keys() {
     key , >/dev/null
     settle
-    key -k Tab >/dev/null
-    key k >/dev/null; key k >/dev/null
-    settle
-    [[ "$(ipc settingsSection)" == "keys" ]] || fail "settings: k on the rail did not reach Keys"
-    key -k Tab >/dev/null
-    settle
+    settings_section keys
     [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Mac"* ]] \
         || fail "settings: the preset row does not start on Mac, got $(ipc settingsRows)"
     [[ "$(ipc settingsRows)" == *"fact|connect to server|ctrl-k"* ]] \
