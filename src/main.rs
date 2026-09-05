@@ -6,6 +6,7 @@ mod heap;
 mod hyprkeys;
 mod json;
 mod jsondoc;
+mod jsonstring;
 mod launcher;
 mod open;
 mod paths;
@@ -186,10 +187,11 @@ fn main() {
     }
     match paths::ui_dir() {
         Some(ui) => {
-            // Before the window, so the first paint reads the migrated state and not the defaults.
-            match uistore::Store::user().and_then(|store| store.migrate()) {
+            // Before the window, so the first paint reads what the settle left, see AGENTS.md "The
+            // state file"; it can fail or decline, and the window then opens on a file it did not touch.
+            match uistore::Store::user().and_then(|store| store.settle()) {
                 Ok(()) => {}
-                Err(e) => eprintln!("flea: the 0.1.3 view state was not migrated ({})", e),
+                Err(e) => eprintln!("flea: the view state was not settled ({})", e),
             }
             exit(gui::exec_qs(&ui, open_path.as_deref(), select_path.as_deref()))
         }

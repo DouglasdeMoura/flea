@@ -283,4 +283,16 @@ Item {
         }
     }
 
+    // flea --ui-state is a reply from outside the window too. A refused patch, or a state file it
+    // could not write, means the change is on screen and the file does not have it; nothing else
+    // would ever say so, because the window's own read is taken once before the first frame.
+    Connections {
+        target: ViewState
+        function onSaveFailed() { pane.message(Errors.sentence("state", ""), true) }
+    }
+
+    // The other half of the same seam: main() leaves a ui.json it cannot read exactly as the operator
+    // wrote it, and the window draws the shipped defaults, so this says once that none of it was used.
+    Component.onCompleted: if (ViewState.unreadable) pane.message(Errors.sentence("statefile", ""), true)
+
 }

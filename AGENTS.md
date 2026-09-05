@@ -327,19 +327,104 @@ the terminal interface is not here yet, as `flea --tui` says by exiting 2, and w
 will submit patches for `view`, `hidden` and `sort` only, because menus and places are the window's.
 Scale is on neither list: `src/uischema.rs` has no `scale` key at all, it stores an Omarchy text-size
 stop under `display.textSize.mode`, and the multiplier `ui/js/Scale.js` applies is a session value.
+**The streams and the status are the contract**, because
+that `Process` reads the status alone: either shape prints the whole document on stdout and exits 0,
+and every refusal, a patch that is not JSON, a key or value this Flea does not take, a state file it
+could not write, or more than one argument, prints one `flea: ` sentence on stderr, prints nothing
+on stdout at all, and exits 2. Pinned in `tests/uistate.sh`, both streams for each of the four.
+
+**The window's read is the settled file, and not a raw one.** `main()` calls `Store::settle` before
+it hands off to `qs`: an empty patch through the same lock and the same per-key validation, so
+whenever that settle succeeded on a document it could read, a value a hand edit left in a key this
+Flea knows has already fallen back to its own default by the time `ui/ViewState.qml`'s `FileView`
+reads it. A key this Flea does not know is not one of those: `merge` keeps it verbatim, so a newer
+Flea's settings survive the settle rather than falling back to anything. Without the step the two
+front ends answer one file two ways, because the window's read is a `JSON.parse` and applies no rule
+of its own. The settle can fail, on an unwritable state directory or a `ui.json` that is a link, and
+then `main()` prints one line and opens the window anyway on a file it did not validate. **The
+migration is `read()`'s and not `settle`'s**: `read()` falls back to `view.json` exactly while
+`ui.json` is absent, so every path that reads reaches it, `flea --ui-state` included. Measured, a
+first `flea --ui-state '{"view":"grid"}'` on a box with `view.json` and no `ui.json` writes the
+migrated columns, the same ones the settle writes, and leaves `view.json` byte for byte. `settle` is
+only where the migration is first written down on a launch that never patches anything.
+
+**A launch never spends the file to settle it.** A launch with neither file writes nothing, the way
+a first run always has. Neither does one whose `ui.json` already reads back as exactly what a
+rewrite would render, because that rewrite would change nothing: the lock, the temp, the `sync_all`
+and the rename measured 6.7 to 18.6 ms a launch on this box, against 1.3 to 1.7 ms for a launch that
+only reads, which is real money against a 77 ms startup. Both are per-launch times of `flea --gui`
+driven to the missing shell, 100 launches a pass over eight passes of two harnesses that differed
+only in how `ui.json` was reseeded between launches; the read figure has the separately timed reseed
+subtracted, and the write figure's own eight passes spanned that whole 6.7 to 18.6, which is why
+each is a range here and never a number to cite. And neither does a launch whose `ui.json` cannot be
+read as a JSON object at all: that file is the only copy of whatever the operator wrote, both front
+ends already read it as the full default shape, and rewriting it would spend the operator's
+settings to close nothing, so it is left byte for byte and `ui/PaneWire.qml` says once that what is
+on disk was not used. **That is the settle and not the file.** `read()` answers the full default
+shape for such a document, so the first patch the window sends merges onto those defaults and
+renames them over the operator's only copy, every hand-written line included. Deliberate, because
+the sentence has already been posted and a save has to land somewhere, and pinned in
+`tests/uistate.sh` so the next change to `update()` is visible rather than silent.
+
+**A refused write reaches the operator.** `ui/ViewState.qml` records a patch as stored only when
+`flea --ui-state` exits 0. `ui/js/UiState.js` holds that bookkeeping, and `ui/PaneWire.qml` turns
+the failure into the status bar's one transient sentence through `ui/js/Errors.js`, the same slot
+every other write operation reports in. The status alone is read and not the child's stderr,
+because a `Process`'s own `onExited` can race its `StdioCollector`'s text. A patch that was refused
+is attempted again the next time the same toggle is made, rather than short-circuited by a book
+that already believed it. **A writer that never starts is that same refusal.** Measured on
+Quickshell 0.3.1: a `Process` whose program cannot be run emits no `exited` at all, only `running`
+going false, so `ui/ViewState.qml` reads that transition as a status of 2. Without it the patch
+stays in flight for the life of the window, every later change queues behind it unwritten, and the
+one failure this module exists to report is the one it cannot report. A real exit clears the book
+before its own `running` goes false, and a restart inside `onExited` emits no false transition at
+all, so the handler cannot fire for a writer that ran. `tests/uiwriter.sh` drives both.
 
 **The lock is the sibling `ui.json.lock`.** `File::lock()` is `flock(2)` here: advisory, exclusive
 and cross-process, held across the re-read, the per-key validation, the caller-key merge, the temp
 write and the rename, so a second Flea cannot land between this one's read and its write. Measured
 on the box with the lock taken out, twelve concurrent writers landed 1 of their 12 keys; with it in,
-12 of 12.
+12 of 12. `update()` makes the state directory and takes the lock before `patched()` validates, so a
+patch this Flea refuses leaves both of those behind and only never writes the state file itself. The
+cost is an empty `~/.local/state/flea/` and a lock the next accepted save uses anyway, which is why
+the check says what it leaves rather than the code being moved to leave nothing.
 
-**Failure is per key, never per file.** A document that does not parse reads as the full default
-shape rather than throwing. A value a key cannot take costs that key alone, and every other key in
-the file stands. A key this Flea does not know is kept and rewritten as it was read, at the top
-level and inside a nested object, so an older Flea cannot eat a newer one's settings. A patch is the
+**Failure is per key, and per file only when the document does not parse at all.** That one case
+is per file by construction: a document that does not parse reads as the full default shape rather
+than throwing, and is left on disk exactly as it was rather than rewritten into that shape, so every
+key in it is lost to the read at once. Every other failure costs one key: a value a key cannot take
+costs that key alone, and every other key in the file stands. A key this Flea does not know is kept
+and rewritten as it was read, at the top level and inside a nested object, so an older Flea cannot
+eat a newer one's settings. A patch is the
 other way round: it is checked whole before any of it lands, and one bad key refuses the whole patch
-with a sentence naming it, because a patch comes from Flea and not from a text editor.
+with a sentence naming it, because a patch comes from Flea and not from a text editor. **A number is
+measured against JSON's own grammar and not Rust's**, because `Json::Num` keeps the literal it was
+read with and writes it straight back: `1.`, `1.e5`, `0192`, `-0192`, `01`, `00` and `-.5` all parse
+as an `f64` and none of them is a JSON number, and accepting one would have let a settle rewrite
+`ui.json` into a document the window's own `JSON.parse` refuses, after which every setting reads as
+default. The shape check is `is_json_number` in `src/jsondoc.rs`, run before the `f64` parse and not
+instead of it: the parse is what bounds the magnitude, since `1e400` is a JSON number and no finite
+`f64`. **A `\u` escape is four hex digits and nothing else**, each digit checked on its own, because
+`u32::from_str_radix` takes a leading `+` for an unsigned type as well and `\u+041` decoded to `A`:
+the same divergence as the number grammar, one escape further in. **Every parse error names a
+byte**, the four that ran off an end included, so a hand edit is answered with a position. It is the
+byte the parse stopped at, except for the six messages that name where the offending token STARTED
+instead, because on those that is the end a reader can act on: a string that runs to the end of the
+document names its opening quote, a number that is not JSON or not UTF-8 names its first character,
+a byte that is not UTF-8 names the first byte of the sequence, and a `\u` escape that is short or
+not hex names the first of its four digits.
+`malformed_input_is_an_error_naming_the_byte_it_is_about` asserts the whole sentence rather than
+`is_err()`, which is all it could see before, and it pins a nonzero offset for each of the two
+messages this branch added, because byte 0 is what a hardcoded format string would print too.
+
+**`columns` names what the list row SHOWS, and it is a set that always holds `name`.** Every entry
+is one of the five column keys, no key appears twice, and `name` is among them, because
+`src/uischema.rs`'s own row says name is never optional and `ui/js/Columns.js` draws it whatever the
+file holds. A duplicate is not harmless: measured through the real `ui/ViewState.qml` singleton, a
+stored `["name","size","size","date"]` left one header-menu "Hide Size" click still drawing
+`name,size,date`, because `toggleColumn` splices the first match and the second still shows the
+column. The header menu offers only the four optional keys onto an array that already carries
+`name`, so no click this window can produce is refused by the rule.
 
 **`wrapAtEnds` is read by the window and by nothing else.** `ui/Pane.qml` exposes it off the
 document `ui/ViewState.qml` already holds, and `ui/js/Focus.js` `step` is its only reader: with the
@@ -355,17 +440,34 @@ It is one key and not two, so there is nowhere for a free number to be stored.
 
 **The write is a temp plus a rename, never a truncation**, created at mode 0600 in the `open()` call
 inside a directory created at 0700, and a symbolic link at either the file or the lock is refused
-rather than written through. Proven by holding an fd open across an update and reading the old bytes
-back through it, and by a sweep of 120 `SIGKILL`s during the write, none of which left the file as
-anything but the old document or the new one.
+rather than written through. **The temp carries the same guarantee and by the same mechanism as
+`src/userfile.rs`**: `write_new` opens `ui.json.<pid>.tmp` with `create_new`, which is
+`O_CREAT | O_EXCL`, so a link or a file planted at that path is an error rather than a redirect, and
+the pid in the name keeps two concurrent writers off each other's temp. The direct proof is
+`the_write_replaces_the_file_rather_than_truncating_it`, which holds an fd open across an update,
+reads the old bytes back through it and compares inodes. The
+sweep beside it fires a `SIGKILL` 1 to 9 ms into each of 120 rounds and lands on a live process in 88
+to 120 of them, measured across nine sweeps on this box and four more with other lanes live on it,
+the second set ranging 92 to 120; no round of the 120 has ever left the file as
+anything but the old document or the new one. The suite prints the count it achieved and asserts only
+a fifth of the rounds, because a faster box kills fewer of them: at a 15 ms budget the same sweep
+killed 3 of 120, which is what the old floor of one kill was letting "120 SIGKILL rounds" be read off.
+A killed round leaves litter: `write()` unlinks only `ui.json.<own pid>.tmp`, so a process killed
+between `write_new` and the rename leaves that temp for good, and tens of the 120 rounds do, 47 to
+90 across the four runs that added the check, which is a magnitude and not a number to cite. Nothing
+reaps them and nothing may: the concurrency block above holds twelve live temps at once, so no
+process can tell a peer's from a corpse, and deleting one in flight is worse than the litter. The
+suite lists the directory with `ls -A` and asserts that every leftover is a killed writer's own temp
+and that there are never more of them than there were kills.
 
 **0.1.3 did store something, and it is migrated.** `ui/ViewState.qml` wrote `hiddenCols` and
 `uiScale` to `$XDG_CONFIG_HOME/flea/view.json`, so the handoff's "0.1.3 stored nothing" is wrong.
 `hiddenCols` named what was HIDDEN and `columns` names what is SHOWN, so the migration inverts it;
 `uiScale` is dropped on the operator's ruling, because 0.1.4 stores an Omarchy stop and never a free
-multiplier. `main()` runs the migration once before it hands off to `qs`, so the first paint after an
-upgrade already reads the migrated columns. A `ui.json` that exists is never re-migrated, and
-`view.json` is never written again.
+multiplier. The migration rides `read()` above, so the first paint after an upgrade already reads
+the migrated columns, whether the settle or a `flea --ui-state` patch was what wrote them down. A
+`ui.json` that exists means `view.json` is never read again, whether or not this Flea can read that
+`ui.json`'s bytes, and `view.json` is never written again.
 
 ## Modes
 
@@ -463,6 +565,7 @@ huge pages" below for what it is worth and what it cost.
 - `error.rs` the one error type, naming the failing operation and input.
 - `json.rs` the wire's JSON: read one named field out of one line, escape one string into one.
 - `jsondoc.rs` one whole JSON document in and out, which the one-line scanner above deliberately is not.
+- `jsonstring.rs` one JSON string in and one Rust `String` out: the escapes and the surrogate pairs.
 - `uischema.rs` the shipped `ui.json` shape and the rule each key is measured against.
 - `uistate.rs` the `ui.json` merges: a file onto the defaults, one caller patch, and 0.1.3's `view.json`.
 - `uistore.rs` where `ui.json` lives and the one locked, atomic way it is rewritten, see "The state file".
@@ -505,6 +608,9 @@ huge pages" below for what it is worth and what it cost.
   `thumb` and `thumbcancel` out and `thumbed` in alongside `list`, `window` and `sort`.
 - `ui/ViewState.qml` reads `ui.json` once at startup with a blocking `FileView` and writes nothing
   itself: every change goes back out through `flea --ui-state`, see "The state file".
+- `ui/js/UiState.js` is `ViewState`'s writer bookkeeping and nothing else: what the state file is
+  known to hold, what the running writer carries and what waits behind it. It imports no QML, so
+  `tests/js/uistate.js` can redden on a mutation of the rule that only a zero exit proves a save.
 - `ui/Theme.qml` owns the singleton palette, type and spacing tokens from the Omarchy
   theme plus the user override.
 - `ui/Pane.qml` owns one directory view, its integer model, held window, actions, the
@@ -746,10 +852,13 @@ beneath it, which is why this one states the failure rather than repeating the i
 `src/backend/proto.rs` was 241 lines when this was written, under both budgets: 71 are the wire types,
 the request dispatch and the four one-line responses, the other 170 the test module. It has
 been split twice, each time at the seam that leaves each file a single job. **At 399 of the
-400 hard cap** `src/json.rs` took the whole of this tree's JSON, the field scanner as well
-as the escaper: the scanner is protocol-agnostic by construction, the decoding half of the
+400 hard cap** `src/json.rs` took the whole of what this tree's JSON then was, the field scanner as
+well as the escaper: the scanner is protocol-agnostic by construction, the decoding half of the
 encoder already living there, and the same mutations still redden the four tests that moved
-with it. **At 489, after the dirsize and Kind wave pushed it through the cap**, the rows
+with it. **That is no longer the whole of this tree's JSON**: the state file needed a whole-document
+type, so `src/jsondoc.rs` was written beside it and `json.rs` kept the one-line wire scanner alone,
+which is what its own header comment and the module map at "Module map" both now say. **At 489,
+after the dirsize and Kind wave pushed it through the cap**, the rows
 serialiser moved out to `src/backend/rows.rs`: every other response is one `format!` line,
 and the one that loops, allocates and owns the Kind dictionary was the file's whole growth.
 The old rule that every consumer imports the wire layer from `proto` alone went with it:
@@ -772,6 +881,48 @@ are the test module. It is one job in two directions: pull one
 named field out of one JSON line, and escape one string into one. Nothing here builds or
 validates a document, because the wire is one object per line and never anything else.
 
+`src/jsondoc.rs` is 379 lines by `wc -l`, over the soft budget and 21 under the hard cap, with its
+`#[cfg(test)]` at 273, so 272 lines of implementation and 107 of tests. **Those three read 352, 272
+and 271 until this round and all three were one out**: `wc -l` on the commit that wrote them said
+353, the fourth count on this branch read off the shape of an edit rather than off the artefact.
+It is one job in two
+directions, the same shape as `json.rs`: a whole JSON document in, and the same document back out
+with its own numbers written the way they were read. **It stood at 398**, and this register said the
+next change here would split `parse` off from the `Json` type plus `render`. That is not the cut
+that was taken. `jsondoc::parse` is called from 17 sites in four other modules, two of which
+(`uistore.rs` and `uistate.rs`) are themselves over the soft budget, so that split renames 17 lines
+in four files and buys a reader nothing. The string decoder went instead, to `src/jsonstring.rs`: a
+different job on the same bytes, with exactly one caller in this file. `parse` against `render` is
+still the cut if this file needs another one.
+
+`src/jsonstring.rs` is 113 lines by `wc -l`, inside both budgets, with its `#[cfg(test)]` at 92, so
+91 lines of implementation and 22 of tests. It is one job: one JSON string in and one Rust `String`
+out, the `\u` escapes and UTF-16's surrogate pairing, which is the reading half of what `json.rs`'s
+`escape` writes. It came out of `jsondoc.rs` when `parse_number` needed JSON's own number grammar
+and that file had two lines of headroom left; `parse_value` is its only caller.
+
+`src/uischema.rs` is 250 lines by `wc -l`, exactly at the soft budget and so not one the tool warns
+about, with its `#[cfg(test)]` at 128, so 127 lines of implementation and 123 of tests. It is one
+job: the shipped `ui.json` shape and the rule table beside it. Its tests are half the file because
+each one is a table read back, and the rule-edge test lives here rather than in `uistate.rs` because
+the rules it bites are declared here and that file has 36 lines of headroom left.
+
+`src/uistore.rs` is 394 lines by `wc -l`, over the soft budget and 6 under the hard cap, with its
+`#[cfg(test)]` at 192, so 191 lines of implementation and 203 of tests. Just over half the file is
+that test module because every claim it makes is about a real file, a real symlink, a real lock and
+a real rename, and each of those costs a fixture on disk. The seam for the next change is the four
+write helpers at the bottom, `make_dir`, `take_lock`, `refuse_a_link` and `write_new`, which know
+nothing about `Store` beyond the paths they are handed.
+
+`src/uistate.rs` is 364 lines by `wc -l`, over the soft budget and 36 under the hard cap, with its
+`#[cfg(test)]` at 189, so 188 lines of implementation and 176 of tests. It is one job in three
+shapes and all three are the same merge: a file onto the shipped defaults, one caller patch onto a
+document, and 0.1.3's `view.json` onto the defaults. They share `merge`, `fits` and the `SCHEMA`
+walk, so cutting `patched` away from `from_file` would put the validator on one side of a file
+boundary and the rule table's only other reader on the other. The seam, if this ever needs one, is
+the value predicates at the bottom, `one_line`, `is_column_set`, `is_action_id` and `is_a_place`,
+which know nothing about a document or a schema.
+
 `src/backend/thumbspec.rs` is 312 lines, over the soft budget and under the hard cap: 190 the
 discovery, the desktop-entry parser and `is_runnable`, the other 122 the test module. Those
 three are one security boundary and are read together, so they stay in one file: splitting the
@@ -790,9 +941,9 @@ need a real file, a real symlink and a real directory on disk before they prove 
 reader arriving without that context will read the ratio as top heavy; it is the cost of testing
 a boundary against the filesystem rather than against a mock.
 
-`src/backend/child.rs` is 231 lines by `wc -l`, inside both budgets and so not one of the eight
-files the tool warns about, with its `#[cfg(test)]` at line 96, so 95 lines of implementation and
-136 of tests. It runs one argv
+`src/backend/child.rs` is 231 lines by `wc -l`, inside both budgets and so not one of the files the
+tool warns about, with its `#[cfg(test)]` at line 96, so 95 lines of implementation and 136 of
+tests. It runs one argv
 under a deadline and reports `Ran::Succeeded`, `Ran::Failed` or `Ran::NotStarted`. It came out of
 `thumbs.rs` at 397 of the 400 hard cap, and it completes a three-part story each of whose parts is one file:
 `thumbargv` builds the inner argv, `sandbox` wraps it, `child` runs the result. Nothing in it
@@ -989,7 +1140,8 @@ waits for its consumer.
   this and cannot be rewritten, because the branch is shared:** its subject says nine suites
   were uninvoked and its body says seven, and the derived answer is zero of the twelve there were
   then. The runner builds both cargo profiles, since `protocol.sh` drives the debug binary and
-  `thumbs.sh` the release one, runs every suite that needs nothing but a shell, and reads each
+  `thumbs.sh` the release one and a guard on either path leaves a STALE binary in place and
+  certifies code nobody compiled, runs every suite that needs nothing but a shell, and reads each
   suite's OWN exit code, never a pipeline's. Its own `headless=` list is the inventory of those,
   so this paragraph carries no count for the list to outgrow. It then names `ui.sh`, `drag.sh` and
   `bench.sh` with what each needs, so a suite it cannot run stays visible instead of being
@@ -1324,6 +1476,16 @@ waits for its consumer.
   states, it drops only rows that are still waiting when they leave the viewport, and
   `remember` evicts at the cap in insertion order. It reddens on a mutation because
   `ui/js/Thumbs.js` imports no QML.
+- `./tests/uiwriter.sh` drives `ui/ViewState.qml`'s writer under a real headless Quickshell, which
+  is the half `tests/js/uistate.js` cannot reach: the book alone never sees a `Process`. It copies
+  the singleton and `ui/js/UiState.js` into its sandbox with a two-line `qmldir` rather than
+  importing `ui/` whole, because a directory import makes Quickshell scan every file in it and warn
+  about the two OEM symlinks a headless run has no session for. It makes two column changes in one
+  turn, so one run drives the start, the queue and the drain, and it drives that twice: once with
+  `FLEA_BIN` at a path that does not exist, where both patches must end refused and the book must
+  drain, and once against `target/debug/flea`, where both must reach `ui.json` and nothing must be
+  reported. Without `ViewState`'s `onRunningChanged` arm the first three checks go red and the
+  second run stays green, which is the exact shape of the defect it was written for.
 - `./tests/ui.sh` drives the real window through `omarchy-drive` and takes a case name to run
   one of the `case_*` functions it defines; the file's own usage line lists them and
   `grep -c '^case_[a-z]*()' tests/ui.sh` counts them. With no argument it runs all of them and

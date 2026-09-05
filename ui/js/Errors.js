@@ -35,6 +35,14 @@ function sentence(where, message) {
         return exists(message) ? "A folder or file with that name is already here."
                                : "That folder could not be created."
     }
+    // The state file: what was asked for is still on screen, so the sentence says what did not last.
+    if (where === "state") {
+        return "That setting could not be saved."
+    }
+    // And the other way round: main() left a ui.json it could not read alone, so none of it is used.
+    if (where === "statefile") {
+        return "Your saved settings could not be read, so these are the defaults."
+    }
     if (where === "duplicate") {
         return "That file could not be duplicated."
     }

@@ -1,5 +1,6 @@
 // One whole JSON document in and out, which src/json.rs deliberately is not: it scans one wire line.
 use crate::json::escape;
+use crate::jsonstring::parse_string;
 
 // A hand-edited state file is an input, so nesting is bounded rather than recursed until the stack ends.
 pub const MAX_DEPTH: usize = 32;
@@ -133,7 +134,7 @@ fn parse_value(bytes: &[u8], at: &mut usize, depth: usize) -> Result<Json, Strin
         return Err(format!("nested past {} levels at byte {}", MAX_DEPTH, at));
     }
     match bytes.get(*at) {
-        None => Err("the document ended before a value".to_string()),
+        None => Err(format!("the document ended before a value at byte {}", at)),
         Some(b'{') => parse_object(bytes, at, depth),
         Some(b'[') => parse_array(bytes, at, depth),
         Some(b'"') => parse_string(bytes, at).map(Json::Str),
@@ -208,69 +209,10 @@ fn parse_array(bytes: &[u8], at: &mut usize, depth: usize) -> Result<Json, Strin
     }
 }
 
-fn parse_string(bytes: &[u8], at: &mut usize) -> Result<String, String> {
-    if bytes.get(*at) != Some(&b'"') {
-        return Err(format!("a string was expected at byte {}", at));
-    }
-    *at += 1;
-    let mut out = String::new();
-    while let Some(&b) = bytes.get(*at) {
-        *at += 1;
-        match b {
-            b'"' => return Ok(out),
-            b'\\' => out.push(unescape(bytes, at)?),
-            _ => {
-                let start = *at - 1;
-                while *at < bytes.len() && bytes[*at] & 0xc0 == 0x80 {
-                    *at += 1;
-                }
-                match std::str::from_utf8(&bytes[start..*at]) {
-                    Ok(s) => out.push_str(s),
-                    Err(_) => return Err(format!("a byte that is not UTF-8 at {}", start)),
-                }
-            }
-        }
-    }
-    Err("a string ran to the end of the document".to_string())
-}
-
-fn unescape(bytes: &[u8], at: &mut usize) -> Result<char, String> {
-    let code = *bytes.get(*at).ok_or_else(|| "an escape ran off the end".to_string())?;
-    *at += 1;
-    match code {
-        b'"' => Ok('"'),
-        b'\\' => Ok('\\'),
-        b'/' => Ok('/'),
-        b'b' => Ok('\u{8}'),
-        b'f' => Ok('\u{c}'),
-        b'n' => Ok('\n'),
-        b'r' => Ok('\r'),
-        b't' => Ok('\t'),
-        b'u' => unescape_hex(bytes, at),
-        _ => Err(format!("an unknown escape at byte {}", *at - 1)),
-    }
-}
-
-// Sample input: the four hex digits after \u, as in é; a lone surrogate becomes the replacement character.
-fn unescape_hex(bytes: &[u8], at: &mut usize) -> Result<char, String> {
-    let end = *at + 4;
-    let digits = bytes.get(*at..end).ok_or_else(|| "a short \\u escape".to_string())?;
-    let text = std::str::from_utf8(digits).map_err(|_| "a \\u escape that is not hex".to_string())?;
-    let point = u32::from_str_radix(text, 16).map_err(|_| format!("a \\u escape that is not hex at byte {}", at))?;
-    *at = end;
-    Ok(char::from_u32(point).unwrap_or(char::REPLACEMENT_CHARACTER))
-}
-
-// Sample input: -12, 0, 192, 1.0, 1.5e-3; the literal is kept as written and only checked for shape.
+// Sample input: -12, 0, 192, 1.0, 1.5e-3; the literal is kept as written, and checked for JSON's
+// own shape and a finite value rather than rewritten into a canonical one.
 fn parse_number(bytes: &[u8], at: &mut usize) -> Result<Json, String> {
     let start = *at;
-    // Rust's own f64 parse takes a leading plus and JSON does not, and the literal is written back
-    // verbatim, so accepting one here would put a value in the file that this cannot read again.
-    match bytes.get(start) {
-        Some(b'-') => {}
-        Some(b) if b.is_ascii_digit() => {}
-        _ => return Err(format!("a value that is not JSON at byte {}", start)),
-    }
     while let Some(&b) = bytes.get(*at) {
         if b.is_ascii_digit() || matches!(b, b'-' | b'+' | b'.' | b'e' | b'E') {
             *at += 1;
@@ -279,10 +221,53 @@ fn parse_number(bytes: &[u8], at: &mut usize) -> Result<Json, String> {
         break;
     }
     let text = std::str::from_utf8(&bytes[start..*at]).map_err(|_| format!("a number that is not UTF-8 at byte {}", start))?;
+    // Rust's own f64 parse takes a leading plus, a leading zero, a bare fraction and a trailing dot
+    // where JSON takes none of them, and the literal is written back verbatim, so one accepted here
+    // would put a value in the file that this cannot read again.
+    if !is_json_number(text) {
+        return Err(format!("a value that is not JSON at byte {}", start));
+    }
+    // The shape is JSON's and the parse is the magnitude: 1e400 is a JSON number and no finite f64.
     match text.parse::<f64>() {
         Ok(n) if n.is_finite() => Ok(Json::Num(text.to_string())),
         _ => Err(format!("a value that is not JSON at byte {}", start)),
     }
+}
+
+// JSON's whole number grammar: -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)? and nothing else.
+fn is_json_number(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut at = if bytes.first() == Some(&b'-') { 1 } else { 0 };
+    let int_end = digit_run(bytes, at);
+    // A leading zero is a whole integer part on its own, so 0192 is Rust's 192 and is not JSON at all.
+    if int_end == at || (int_end > at + 1 && bytes[at] == b'0') {
+        return false;
+    }
+    at = int_end;
+    if bytes.get(at) == Some(&b'.') {
+        let frac_end = digit_run(bytes, at + 1);
+        if frac_end == at + 1 {
+            return false;
+        }
+        at = frac_end;
+    }
+    if !matches!(bytes.get(at), Some(b'e' | b'E')) {
+        return at == bytes.len();
+    }
+    at += 1;
+    if matches!(bytes.get(at), Some(b'+' | b'-')) {
+        at += 1;
+    }
+    let exp_end = digit_run(bytes, at);
+    exp_end > at && exp_end == bytes.len()
+}
+
+// The end of the run of ASCII digits at `at`, which is `at` itself when there is no digit there.
+fn digit_run(bytes: &[u8], mut at: usize) -> usize {
+    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+        at += 1;
+    }
+    at
 }
 
 #[cfg(test)]
@@ -309,6 +294,24 @@ mod tests {
         assert_eq!(render(&v), "{\n  \"width\": 192,\n  \"opacity\": 1.0\n}\n");
     }
 
+    // Rust's f64 parse takes literals JSON does not, and Json::Num keeps the literal, so render
+    // writes it straight back and the window's own JSON.parse refuses the file the settle wrote.
+    #[test]
+    fn a_number_only_rust_takes_is_refused_rather_than_written_back() {
+        let mut written_back = Vec::new();
+        for bad in ["1.", "1.e5", "5.e3", "0192", "-0192", "01", "00", "-.5", "+1", ".5", "1e", "0x1"] {
+            let doc = format!("{{\"a\":{}}}", bad);
+            if let Ok(v) = parse(&doc) {
+                written_back.push(format!("{} -> {}", bad, render(&v).replace('\n', "")));
+            }
+        }
+        assert!(written_back.is_empty(), "written back verbatim: {:?}", written_back);
+        for good in ["0", "-0", "192", "-12", "1.0", "0.5", "1e5", "1E5", "1e+5", "1.5e-3"] {
+            let v = parse(&format!("{{\"a\":{}}}", good)).unwrap_or_else(|e| panic!("{} must parse: {}", good, e));
+            assert_eq!(render(&v), format!("{{\n  \"a\": {}\n}}\n", good), "the literal is written back as it was read");
+        }
+    }
+
     #[test]
     fn strings_survive_a_round_trip_with_every_escape_in_them() {
         let v = parse(r#"{"k":"a\"b\\c\nd\teAé\/f"}"#).expect("parse");
@@ -316,11 +319,37 @@ mod tests {
         assert_eq!(parse(&render(&v)).expect("reparse"), v);
     }
 
+    // The whole sentence, not is_err(): a message that names no byte, or names the wrong one, is
+    // what this test's own name promises against and it could not see either before.
     #[test]
-    fn malformed_input_is_an_error_naming_where_it_stopped() {
-        for bad in ["", "{", "{\"a\"}", "{\"a\":}", "[1,]", "tru", "{\"a\":1}x", "\"unterminated",
-                    "{\"a\":+5}", "{\"a\":.5}", "{\"a\":1.2.3}", "{\"a\":inf}"] {
-            assert!(parse(bad).is_err(), "{} should not parse", bad);
+    fn malformed_input_is_an_error_naming_the_byte_it_is_about() {
+        for (bad, message) in [
+            ("", "the document ended before a value at byte 0"),
+            // Byte 0 is any format string's own default, so the two messages this branch added
+            // are each pinned at a nonzero offset as well.
+            ("{\"a\":", "the document ended before a value at byte 5"),
+            ("{", "a string was expected at byte 1"),
+            ("{\"a\"}", "a colon was expected at byte 4"),
+            ("{\"a\":}", "a value that is not JSON at byte 5"),
+            ("[1,]", "a value that is not JSON at byte 3"),
+            ("tru", "true expected at byte 0"),
+            ("{\"a\":1}x", "trailing text at byte 7"),
+            ("\"unterminated", "a string opened at byte 0 ran to the end of the document"),
+            ("{\"a\":\"unterminated", "a string opened at byte 5 ran to the end of the document"),
+            ("{\"a\":+5}", "a value that is not JSON at byte 5"),
+            ("{\"a\":.5}", "a value that is not JSON at byte 5"),
+            ("{\"a\":1.2.3}", "a value that is not JSON at byte 5"),
+            ("{\"a\":inf}", "a value that is not JSON at byte 5"),
+            ("{\"a\":\"\\q\"}", "an unknown escape at byte 7"),
+            ("{\"a\":\"\\u12\"}", "a \\u escape that is not hex at byte 8"),
+            // u32::from_str_radix takes a leading + and JSON takes no sign at all, so "\u+041"
+            // decoded to 'A' and a settle could write back what the window's JSON.parse refuses.
+            ("{\"a\":\"\\u+041\"}", "a \\u escape that is not hex at byte 8"),
+            ("{\"a\":\"\\u\u{20ac}\u{20ac}\"}", "a \\u escape that is not hex at byte 8"),
+            ("{\"a\":\"\\u12", "a short \\u escape at byte 8"),
+            ("{\"a\":\"\\", "an escape ran off the end at byte 7"),
+        ] {
+            assert_eq!(parse(bad).expect_err("should not parse"), message, "{} stopped elsewhere", bad);
         }
     }
 

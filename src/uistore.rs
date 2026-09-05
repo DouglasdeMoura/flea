@@ -59,7 +59,11 @@ impl Store {
         if let Ok(text) = fs::read_to_string(&self.file) {
             return uistate::from_file(&text);
         }
-        // Only while ui.json is absent: once it exists it is the state file and 0.1.3's is never read again.
+        // A ui.json that is there is the state file even when its bytes cannot be read, so 0.1.3's
+        // view.json is read only while there is no ui.json at all.
+        if fs::symlink_metadata(&self.file).is_ok() {
+            return uischema::defaults();
+        }
         match fs::read_to_string(&self.legacy) {
             Ok(text) => uistate::from_view_json(&text),
             Err(_) => uischema::defaults(),
@@ -78,13 +82,36 @@ impl Store {
         Ok(next)
     }
 
-    // Once, before the window: 0.1.3's view.json becomes ui.json so the first paint reads the
-    // migrated columns instead of the shipped defaults. A file already here is never re-migrated.
-    pub fn migrate(&self) -> Result<(), String> {
-        if fs::symlink_metadata(&self.file).is_ok() || fs::symlink_metadata(&self.legacy).is_err() {
-            return Ok(());
+    // Before the window, because the window reads this file with its own FileView and applies no
+    // schema of its own: an empty patch rewrites a document this can read through the same per-key
+    // validation a patch gets, so a refused value cannot be what the first paint draws, while one it
+    // cannot read is left alone and reads as the full default shape on both sides. It is also where
+    // 0.1.3's view.json becomes ui.json, since read() falls back to it only while ui.json is absent.
+    pub fn settle(&self) -> Result<(), String> {
+        match fs::symlink_metadata(&self.file) {
+            Ok(here) if here.file_type().is_file() && self.left_as_it_is() => Ok(()),
+            Ok(_) => self.update(&Json::Obj(Vec::new())).map(|_| ()),
+            // A first run with neither file writes nothing, the way a first run always has.
+            Err(_) if fs::symlink_metadata(&self.legacy).is_err() => Ok(()),
+            Err(_) => self.update(&Json::Obj(Vec::new())).map(|_| ()),
         }
-        self.update(&Json::Obj(Vec::new())).map(|_| ())
+    }
+
+    // Whether this launch's settle leaves ui.json exactly as it is rather than rewriting it.
+    fn left_as_it_is(&self) -> bool {
+        match fs::read_to_string(&self.file) {
+            Ok(text) => match jsondoc::parse(&text) {
+                // A rewrite that would change nothing is not worth the launch: the lock, the temp, the
+                // sync_all and the rename measured 6.7 to 18.6 ms a launch here, against 1.3 to 1.7 for one
+                // that only reads.
+                Ok(found) if found.as_object().is_some() => text == jsondoc::render(&uistate::from_file(&text)),
+                // A settle rewrite would spend the only copy of whatever the operator wrote and close
+                // nothing, because both front ends already read this file as the full default shape.
+                // The settle alone: update() reads those same defaults and does write them back over it.
+                _ => true,
+            },
+            Err(_) => true,
+        }
     }
 
     // AGENTS.md "Predictable path writes": unlink this pid's own leftover, create exclusively, rename last.
@@ -104,10 +131,13 @@ impl Store {
 }
 
 fn state_home() -> Result<PathBuf, String> {
-    match userfile::env_dir("XDG_STATE_HOME") {
-        Some(p) => Ok(p),
-        None => Ok(userfile::home()?.join(".local").join("state")),
-    }
+    Ok(state_dir(userfile::env_dir("XDG_STATE_HOME"), &userfile::home()?))
+}
+
+// The environment is read by the caller above and never here, so the rule can be tested without
+// mutating a process-wide variable that another test in this binary is reading at the same time.
+fn state_dir(from_env: Option<PathBuf>, home: &Path) -> PathBuf {
+    from_env.unwrap_or_else(|| home.join(".local").join("state"))
 }
 
 fn make_dir(dir: &Path) -> Result<(), String> {
@@ -216,21 +246,44 @@ mod tests {
     fn the_migration_runs_once_and_only_when_there_is_something_to_migrate() {
         let d = TestDir::new("uistore-migrate-once");
         let s = store(&d);
-        s.migrate().expect("nothing to migrate");
+        s.settle().expect("nothing to migrate");
         assert!(!s.file().exists(), "no view.json means no state file is seeded");
         fs::create_dir_all(d.join("config").join("flea")).expect("config dir");
         fs::write(s.legacy(), r#"{"hiddenCols":["kind"],"uiScale":1.4}"#).expect("write");
-        s.migrate().expect("migrate");
+        s.settle().expect("migrate");
         let migrated = s.read();
         let cols: Vec<&str> = migrated.get("columns").and_then(Json::as_array).expect("columns").iter().filter_map(Json::as_str).collect();
         assert_eq!(cols, ["name", "mode", "size", "date"]);
         assert!(!fs::read_to_string(s.file()).expect("state file").contains("uiScale"));
         // A second run must not re-derive over what the user has since changed.
         s.update(&patch(r#"{"columns":["name"]}"#)).expect("user change");
-        s.migrate().expect("second migrate");
+        s.settle().expect("second settle");
         let after = s.read();
         let kept: Vec<&str> = after.get("columns").and_then(Json::as_array).expect("columns").iter().filter_map(Json::as_str).collect();
-        assert_eq!(kept, ["name"], "the second migrate must be a no-op");
+        assert_eq!(kept, ["name"], "the second settle must not re-derive from view.json");
+    }
+
+    // The window applies no schema of its own, so what settle leaves on disk is what the first paint
+    // reads: a value this Flea refuses has to be gone before the FileView ever sees it.
+    #[test]
+    fn a_settle_rewrites_a_refused_value_out_of_the_file_and_keeps_its_neighbours() {
+        let d = TestDir::new("uistore-settle");
+        let s = store(&d);
+        fs::create_dir_all(d.join("state").join("flea")).expect("state dir");
+        fs::write(s.file(), r#"{"columns":["name","size","owner"],"density":"compact","fromANewerFlea":{"a":1}}"#).expect("write");
+        s.settle().expect("settle");
+        let body = fs::read_to_string(s.file()).expect("read back");
+        assert!(!body.contains("owner"), "the refused column must not survive the settle: {}", body);
+        let stored = jsondoc::parse(&body).expect("valid JSON on disk");
+        let cols: Vec<&str> = stored.get("columns").and_then(Json::as_array).expect("columns").iter().filter_map(Json::as_str).collect();
+        assert_eq!(cols, ["name", "size", "date"], "the refused array falls back to the shipped one");
+        assert_eq!(stored.get("density").and_then(Json::as_str), Some("compact"), "a good key beside it stands");
+        assert!(stored.get("fromANewerFlea").is_some(), "a newer Flea's own key still survives");
+        let settled = fs::read_to_string(s.file()).expect("settled");
+        let ino = fs::metadata(s.file()).expect("meta").ino();
+        s.settle().expect("second settle");
+        assert_eq!(fs::read_to_string(s.file()).expect("again"), settled, "a settled file settles to itself");
+        assert_eq!(fs::metadata(s.file()).expect("meta").ino(), ino, "and is not rewritten to say so");
     }
 
     #[test]
@@ -326,20 +379,16 @@ mod tests {
         assert!(fs::read_to_string(s.file()).expect("after").contains("\"columns\""));
     }
 
-    // One test, because the variables are process wide and cargo runs tests in threads.
+    // No environment at all: XDG_CONFIG_HOME and XDG_STATE_HOME are process wide, cargo runs tests
+    // in threads, and src/userfile.rs already owns the one test that mutates XDG_CONFIG_HOME.
     #[test]
-    fn the_paths_follow_xdg_state_home_and_xdg_config_home() {
-        std::env::set_var("XDG_STATE_HOME", "/tmp/flea-test-state");
-        std::env::set_var("XDG_CONFIG_HOME", "/tmp/flea-test-config");
-        let s = Store::user().expect("store");
-        assert_eq!(s.file(), std::path::Path::new("/tmp/flea-test-state/flea/ui.json"));
-        assert_eq!(s.lock_file(), std::path::Path::new("/tmp/flea-test-state/flea/ui.json.lock"));
-        assert_eq!(s.legacy(), std::path::Path::new("/tmp/flea-test-config/flea/view.json"));
-        std::env::set_var("XDG_STATE_HOME", "");
-        std::env::remove_var("XDG_CONFIG_HOME");
-        let home = std::env::var("HOME").expect("HOME");
-        let fallback = Store::user().expect("store");
-        assert_eq!(fallback.file(), std::path::Path::new(&home).join(".local/state/flea/ui.json"));
-        std::env::remove_var("XDG_STATE_HOME");
+    fn the_paths_hang_off_the_state_home_and_the_config_home() {
+        let home = PathBuf::from("/home/nobody");
+        assert_eq!(state_dir(Some(PathBuf::from("/tmp/flea-test-state")), &home), PathBuf::from("/tmp/flea-test-state"));
+        assert_eq!(state_dir(None, &home), PathBuf::from("/home/nobody/.local/state"));
+        let s = Store::at(&state_dir(None, &home), Path::new("/tmp/flea-test-config"));
+        assert_eq!(s.file(), Path::new("/home/nobody/.local/state/flea/ui.json"));
+        assert_eq!(s.lock_file(), Path::new("/home/nobody/.local/state/flea/ui.json.lock"));
+        assert_eq!(s.legacy(), Path::new("/tmp/flea-test-config/flea/view.json"));
     }
 }

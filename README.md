@@ -543,6 +543,9 @@ cargo test                    # unit tests
 ./tests/archive.sh            # archive listing, extract and compress
 ./tests/thumbs.sh             # the release binary against the media fixture
 ./tests/sandbox.sh            # the thumbnail jail and its refusals
+./tests/uistate.sh            # ui.json: the lock, the settle, the migration and a SIGKILL sweep
+./tests/uiwriter.sh           # ViewState's writer under a headless Quickshell
+./tests/charts.sh             # the README's own tables against the bench CSV
 ./tests/ui.sh                 # drives the real window
 ./tests/drag.sh               # the internal drag, through a real pointer on uinput
 ./tests/bench.sh              # the field bench harness itself
@@ -557,7 +560,7 @@ FLEA_PACKAGE_FILE=/path/to/flea.pkg.tar.zst ./tests/package.sh # real makepkg ar
 ```
 
 `./tests/run-all.sh` is the main headless command. It builds both cargo profiles, because
-`protocol.sh` drives the debug binary and `thumbs.sh` the release one, runs thirteen suites, and
+`protocol.sh` drives the debug binary and `thumbs.sh` the release one, runs every suite that needs nothing but a shell, and
 reads each suite's own exit code rather than a pipeline's. It then names `ui.sh`, `drag.sh`,
 `bench.sh` and `package.sh` and says what each needs: a display, a real pointer, an idle box, or a
 real makepkg archive. There is no CI, and `PKGBUILD`'s `check()` runs `cargo test` alone.

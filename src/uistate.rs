@@ -1,7 +1,7 @@
 // The ui.json merges with no disk in them: read a file onto the defaults, apply one caller patch,
 // and carry 0.1.3's view.json across.
 use crate::jsondoc::{self, Json};
-use crate::uischema::{defaults, Rule, OPTIONAL_COLUMNS, SCHEMA, TEXT_SIZE_STOPS};
+use crate::uischema::{defaults, Rule, COLUMN_KEYS, OPTIONAL_COLUMNS, SCHEMA, TEXT_SIZE_STOPS};
 
 // Never fails: a file this cannot read is a file whose every key falls back to the shipped default.
 pub fn from_file(text: &str) -> Json {
@@ -118,8 +118,13 @@ fn fits(rule: &Rule, value: &Json) -> bool {
     match rule {
         Rule::Bool => value.as_bool().is_some(),
         Rule::Word(words) => value.as_str().map(|s| words.contains(&s)).unwrap_or(false),
-        Rule::Words(words) => every_string(value, |s| words.contains(&s)),
+        Rule::Columns => is_column_set(value),
         Rule::Paths => every_string(value, |s| !s.is_empty()),
+        // Handoff 5a stores the two panes or nothing, so a third path is a shape no restore can read.
+        Rule::Pair => match value.as_array() {
+            Some(items) => (items.is_empty() || items.len() == 2) && every_string(value, is_a_place),
+            None => false,
+        },
         Rule::Ids => every_string(value, is_action_id),
         Rule::Count(low, high) => match value.as_f64() {
             Some(n) => n.fract() == 0.0 && n >= *low && n <= *high,
@@ -141,9 +146,32 @@ fn every_string(value: &Json, ok: impl Fn(&str) -> bool) -> bool {
     }
 }
 
-// An action id is what tools/flea-keymap-gen emits, so it is lower case letters and nothing else.
+// The list row's own set. uischema's columns row says name is never optional and ui/js/Columns.js
+// draws it whatever this holds, so every entry is a column key, each of them once, and name is one.
+fn is_column_set(value: &Json) -> bool {
+    let items = match value.as_array() {
+        Some(items) => items,
+        None => return false,
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    for item in items {
+        match item.as_str() {
+            Some(key) if COLUMN_KEYS.contains(&key) && !seen.contains(&key) => seen.push(key),
+            _ => return false,
+        }
+    }
+    seen.contains(&"name")
+}
+
+// An action id is one of keys.toml's own, and 32 of its 48 are camelCase, so this is the shape of
+// an identifier rather than a case: ASCII letters, digits, hyphen and underscore, and nothing else.
 fn is_action_id(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase())
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+// A remembered pane is somewhere the restore can list: an absolute path, or a URI naming its root.
+fn is_a_place(s: &str) -> bool {
+    s.starts_with('/') || s.contains("://")
 }
 
 // One elided line for an error sentence, never the whole pretty document. Counted in characters,
@@ -249,6 +277,74 @@ mod tests {
             assert!(message.contains(named), "{} should name {}, got {}", patch, named, message);
         }
         assert!(patched(&current, &Json::Str("nope".to_string())).is_err());
+    }
+
+    // Handoff section 5a: "dual": { "paths": [left, right], "focus": 0 }, and an empty array means
+    // no dual-pane locations have been remembered. Three paths is a shape the restore cannot read.
+    #[test]
+    fn dual_paths_is_two_places_or_none_and_never_a_relative_name() {
+        let current = from_file("{}");
+        for good in [r#"{"dual":{"paths":[]}}"#, r#"{"dual":{"paths":["/home/gm","/tmp"]}}"#,
+                     r#"{"dual":{"paths":["smb://nas/share","/run/user/1000/gvfs/x"]}}"#] {
+            let p = jsondoc::parse(good).expect("patch parses");
+            assert!(patched(&current, &p).is_ok(), "{} is the shape 5a specifies", good);
+        }
+        for bad in [r#"{"dual":{"paths":["..","x","y"]}}"#, r#"{"dual":{"paths":["/home/gm"]}}"#,
+                    r#"{"dual":{"paths":["..","x"]}}"#, r#"{"dual":{"paths":["/home/gm",""]}}"#] {
+            let p = jsondoc::parse(bad).expect("patch parses");
+            let message = patched(&current, &p).expect_err("the patch must be refused");
+            assert!(message.contains("dual.paths"), "{} should name dual.paths, got {}", bad, message);
+        }
+        // A file carrying the wrong shape costs that key alone and the pair beside it still stands.
+        let read = from_file(r#"{"dual":{"paths":["..","x","y"],"focus":1}}"#);
+        assert_eq!(read.get("dual").and_then(|d| d.get("paths")).and_then(Json::as_array).map(<[Json]>::len), Some(0));
+        assert_eq!(read.get("dual").and_then(|d| d.get("focus")).and_then(Json::as_f64), Some(1.0));
+        // places.favourites keeps the loose rule, because handoff section 4 says a gvfs URI is one.
+        let fav = jsondoc::parse(r#"{"places":{"favourites":["/a","/b","/c"]}}"#).expect("patch parses");
+        assert!(patched(&current, &fav).is_ok(), "a favourites list is any length");
+    }
+
+    // keys.toml holds 48 unique action ids and 32 of them are camelCase, so a hideable row named
+    // like one of those has to survive a read rather than take the whole array down with it.
+    #[test]
+    fn a_camel_case_action_id_is_a_menu_row_this_flea_can_keep_hidden() {
+        let merged = from_file(r#"{"menu":{"hidden":["delete","newFolder","copy-path","copy_path"]}}"#);
+        let hidden: Vec<&str> = merged
+            .get("menu").and_then(|m| m.get("hidden")).and_then(Json::as_array).expect("menu.hidden")
+            .iter().filter_map(Json::as_str).collect();
+        assert_eq!(hidden, ["delete", "newFolder", "copy-path", "copy_path"]);
+        // Still bounded: anything that is not an id costs the key its own default, as it always did.
+        for bad in [r#"{"menu":{"hidden":["delete","rm -rf /"]}}"#, r#"{"menu":{"hidden":["delete",""]}}"#,
+                    r#"{"menu":{"hidden":["delete","a/b"]}}"#, r#"{"menu":{"hidden":["delete",1]}}"#] {
+            let read = from_file(bad);
+            let fell_back = read
+                .get("menu").and_then(|m| m.get("hidden")).and_then(Json::as_array).expect("menu.hidden");
+            assert_eq!(fell_back.len(), 8, "{} must cost the key its own default", bad);
+        }
+    }
+
+    // Measured through the real singleton: seeded ["name","size","size","date"], one header-menu
+    // "Hide Size" click left the drawn set at name,size,date, so a duplicate costs the user a click.
+    #[test]
+    fn a_columns_array_holds_each_key_once_and_always_name() {
+        let current = from_file("{}");
+        for good in [r#"{"columns":["name"]}"#, r#"{"columns":["name","size","date"]}"#,
+                     r#"{"columns":["kind","name","mode","size","date"]}"#] {
+            let p = jsondoc::parse(good).expect("patch parses");
+            assert!(patched(&current, &p).is_ok(), "{} is a column set", good);
+        }
+        for bad in [r#"{"columns":[]}"#, r#"{"columns":["size","date"]}"#, r#"{"columns":["name","name"]}"#,
+                    r#"{"columns":["name","size","size"]}"#, r#"{"columns":["name","owner"]}"#,
+                    r#"{"columns":"name"}"#, r#"{"columns":["name",1]}"#] {
+            let p = jsondoc::parse(bad).expect("patch parses");
+            let message = patched(&current, &p).expect_err("the patch must be refused");
+            assert!(message.contains("columns"), "{} should name columns, got {}", bad, message);
+        }
+        // A file carrying one costs that key its own default, and the key beside it still stands.
+        let read = from_file(r#"{"columns":["size","size"],"density":"compact"}"#);
+        let cols: Vec<&str> = read.get("columns").and_then(Json::as_array).expect("columns").iter().filter_map(Json::as_str).collect();
+        assert_eq!(cols, ["name", "size", "date"]);
+        assert_eq!(read.get("density").and_then(Json::as_str), Some("compact"));
     }
 
     // hiddenCols named what was hidden; columns names what is shown, so the migration inverts it.
