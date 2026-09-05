@@ -423,8 +423,14 @@ opening a window; it exists so the resolution is testable without a display.
 Run the development UI directly, bypassing the launcher, from the repository root:
 
 ```bash
-FLEA_PATH="$HOME" FLEA_BIN="$PWD/target/release/flea" qs -p "$PWD/ui"
+QSG_RHI_BACKEND=vulkan FLEA_PATH="$HOME" FLEA_BIN="$PWD/target/release/flea" qs -p "$PWD/ui"
 ```
+
+`flea --gui` picks the renderer in `src/gui.rs`, so a direct `qs` launch has to name one itself;
+without it Qt takes its own default. It is still not the launcher's window: `src/gui.rs` also sets
+`FLEA_RENDERER_AUTOMATIC=1` on that implicit choice, which is what arms the one OpenGL retry in
+`ui/shell.qml`, and the line above deliberately leaves it unset so a scene-graph failure ends the
+dev loop instead of detaching a second process behind it.
 
 The backend protocol is newline-delimited JSON over the child process's stdin and stdout;
 its exact wire shape is documented in [`docs/protocol.md`](docs/protocol.md).

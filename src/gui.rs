@@ -1,4 +1,5 @@
 use crate::thp;
+use crate::vulkan;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
@@ -7,6 +8,23 @@ use std::process::Command;
 pub fn exec_qs(ui: &Path, start: Option<&str>, select: Option<&str>) -> i32 {
     let mut cmd = Command::new("qs");
     cmd.arg("-p").arg(ui);
+    if let Ok(binary) = std::env::current_exe() {
+        cmd.env("FLEA_BIN", binary);
+    }
+    // Empty is absent, the rule paths::has_display() applies: a wrapper's unset variable is not a choice.
+    if std::env::var_os("QSG_RHI_BACKEND").is_some_and(|value| !value.is_empty()) {
+        // An explicit choice is the operator's, so it is neither replaced nor offered a retry.
+        cmd.env_remove("FLEA_RENDERER_AUTOMATIC");
+    } else if let Err(reason) = vulkan::usable() {
+        // A silent downgrade hides a 2.4x memory regression, so the reason the probe found is said once.
+        eprintln!("flea: Vulkan is unusable, {reason}, so the shell starts on OpenGL");
+        cmd.env("QSG_RHI_BACKEND", "opengl");
+        cmd.env_remove("FLEA_RENDERER_AUTOMATIC");
+    } else {
+        // Vulkan is the measured fast path, and the marker is what permits the QML arm its one retry.
+        cmd.env("QSG_RHI_BACKEND", "vulkan");
+        cmd.env("FLEA_RENDERER_AUTOMATIC", "1");
+    }
     if let Some(path) = start {
         cmd.env("FLEA_PATH", path);
     }

@@ -16,6 +16,7 @@ mod uischema;
 mod uistate;
 mod uistore;
 mod userfile;
+mod vulkan;
 
 use crate::backend::proto::error_line;
 use std::io::IsTerminal;

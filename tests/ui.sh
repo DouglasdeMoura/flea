@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives the real Quickshell window with omarchy-drive and asserts through the read-only IPC seam.
-# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal ...]; networklive is opt-in.
+# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal|renderer ...]; networklive is opt-in.
 set -u
 set -o pipefail
 # Hard rule 9's guard, which owns FIXTURE_ROOT and every create and delete this suite makes.
@@ -332,7 +332,8 @@ launch() {
     kill_flea
     cat "$flea_log" >> "$run_log" 2>/dev/null || true
     : > "$flea_log"
-    FLEA_PATH="$start_path" FLEA_BIN="$flea_bin" \
+    # The renderer is stated because src/gui.rs owns that choice and a direct qs launch never runs it.
+    QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" FLEA_PATH="$start_path" FLEA_BIN="$flea_bin" \
         setsid nohup qs -p "$flea_ui" >"$flea_log" 2>&1 </dev/null &
     omarchy-drive wait window flea --timeout 15 >/dev/null
     omarchy-drive focus flea >/dev/null
@@ -1481,7 +1482,8 @@ case_select() {
     kill_flea
     cat "$flea_log" >> "$run_log" 2>/dev/null || true
     : > "$flea_log"
-    FLEA_PATH="$dir" FLEA_SELECT="$dir/b.txt" FLEA_BIN="$flea_bin" \
+    # The renderer is stated because src/gui.rs owns that choice and a direct qs launch never runs it.
+    QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" FLEA_PATH="$dir" FLEA_SELECT="$dir/b.txt" FLEA_BIN="$flea_bin" \
         setsid nohup qs -p "$flea_ui" >"$flea_log" 2>&1 </dev/null &
     omarchy-drive wait window flea --timeout 15 >/dev/null
     omarchy-drive focus flea >/dev/null
@@ -1498,7 +1500,8 @@ case_select() {
     kill_flea
     cat "$flea_log" >> "$run_log" 2>/dev/null || true
     : > "$flea_log"
-    FLEA_PATH="$dir" FLEA_SELECT="$dir/does-not-exist.txt" FLEA_BIN="$flea_bin" \
+    # The renderer is stated because src/gui.rs owns that choice and a direct qs launch never runs it.
+    QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" FLEA_PATH="$dir" FLEA_SELECT="$dir/does-not-exist.txt" FLEA_BIN="$flea_bin" \
         setsid nohup qs -p "$flea_ui" >"$flea_log" 2>&1 </dev/null &
     omarchy-drive wait window flea --timeout 15 >/dev/null
     omarchy-drive focus flea >/dev/null
@@ -2307,6 +2310,38 @@ case_tabs() {
     shot tabs-two
     printf 'TABS count=%s index=%s labels=%s\n' "$(ipc tabCount)" "$(ipc tabIndex)" "$(ipc tabLabels)"
     kill_flea
+}
+
+# The one scene-graph failure found to be raisable here: Qt's GL backend with no EGL vendor file to load.
+case_renderer() {
+    kill_flea
+    local dir="$fixture_root/renderer"
+    sandbox_scratch "$dir"
+    local log="$dir/shell.log"
+    local relaunched="$dir/relaunch.log"
+    : > "$relaunched"
+    printf '#!/bin/sh\nprintf "RAN %%s\\n" "$*" >> %q\n' "$relaunched" > "$dir/flea-stub"
+    chmod +x "$dir/flea-stub"
+    # The marker is set, so the renderer's own name is the only thing standing between this and a retry.
+    env QSG_RHI_BACKEND=opengl FLEA_RENDERER_AUTOMATIC=1 \
+        __EGL_VENDOR_LIBRARY_FILENAMES="$dir/no-such-egl-vendor.json" \
+        FLEA_PATH="$dir" FLEA_BIN="$dir/flea-stub" \
+        setsid nohup qs -p "$flea_ui" > "$log" 2>&1 </dev/null &
+    local waited
+    for waited in $(seq 1 200); do
+        grep -aq 'graphics backend opengl failed' "$log" && break
+        sleep 0.1
+    done
+    kill_flea
+    printf 'RENDERER ran=%q\n' "$(tr '\n' ' ' < "$relaunched")"
+    grep -aq 'graphics backend opengl failed' "$log" \
+        || fail "no scene-graph error reached ui/shell.qml, so its Connections never held the window"
+    # The denominator: with no stub run at all, the count of retries below would be zero for free.
+    local ran retried
+    ran=$(grep -c -- '--backend' "$relaunched" || true)
+    [[ "$ran" != "0" ]] || fail "the stub Flea was never run, so no retry could have been recorded either"
+    retried=$(grep -c -- '--gui' "$relaunched" || true)
+    [[ "$retried" == "0" ]] || fail "the retry fired for a renderer the operator named: $(cat "$relaunched")"
 }
 
 # Catches Space not opening a preview, the kind dispatch misclassifying a row, or the size gate not firing.
@@ -4255,7 +4290,8 @@ EOS
     kill_flea
     cat "$flea_log" >> "$run_log" 2>/dev/null || true
     : > "$flea_log"
-    PATH="$stub_bin" FLEA_PATH="$dir" FLEA_BIN="$flea_bin" \
+    # The renderer is stated because src/gui.rs owns that choice and a direct qs launch never runs it.
+    QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" PATH="$stub_bin" FLEA_PATH="$dir" FLEA_BIN="$flea_bin" \
         setsid nohup qs -p "$flea_ui" >"$flea_log" 2>&1 </dev/null &
     omarchy-drive wait window flea --timeout 15 >/dev/null
     omarchy-drive focus flea >/dev/null
@@ -4378,7 +4414,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer)
 
 : > "$run_log"
 : > "$flea_log"

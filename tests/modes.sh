@@ -6,6 +6,10 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 BIN=./target/debug/flea
+# current_exe() answers with the kernel's own resolved path, so the expectation is resolved the same way.
+BIN_REAL=$(readlink -f "$BIN")
+# An operator exporting any of these would answer for src/gui.rs, which is the thing under test here.
+unset QSG_RHI_BACKEND FLEA_RENDERER_AUTOMATIC VK_DRIVER_FILES VK_ICD_FILENAMES
 fail=0
 
 check() {
@@ -91,15 +95,76 @@ rc=$?
 check "--tui --gui is a usage error" "2" "$rc"
 check "--tui --gui names the conflict" "1" "$(echo "$out" | grep -c 'mutually exclusive')"
 
-# The prctl has to survive exec, so a stub qs reports the kernel's own view of the launched child.
+# The prctl and renderer choice have to survive exec, so a stub qs reports the launched child.
 D="$FIXTURE_ROOT/flea-thp-test-$$"
 sandbox_make "$D"
-printf '#!/bin/sh\ngrep -i "^THP_enabled" /proc/self/status\n' > "$D/qs"
+# One stub reports everything the launch has to carry across exec, huge pages and target included.
+cat > "$D/qs" <<'STUB'
+#!/bin/sh
+grep -i "^THP_enabled" /proc/self/status
+printf 'FLEA_BIN %s\n' "$FLEA_BIN"
+printf 'RENDERER %s\n' "$QSG_RHI_BACKEND"
+printf 'AUTOMATIC %s\n' "${FLEA_RENDERER_AUTOMATIC-unset}"
+printf 'ARGV %s\n' "$*"
+printf 'FLEA_PATH %s\n' "${FLEA_PATH-unset}"
+printf 'FLEA_SELECT %s\n' "${FLEA_SELECT-unset}"
+STUB
 chmod +x "$D/qs"
-out=$(env WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
+out=$(env FLEA_BIN=stale WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
 check "the launched shell has transparent huge pages off" "1" \
   "$(echo "$out" | grep -c 'THP_enabled:[[:space:]]*0')"
 check "the launched shell reported its THP state at all" "1" "$(echo "$out" | grep -c 'THP_enabled')"
+check "the launched shell uses this Flea binary" "FLEA_BIN $BIN_REAL" \
+  "$(echo "$out" | grep '^FLEA_BIN ')"
+check "the automatic renderer starts with Vulkan" "1" "$(echo "$out" | grep -c '^RENDERER vulkan$')"
+check "the automatic renderer permits one fallback" "1" "$(echo "$out" | grep -c '^AUTOMATIC 1$')"
+# The downgrade below says why, so its silence here is what proves this arm took the probe's other branch.
+check "a loader that can deliver Vulkan says nothing" "0" "$(echo "$out" | grep -c 'Vulkan is unusable')"
+out=$(env QSG_RHI_BACKEND=opengl FLEA_RENDERER_AUTOMATIC=stale WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
+check "an explicit renderer is preserved" "1" "$(echo "$out" | grep -c '^RENDERER opengl$')"
+check "an explicit renderer cannot trigger fallback" "1" "$(echo "$out" | grep -c '^AUTOMATIC unset$')"
+# An exported-but-empty renderer is a wrapper script's unset variable, absent as WAYLAND_DISPLAY is.
+out=$(env QSG_RHI_BACKEND= WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
+check "an empty renderer is absent, not a choice" "1" "$(echo "$out" | grep -c '^RENDERER vulkan$')"
+check "and an empty renderer still permits the one fallback" "1" "$(echo "$out" | grep -c '^AUTOMATIC 1$')"
+
+# Issue #14: a loader that cannot build an instance kills the shell before it can raise a scene-graph error.
+out=$(env VK_DRIVER_FILES=/nonexistent-flea-icd VK_ICD_FILENAMES=/nonexistent-flea-icd \
+  WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
+check "an unusable Vulkan loader launches the shell on OpenGL" "1" "$(echo "$out" | grep -c '^RENDERER opengl$')"
+check "and OpenGL is marked as final, since it has nowhere left to fall" "1" "$(echo "$out" | grep -c '^AUTOMATIC unset$')"
+# Only the probe's own branch prints this, so the pair above cannot come from an explicit renderer.
+check "and the operator is told which call refused" "1" \
+  "$(echo "$out" | grep -c 'flea: Vulkan is unusable, vkCreateInstance answered ')"
+check "and the sentence names the extensions it asked for" "1" "$(echo "$out" | grep -c 'VK_KHR_surface')"
+check "and it is said once, not dumped" "1" "$(echo "$out" | grep -c 'Vulkan is unusable')"
+
+# The operator's own choice is not a guess to be corrected, even when the loader cannot honour it.
+out=$(env VK_DRIVER_FILES=/nonexistent-flea-icd VK_ICD_FILENAMES=/nonexistent-flea-icd \
+  QSG_RHI_BACKEND=vulkan WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
+check "an explicit Vulkan survives an unusable loader" "1" "$(echo "$out" | grep -c '^RENDERER vulkan$')"
+check "and an explicit choice still marks no fallback" "1" "$(echo "$out" | grep -c '^AUTOMATIC unset$')"
+check "and the probe never ran, so nothing was said about it" "0" "$(echo "$out" | grep -c 'Vulkan is unusable')"
+
+# Nothing but the renderer may differ between the two arms, so both are launched on the same target.
+good=$(env WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" \
+  $BIN --gui --select /etc/hostname 2>&1 </dev/null)
+broken=$(env VK_DRIVER_FILES=/nonexistent-flea-icd VK_ICD_FILENAMES=/nonexistent-flea-icd \
+  WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" \
+  $BIN --gui --select /etc/hostname 2>&1 </dev/null)
+check "the working arm opens the selected file's directory" "FLEA_PATH /etc" "$(echo "$good" | grep '^FLEA_PATH ')"
+check "the working arm selects the file itself" "FLEA_SELECT /etc/hostname" "$(echo "$good" | grep '^FLEA_SELECT ')"
+check "the fallback arm opens the same directory" "$(echo "$good" | grep '^FLEA_PATH ')" "$(echo "$broken" | grep '^FLEA_PATH ')"
+check "the fallback arm selects the same file" "$(echo "$good" | grep '^FLEA_SELECT ')" "$(echo "$broken" | grep '^FLEA_SELECT ')"
+check "the fallback arm passes the same UI root" "$(echo "$good" | grep '^ARGV ')" "$(echo "$broken" | grep '^ARGV ')"
+check "and the fallback arm is the one that changed renderer" "1" "$(echo "$broken" | grep -c '^RENDERER opengl$')"
+check "and it is the only arm that reported a downgrade" "0" "$(echo "$good" | grep -c 'Vulkan is unusable')"
+
+# A launch with no FLEA_BIN in the environment is the ordinary one, and it must still name this binary.
+out=$(env -u FLEA_BIN WAYLAND_DISPLAY=flea-modes-test-display PATH="$D:/usr/bin:/bin" $BIN --gui 2>&1 </dev/null)
+check "an unset FLEA_BIN is derived from the running binary" "FLEA_BIN $BIN_REAL" \
+  "$(echo "$out" | grep '^FLEA_BIN ')"
+
 sandbox_remove "$D"
 
 # Sample input: let finished = Command::new("gio")

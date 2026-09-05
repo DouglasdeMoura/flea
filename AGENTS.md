@@ -33,12 +33,58 @@ this tree yet: `flea --tui` says so and exits 2.
    was rejected as slower and stale-capable; it remains disabled until the wire carries
    the requested path and a new measurement proves a real win.
 
-5. **Vulkan now, lazy multimedia later.** `ui/shell.qml` sets
-   `QSG_RHI_BACKEND=vulkan`, which costs 2.4x less memory than the OpenGL default and
-   initialises 35 ms faster, with identical frame timing. Preview and QtMultimedia
-   are now in the tree and the laziness held: `ui/PreviewMedia.qml` is the only file
-   that imports QtMultimedia, reached through a `Loader` built by the first press of
-   play, because QtMultimedia costs 20 MB before it plays anything.
+5. **Vulkan where the loader can deliver it, lazy multimedia later.** `src/gui.rs` sets
+   `QSG_RHI_BACKEND=vulkan` when the user did not choose a renderer and `src/vulkan.rs` has
+   created a throwaway instance and seen a device, which costs 2.4x less memory than the OpenGL
+   default and initialises 35 ms faster, with identical frame timing. A loader that cannot
+   deliver one is given `opengl` before `qs` starts at all, because Quickshell hands
+   `QRhi::create` a `QVulkanInstance` it never created and SIGSEGVs there rather than raising
+   the scene-graph error the QML arm listens for, issue #14 on a QEMU Virtio GPU. That downgrade
+   is not silent: `usable()` answers with the call or library that refused, and with the
+   extensions in the two arms that asked for them, and `src/gui.rs` prints that as one sentence
+   on stderr, because a 2.4x memory regression the operator cannot see is the defect and not the
+   report of it. The probe is `dlopen` plus `vkCreateInstance` plus `vkEnumeratePhysicalDevices`,
+   and it costs an implicit launch roughly 8 ms on this box, so about a quarter of that init
+   advantage is what buys the crash out; dropping the device count would save only 2 of those
+   milliseconds and would stop catching a loader that creates an instance and then lists nothing.
+   A scene-graph failure after launch still relaunches once with OpenGL and drains the failed
+   backend; an explicit `QSG_RHI_BACKEND` is never replaced, and
+   an exported-but-empty one is absent rather than a choice, the same rule `paths::has_display()`
+   applies. What the probe proves is exactly what it asks the loader for: an instance carrying
+   `VK_KHR_surface` and the session's own surface extension, `VK_KHR_wayland_surface` here and
+   `VK_KHR_xcb_surface` where only `DISPLAY` is set, plus a physical device. Those three names are
+   Qt's own: `libQt6Gui.so.6`, `libQt6XcbQpa.so.6` and `libQt6WaylandClient.so.6` here carry exactly
+   those and no other surface name. The request is not satisfiable without a driver either: with
+   every ICD hidden this loader enumerates 5 instance extensions and no surface one, and
+   `vkCreateInstance` answers `VK_ERROR_INCOMPATIBLE_DRIVER`. What it does not prove is that a
+   device can present, which an instance-level request cannot ask and this probe never does. The
+   cost is measured against a probe-free build of the same tree, 25 interleaved pairs of the whole
+   implicit launch to a stub `qs`, timed in microseconds: 10.6 to 11.6 ms with the probe against
+   2.6 to 3.2 ms without it, medians about 8 ms apart, so the probe is most of that launch rather
+   than a component hidden inside it. An earlier note here read 11 to 12 ms in both arms, which is
+   wrong: only the probe arm is near that, and a 1 ms instrument resolves this gap eight times over.
+   The retry arm is covered in two halves, because no whole of it can be driven here.
+   `ui/js/Renderer.js` is the decision and the argv, driven by `tests/js/renderer.js`; the signal
+   reaching that decision is driven by `tests/ui.sh renderer`, which starts Qt's GL backend with
+   no EGL vendor file to load. That is the one scene-graph failure found to be raisable on this
+   box: a broken Vulkan loader cannot stand in for it, because the shell dies first, which is the
+   whole of issue #14. Measured here with every ICD hidden, `qs` warns `No QVulkanInstance set for
+   QQuickWindow` and exits 255 without raising anything; the SIGSEGV is issue #14's own report on a
+   QEMU Virtio GPU. `view.Window.window` is null while `ui/shell.qml` loads and holds the
+   `QQuickWindow` once it exists, and that same `Connections` was measured receiving
+   `sceneGraphInitialized`, the signal Qt raises at the phase `sceneGraphError` replaces. What no
+   test reaches is the positive arm, a Vulkan failure leaving `QVulkanInstance` valid and failing
+   at `QRhi::create`, which no environment variable here was able to produce.
+   **`ui/shell.qml` no longer carries the `//@ pragma DefaultEnv QSG_RHI_BACKEND=vulkan`
+   line**, so `src/gui.rs` is the only thing that chooses a renderer for a launch, the one OpenGL
+   relaunch in `ui/shell.qml` aside, and a direct `qs -p ui` launch bypasses it entirely:
+   `tools/flea-first-paint`, `tools/flea-metrics-gate`, `tests/ui.sh`, `tests/drag.sh` and the
+   `README.md` dev loop each state `QSG_RHI_BACKEND` for themselves, so their numbers stay on the
+   Vulkan baseline they were recorded against.
+   `tools/flea-field-bench` needs none of that, because it launches `$FLEA_BIN --gui`.
+   Preview and QtMultimedia are now in the tree and the laziness held: `ui/PreviewMedia.qml`
+   is the only file that imports QtMultimedia, reached through a `Loader` built by the first
+   press of play, because QtMultimedia costs 20 MB before it plays anything.
 
 6. **A hidden view is not a free view.** `visible: false` does NOT stop a QML view doing
    model work: it keeps its geometry, stays bound to the listing, and pays per row. All
@@ -3542,8 +3588,9 @@ lucide glyph is therefore: square the corner arcs, keep the extents. One deliber
 change beyond corners: `music` note heads are squares, not circles, the set's brand tell
 (`file-text`'s three rules are lucide's own, restored with the body). The AE compare
 above no longer applies to recut marks (they differ from source on purpose); the gate is the
-montage eyeball plus a live `qs -p ui` look on the box (bench numbers still come from the
-launcher path, hard rule 7). `rsvg-convert` only
+montage eyeball plus a live `QSG_RHI_BACKEND=vulkan qs -p ui` look on the box, which names the
+renderer but not `FLEA_RENDERER_AUTOMATIC` and so leaves the QML fallback arm disarmed (bench
+numbers still come from the launcher path, hard rule 7). `rsvg-convert` only
 proves a `d` parses; librsvg renders through a bad tail and exits 0, so its exit status is
 not a gate.
 
