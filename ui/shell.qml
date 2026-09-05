@@ -32,6 +32,13 @@ ShellRoot {
             var rect = fleaWindow.itemRect(item)
             return Math.round(rect.x + rect.width / 2) + " " + Math.round(rect.y + rect.height / 2)
         }
+        // centreOf's sibling for a test that has to compare boxes and not only middles: "x width centre".
+        function boxOf(item) {
+            if (!item)
+                return ""
+            var rect = fleaWindow.itemRect(item)
+            return Math.round(rect.x) + " " + Math.round(rect.width) + " " + Math.round(rect.x + rect.width / 2)
+        }
 
         Rectangle {
             id: view

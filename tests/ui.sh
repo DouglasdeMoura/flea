@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives the real Quickshell window with omarchy-drive and asserts through the read-only IPC seam.
-# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs ...]; networklive is opt-in.
+# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs ...]; networklive is opt-in.
 set -u
 set -o pipefail
 # Hard rule 9's guard, which owns FIXTURE_ROOT and every create and delete this suite makes.
@@ -546,28 +546,58 @@ click_rail_row() {
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" "$button" >/dev/null
 }
 
+# GM's contract, measured and not recomputed: the NETWORK "+" ink, its hit target and the rail's own
+# indicator dot share one x centre. The three boxes come from ui/shell.qml's boxOf, in window
+# coordinates, so nothing here restates the anchoring the way an arithmetic slot did.
 assert_network_mark_alignment() {
-    local want_scale="$1" take_shot="${2:-false}" geometry scale plus_x slot_x wx wy ww wh
+    local label="$1" take_shot="${2:-false}" geometry glyph target dot
+    local gx gw gc tx tw tc dx dw dc caption
+    # GM's contract names a 24 px target; this is a floor, not a mirror of Theme.hitMin.
+    local hit_target_min=24
     geometry=$(ipc networkMarkGeometry)
-    IFS='|' read -r scale plus_x slot_x <<< "$geometry"
-    [[ "$scale" == "$want_scale" ]] \
-        || fail "network: interface scale is $scale after requesting $want_scale"
-    read -r wx wy ww wh < <(window_box)
-    plus_x=$((plus_x + wx))
-    slot_x=$((slot_x + wx))
+    [[ -n "$geometry" ]] || fail "network: the + ink, its target or the rail dot has no box at $label"
+    IFS='|' read -r glyph target dot <<< "$geometry"
+    read -r gx gw gc <<< "$glyph"
+    read -r tx tw tc <<< "$target"
+    read -r dx dw dc <<< "$dot"
+    read -r _body caption _pad _rowheight <<< "$(ipc metrics)"
     [[ "$take_shot" == "true" ]] && shot network-add-alignment
-    printf 'NETWORK add-alignment scale=%s plus-x=%s indicator-slot-x=%s\n' \
-        "$scale" "$plus_x" "$slot_x"
-    [[ "$plus_x" -eq "$slot_x" ]] \
-        || fail "network: add mark x centre $plus_x differs from network indicator slot x centre $slot_x at interface scale $scale"
+    printf 'NETWORK mark %s caption=%s ink=[%s,%s)c%s target=[%s,%s)c%s dot=[%s,%s)c%s\n' \
+        "$label" "$caption" "$gx" "$((gx + gw))" "$gc" \
+        "$tx" "$((tx + tw))" "$tc" "$dx" "$((dx + dw))" "$dc"
+    [[ "$gc" -eq "$dc" ]] \
+        || fail "network: the + ink centre $gc differs from the rail indicator centre $dc at $label"
+    [[ "$tc" -eq "$dc" ]] \
+        || fail "network: the + hit target centre $tc differs from the rail indicator centre $dc at $label"
+    [[ "$tw" -ge "$hit_target_min" ]] \
+        || fail "network: the + hit target is $tw wide, under the $hit_target_min px contract at $label"
 }
 
-assert_network_mark_anchor() {
-    local glyph_block
-    glyph_block=$(sed -n '/id: addGlyph/,/TapHandler/p' "$repo/ui/Sidebar.qml")
-    grep -Fq 'anchors.right: parent.right' <<< "$glyph_block" \
-        && grep -Fq 'anchors.verticalCenter: parent.verticalCenter' <<< "$glyph_block" \
-        && ! grep -Fq 'anchors.centerIn: parent' <<< "$glyph_block"
+# A measured box is still only a claim until a click at its edge opens the dialog. Four probes: one
+# just inside and one just outside each edge of the hit target, all at the target's own centre line.
+probe_network_mark_target() {
+    local geometry target tx tw centre cy wx wy probe x want opened
+    geometry=$(ipc networkMarkGeometry)
+    IFS='|' read -r _glyph target _dot <<< "$geometry"
+    read -r tx tw _tc <<< "$target"
+    centre=$(ipc networkMarkCentre)
+    [[ -n "$centre" ]] || fail "network: the + hit target has no centre point"
+    read -r _cx cy <<< "$centre"
+    read -r wx wy _ww _wh < <(window_box)
+    for probe in "$((tx + 1)) true" "$((tx + tw - 1)) true" "$((tx - 2)) false" "$((tx + tw + 1)) false"; do
+        read -r x want <<< "$probe"
+        omarchy-drive click "$((x + wx))" "$((cy + wy))" >/dev/null
+        settle
+        opened=$(ipc dialogOpen)
+        printf 'NETWORK probe x=%s want-open=%s opened=%s\n' "$x" "$want" "$opened"
+        if [[ "$opened" == "true" ]]; then
+            key -k Escape >/dev/null
+            settle
+            [[ "$(ipc dialogOpen)" == "false" ]] || fail "network: Escape did not close the probed dialog"
+        fi
+        [[ "$opened" == "$want" ]] \
+            || fail "network: a click at x=$x reported dialogOpen=$opened against the target box [$tx,$((tx + tw)))"
+    done
 }
 
 # A single IPC call may consume its own two-second timeout, so count wall time and bound each read;
@@ -2329,21 +2359,10 @@ EOS
     shot network-appeared
     [[ -f "$fixture_home/.config/gtk-3.0/bookmarks" ]] || fail "network: the dialog did not create gtk-3.0/bookmarks under the fixture HOME"
 
-    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
-    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
-    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
-    local ui_scale first_scale=true
-    for ui_scale in 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5 1.6 1.7 1.8 1.9 2.0; do
-        settle
-        assert_network_mark_alignment "$ui_scale" "$first_scale"
-        first_scale=false
-        [[ "$ui_scale" == "2.0" ]] \
-            || key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
-    done
-    assert_network_mark_anchor \
-        || fail "network: add mark is not right-anchored inside its caption-aligned hit target"
-    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    # The mark's own case walks the text sizes and probes the target; here it is read once, on the
+    # rail this case just filled, so a regression shows up in the case that produced the row.
     settle
+    assert_network_mark_alignment "the live text size" true
 
     local bookmarks="$fixture_home/.config/gtk-3.0/bookmarks"
     local invalid_port invalid_port_failures=0 snapshot
@@ -2524,6 +2543,74 @@ EOS
     kill_flea
     sandbox_remove "$fixture_home"
     sandbox_remove "$fake_root"
+}
+
+# The NETWORK "+" against every text size Omarchy offers. The gap between the ink and its 24 px hit
+# target is (hitMin - caption) / 2, so the term that moves it is the caption token and the lever that
+# moves that is [font] base-size, read from the fixture HOME rather than the operator's own config.
+case_netmark() {
+    local dir="$fixture_root/netmark"
+    sandbox_scratch "$dir"
+    : > "$dir/one.txt"
+    local fake_root="$fixture_root/netmark-fake"
+    sandbox_scratch "$fake_root"
+    mkdir -p "$fake_root/bin"
+    # This case measures geometry, so the rail must not depend on whatever the box has mounted.
+    printf '#!/bin/sh\nexit 0\n' > "$fake_root/bin/gio"
+    chmod +x "$fake_root/bin/gio"
+    local saved_path="$PATH"
+    export PATH="$fake_root/bin:$PATH"
+
+    local fixture_home="$fixture_root/netmark-home" real_home="$HOME"
+    fixture_home_make "$fixture_home"
+    mkdir -p "$fixture_home/.config/gtk-3.0" "$fixture_home/.config/omarchy"
+    # One bookmark is one NETWORK row, and a NETWORK row is the only thing that draws an indicator dot.
+    printf 'smb://198.51.100.1/ 198.51.100.1\n' > "$fixture_home/.config/gtk-3.0/bookmarks"
+
+    local base first=true caption smallest="" largest=""
+    for base in 9 10 11 12 14 16 20; do
+        printf '[font]\nbase-size = %s\n' "$base" > "$fixture_home/.config/omarchy/shell.toml"
+        export HOME="$fixture_home"
+        launch "$dir"
+        export HOME="$real_home"
+        wait_rail 1
+        # The probes cost four clicks, so they run once, at the stop with the widest overhang, and
+        # before the invariant: a measured box has to be real before its centre is worth arguing about.
+        if [[ "$first" == true ]]; then
+            probe_network_mark_target
+            first=false
+        fi
+        assert_network_mark_alignment "text size $base"
+        read -r _body caption _pad _rowheight <<< "$(ipc metrics)"
+        [[ -n "$smallest" ]] || smallest="$caption"
+        largest="$caption"
+    done
+    # A sweep whose stops all render the same caption would pass without testing anything.
+    [[ "$largest" -gt "$smallest" ]] \
+        || fail "netmark: caption stayed at $smallest across every text size, so no stop took effect"
+
+    # The interface zoom is a live feature of its own, and its top stop is the only place the caption
+    # grows past Theme.hitMin, where the hit target and the caption slot become the same box.
+    local step
+    for step in 1 2; do
+        key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
+    done
+    settle
+    assert_network_mark_alignment "text size 20 at the smallest zoom"
+    for step in $(seq 1 12); do
+        key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
+    done
+    settle
+    assert_network_mark_alignment "text size 20 at the largest zoom"
+    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    settle
+
+    printf 'NETMARK stops=7 caption=%s..%s probes=4 zoom=both-ends\n' "$smallest" "$largest"
+    export PATH="$saved_path"
+    kill_flea
+    sandbox_remove "$fixture_home"
+    sandbox_remove "$fake_root"
+    sandbox_remove "$dir"
 }
 
 # Restores the authenticated route as a product-level control: the helper sees one URI argument and
@@ -3999,7 +4086,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs)
 
 : > "$run_log"
 : > "$flea_log"
