@@ -584,19 +584,19 @@ click_rail_row() {
 }
 
 assert_network_mark_alignment() {
-    local want_scale="$1" take_shot="${2:-false}" geometry scale plus_x slot_x wx wy ww wh
+    local want_base="$1" take_shot="${2:-false}" geometry base plus_x slot_x wx wy ww wh
     geometry=$(ipc networkMarkGeometry)
-    IFS='|' read -r scale plus_x slot_x <<< "$geometry"
-    [[ "$scale" == "$want_scale" ]] \
-        || fail "network: interface scale is $scale after requesting $want_scale"
+    IFS='|' read -r base plus_x slot_x <<< "$geometry"
+    [[ "$base" == "$want_base" ]] \
+        || fail "network: text size is ${base}px after requesting ${want_base}px"
     read -r wx wy ww wh < <(window_box)
     plus_x=$((plus_x + wx))
     slot_x=$((slot_x + wx))
     [[ "$take_shot" == "true" ]] && shot network-add-alignment
-    printf 'NETWORK add-alignment scale=%s plus-x=%s indicator-slot-x=%s\n' \
-        "$scale" "$plus_x" "$slot_x"
+    printf 'NETWORK add-alignment base=%s plus-x=%s indicator-slot-x=%s\n' \
+        "$base" "$plus_x" "$slot_x"
     [[ "$plus_x" -eq "$slot_x" ]] \
-        || fail "network: add mark x centre $plus_x differs from network indicator slot x centre $slot_x at interface scale $scale"
+        || fail "network: add mark x centre $plus_x differs from network indicator slot x centre $slot_x at ${base}px"
 }
 
 assert_network_mark_anchor() {
@@ -2379,15 +2379,19 @@ EOS
     shot network-appeared
     [[ -f "$fixture_home/.config/gtk-3.0/bookmarks" ]] || fail "network: the dialog did not create gtk-3.0/bookmarks under the fixture HOME"
 
+    # Every text-size stop, walked from the floor: six steps down reaches 9 px from any of the seven,
+    # and the alignment has to hold at each one rather than only at the size this box happens to run.
     key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
-    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
-    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
-    local ui_scale first_scale=true
-    for ui_scale in 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5 1.6 1.7 1.8 1.9 2.0; do
+    local _step
+    for _step in 1 2 3 4 5 6; do
+        key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
+    done
+    local text_stop first_stop=true
+    for text_stop in 9 10 11 12 14 16 20; do
         settle
-        assert_network_mark_alignment "$ui_scale" "$first_scale"
-        first_scale=false
-        [[ "$ui_scale" == "2.0" ]] \
+        assert_network_mark_alignment "$text_stop" "$first_stop"
+        first_stop=false
+        [[ "$text_stop" == "20" ]] \
             || key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
     done
     assert_network_mark_anchor \
@@ -4045,7 +4049,7 @@ case_renamelife() {
     kill_flea
 }
 
-# The settings panel: its three doors, its three control groups, and the one thing a settings window
+# The settings panel: its doors, its three control groups, and the one thing a settings window
 # has to do that a menu does not, which is outlive the process that wrote it. XDG_CONFIG_HOME points
 # inside the fixture root for the whole case, so nothing here can write the operator's own
 # ~/.config/flea/view.json; hard rule 9 covers writes and not only deletes.
@@ -4062,19 +4066,40 @@ case_settings() {
     wait_listing 2
 
     settings_doors
-    settings_scale
+    settings_display
     settings_menus
     settings_keys
 
-    # Restart survival, which is what separates a setting from a session's mood. Both values are
+    # One override left standing, so the restart below has a text size to bring back as well.
+    key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
+    settle
+    local pinned_base
+    pinned_base=$(token_of baseSize)
+
+    # Restart survival, which is what separates a setting from a session's mood. Every value is
     # asserted in the file the panel wrote and again in the behaviour of a process that only read it.
     local state="$config/flea/view.json"
     [[ -f "$state" ]] || fail "settings: the panel wrote no state file at $state"
     grep -q '"paste"' "$state" || fail "settings: the hidden action never reached the state file"
     grep -q '"keysPreset": "windows"' "$state" || fail "settings: the preset never reached the state file"
+    grep -q '"mode": "override"' "$state" || fail "settings: the text-size override never reached the state file"
+    grep -q "\"px\": $pinned_base" "$state" || fail "settings: the state file holds no ${pinned_base}px stop"
+    # The board's own words: an override stores a stop, never a free number or a multiplier.
+    ! grep -q 'uiScale' "$state" || fail "settings: the state file still carries an interface-scale multiplier"
     kill_flea
     launch "$dir"
     wait_listing 2
+    [[ "$(token_of baseSize)" == "$pinned_base" ]] \
+        || fail "settings: a restart lost the ${pinned_base}px override, it draws at $(token_of baseSize)"
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Size|${pinned_base}px"* ]] \
+        || fail "settings: a restart brought the panel back on a different stop"
+    key -k Escape >/dev/null
+    settle
+    # Back to following, so nothing after this case runs at a size it did not ask for.
+    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    settle
     click_row 0 right
     settle
     local reopened="|$(ipc contextMenuEntries)|"
@@ -4088,7 +4113,7 @@ case_settings() {
     key -M ctrl -k h -m ctrl >/dev/null
     settle
 
-    printf 'SETTINGS doors=ok scale=ok menus=ok keys=ok restart=ok\n'
+    printf 'SETTINGS doors=ok display=ok menus=ok keys=ok restart=ok\n'
     if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
     kill_flea
 }
@@ -4128,31 +4153,151 @@ settings_doors() {
     settle
 }
 
-# One control over ui/js/Scale.js, not a second scale: the stepper reaches the same engine
-# Ctrl+Shift+Plus does, so the status bar announces the step the row shows.
-settings_scale() {
+# The Display section, whose consumer is ui/Theme.qml. The board rules that Omarchy owns the size
+# until Flea is told otherwise, that an override takes one of seven stops and not a free number, and
+# that the monitor scale is read-only. Every stop is walked and its whole token row is read back off
+# the live seam against the board's own layout table, because the table is the contract.
+settings_display() {
     key , >/dev/null
     settle
+    local omarchy_base
+    omarchy_base=$(token_of baseSize)
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
+        || fail "settings: Display did not open on Follow Omarchy, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"fact|Effective|${omarchy_base}px"* ]] \
+        || fail "settings: the effective row does not report Omarchy's own ${omarchy_base}px"
+    # Read-only means read-only: the compositor's two rows are facts, and no control sits on them.
+    [[ "$(ipc settingsRows)" == *"fact|Scale|"* ]] \
+        || fail "settings: the Display section draws no monitor scale, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" != *"choice|Scale|"* ]] \
+        || fail "settings: the monitor scale is a control, and the board says Flea never steps it"
+    assert_monitor_scale_row
+    shot settings-text-follow
+
+    # Switching to Override changes the mode and nothing on screen, which is what makes the switch
+    # safe to press: only a step moves the type.
     local before after
-    before=$(ipc metrics | cut -d' ' -f1)
-    key l >/dev/null
-    settle
-    after=$(ipc metrics | cut -d' ' -f1)
-    (( after > before )) || fail "settings: the scale stepper did not grow the type, $before then $after"
-    [[ "$(ipc settingsRows)" == *"stepper|Interface scale|110%"* ]] \
-        || fail "settings: the row does not show the stepped scale, got $(ipc settingsRows)"
-    [[ "$(ipc lastMessage)" == "Interface scale 110 percent."* ]] \
-        || fail "settings: the stepper did not reach the engine that announces, got $(ipc lastMessage)"
-    shot settings-scaled
-    # Enter on the stepper is the reset the announcement names, and the chord's own reset agrees.
+    before=$(ipc metrics)
     key -k Return >/dev/null
     settle
-    [[ "$(ipc settingsRows)" == *"stepper|Interface scale|100%"* ]] \
-        || fail "settings: Enter on the stepper did not reset the scale"
-    [[ "$(ipc metrics | cut -d' ' -f1)" == "$before" ]] \
-        || fail "settings: the reset did not put the type back where it started"
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Override"* ]] \
+        || fail "settings: Enter on the mode row did not reach Override, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"choice|Size|${omarchy_base}px"* ]] \
+        || fail "settings: the override did not start on Omarchy's own stop"
+    [[ "$(ipc metrics)" == "$before" ]] \
+        || fail "settings: switching to Override moved the type before any step, $before then $(ipc metrics)"
+
+    # Down onto the stop row, then the whole list, each stop checked against the board's table.
+    key j >/dev/null
+    settle
+    settings_walk_to_stop 9
+    local stop
+    for stop in 9 10 11 12 14 16 20; do
+        settings_walk_to_stop "$stop"
+        assert_board_row "$stop"
+    done
+    after=$(ipc metrics | cut -d' ' -f1)
+    (( after > $(cut -d' ' -f1 <<< "$before") )) \
+        || fail "settings: the largest stop did not grow the type past Omarchy's own size"
+    shot settings-text-override
+
+    # The way back is one row, and it puts every token where Omarchy had it.
+    key k >/dev/null
+    settle
+    key -k Return >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
+        || fail "settings: the mode row did not go back to Follow Omarchy"
+    [[ "$(ipc settingsRows)" != *"choice|Size|"* ]] \
+        || fail "settings: following Omarchy still draws an override stop row"
+    [[ "$(ipc metrics)" == "$before" ]] \
+        || fail "settings: following Omarchy again did not put the type back, $before then $(ipc metrics)"
     key -k Escape >/dev/null
     settle
+
+    settings_chord_alias "$omarchy_base"
+}
+
+# The chord is an alias, not a second engine: keys.toml binds textSizeUp, textSizeDown and
+# textSizeReset, and each one has to move the very state the panel's own rows show.
+settings_chord_alias() {
+    local omarchy_base="$1"
+    key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
+    settle
+    local grown
+    grown=$(token_of baseSize)
+    (( grown > omarchy_base )) \
+        || fail "settings: Ctrl+Shift+Plus did not grow the text size, still $grown"
+    [[ "$(ipc lastMessage)" == "Text size ${grown}px. Ctrl+Shift+0 follows Omarchy again." ]] \
+        || fail "settings: the chord did not announce its stop, got $(ipc lastMessage)"
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Size|${grown}px"* ]] \
+        || fail "settings: the panel does not show the stop the chord set, got $(ipc settingsRows)"
+    key -k Escape >/dev/null
+    settle
+    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(token_of baseSize)" == "$omarchy_base" ]] \
+        || fail "settings: Ctrl+Shift+Minus did not step back one stop"
+    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc lastMessage)" == "Text size follows Omarchy, ${omarchy_base}px." ]] \
+        || fail "settings: Ctrl+Shift+0 did not announce following Omarchy, got $(ipc lastMessage)"
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
+        || fail "settings: the chord's reset did not reach the panel's own mode row"
+    key -k Escape >/dev/null
+    settle
+}
+
+# h and l walk the stop row. The floor and the ceiling clamp, so pressing past either is a no-op
+# rather than a wrap, and this walks far enough to reach any stop from any other.
+settings_walk_to_stop() {
+    local want="$1" step=h attempt
+    (( want > $(token_of baseSize) )) && step=l
+    for attempt in 1 2 3 4 5 6 7; do
+        [[ "$(token_of baseSize)" == "$want" ]] && return 0
+        key "$step" >/dev/null
+        settle
+    done
+    [[ "$(token_of baseSize)" == "$want" ]] \
+        || fail "settings: seven steps did not reach the ${want}px stop, stopped at $(token_of baseSize)"
+}
+
+# One key of Theme.tokens(), which is the live seam tools/flea-metrics-gate diffs.
+token_of() {
+    ipc tokens | grep "^$1=" | cut -d= -f2-
+}
+
+# The SettingsScale board's layout table, base|bodySmall|caption|paddingY|rowHeight|iconSize|mark.
+# mark is the board's own unrounded number rounded to whole pixels, which is what Theme draws.
+assert_board_row() {
+    local want_base="$1" row got
+    for row in "9|8|7|5|24|14|12" "10|9|8|5|26|16|13" "11|10|9|6|30|18|15" \
+               "12|11|10|6|32|20|16" "14|13|12|7|37|23|19" "16|15|13|8|43|27|22" \
+               "20|18|17|10|52|32|26"; do
+        IFS='|' read -r base body caption padding height icon mark <<< "$row"
+        [[ "$base" == "$want_base" ]] || continue
+        got="$(token_of baseSize)|$(token_of bodySmall)|$(token_of caption)|$(token_of rowPaddingY)|$(token_of rowHeight)|$(token_of iconSize)|$(token_of markSize)"
+        printf 'SETTINGS stop=%s tokens=%s\n' "$base" "$got"
+        [[ "$got" == "$base|$body|$caption|$padding|$height|$icon|$mark" ]] \
+            || fail "settings: the ${base}px stop draws $got, and the board's table says $base|$body|$caption|$padding|$height|$icon|$mark"
+        return 0
+    done
+    fail "settings: ${want_base}px is not a stop the board tabulates"
+}
+
+# The compositor's own number, read the same way ui/Theme.qml reads it, so the row cannot show a
+# scale Hyprland is not on and cannot quietly read "not reported" on a box that answers.
+assert_monitor_scale_row() {
+    local live shown
+    live=$(hyprctl monitors -j | jq -r 'map(select(.focused)) | .[0].scale // empty')
+    [[ -n "$live" ]] || fail "settings: hyprctl reports no focused monitor, so the row has no contract"
+    shown=$(awk -v s="$live" 'BEGIN { printf "%g", s + 0 }')
+    [[ "$(ipc settingsRows)" == *"fact|Scale|${shown}x"* ]] \
+        || fail "settings: the Scale row does not show the compositor's ${shown}x, got $(ipc settingsRows)"
 }
 
 # The Menus section, whose consumer is ui/js/Menu.js: every assertion here is made against the real

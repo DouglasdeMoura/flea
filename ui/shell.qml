@@ -9,7 +9,7 @@ import QtQuick
 import qs.Commons
 import "."
 import "." as Flea
-import "js/Scale.js" as Scale
+import "js/TextSize.js" as TextSize
 import "js/Ops.js" as Ops
 import "js/Search.js" as Search
 
@@ -25,12 +25,15 @@ ShellRoot {
         Connections { target: Quickshell; function onLastWindowClosed() { backend.quit() } }
         Connections { target: backend; function onQuitReady() { Quickshell.execDetached(["kill", String(Quickshell.processId)]) } }
 
-        // Issue 9's one engine, reached by the Ctrl+Shift chords through the pane and by the settings
-        // panel's own stepper, so a control and a keystroke cannot step two different scales.
-        function applyScale(direction) {
-            ViewState.uiScale = direction === 0 ? 1 : Scale.stepped(ViewState.uiScale, direction)
-            ViewState.save()
-            pane.message(Scale.announce(ViewState.uiScale), false)
+        // Issue 9's chords, aliased by keys.toml onto the Display section's own text size. The
+        // panel writes ui/ViewState.qml directly and shows the value in the row; a chord has no
+        // readout of its own with the panel shut, so this one adds the status line.
+        function applyTextSize(direction) {
+            if (direction === 0)
+                ViewState.followTextSize()
+            else
+                ViewState.stepTextSize(direction)
+            pane.message(TextSize.announce(ViewState.textSize, ViewState.omarchyBase), false)
         }
 
         // Every *Centre reader on the IPC seam is this: an item's painted box, reduced to the point a test clicks.
@@ -117,9 +120,9 @@ ShellRoot {
                 onSticky: function (text) { bar.sticky = text; bar.transfer = pane.transfer }
                 onConvertRequested: function (name) { convertDialog.open(name, pane) }
                 onPathBarRequested: chrome.startEdit()
-                // Issue 9. ViewState persists it and Theme multiplies its own tokens by it, so the
-                // whole window follows without any surface reading the chord itself.
-                onScaleRequested: function (direction) { fleaWindow.applyScale(direction) }
+                // Issue 9. ViewState persists the stop and Theme derives its own tokens from it, so
+                // the whole window follows without any surface reading the chord itself.
+                onTextSizeRequested: function (direction) { fleaWindow.applyTextSize(direction) }
                 onOpened: function (path) { shareBrowser.close() }
             }
 
@@ -163,7 +166,6 @@ ShellRoot {
             Flea.SettingsPanel {
                 id: settingsPanel
                 anchors.fill: parent
-                onScaleRequested: function (direction) { fleaWindow.applyScale(direction) }
             }
 
             Flea.NetworkDialog {

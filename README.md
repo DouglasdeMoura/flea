@@ -326,11 +326,13 @@ the name is one typed word away.
   one window, and only one listing is ever live.
 - **Columns you choose.** Right click the column titles to hide Mode, Size, Date Modified or
   Kind; the choice outlives the window, and the pane's width still wins over a column it cannot
-  carry. `Ctrl+Shift+Plus` and `Minus` scale the whole interface, `Ctrl+Shift+0` puts it back, and
-  the settings panel's own stepper drives that same scale.
-- **A settings panel** on `,` and on the toolbar's sliders button, with three working groups: the interface scale, which drives the same engine `Ctrl+Shift+Plus` does;
-  per-action context-menu visibility with one tri-state master over the six basic actions; and a
-  Mac/Windows keyboard preset over that one key table. Nothing else is in it yet.
+  carry. `Ctrl+Shift+Plus` and `Minus` walk Flea's text size along Omarchy's own stops,
+  `Ctrl+Shift+0` goes back to following the desktop, and the settings panel's Display section is
+  the same one setting.
+- **A settings panel** on `,` and on the toolbar's sliders button, with three working groups: a text
+  size that follows Omarchy or pins one of its stops; per-action context-menu visibility with one
+  tri-state master over the six basic actions; and a Mac/Windows keyboard preset over that one key
+  table. Nothing else is in it yet.
 - **It looks like Omarchy** because it reads the live palette, the same tokens the shell
   bar uses, and every mark is drawn in the Omarchy cut, which is its own section below.
 
@@ -340,9 +342,12 @@ the name is one typed word away.
 sections, and only three, because a rail row onto a page with no working control is worse than no
 row:
 
-- **Display.** The interface scale, in the same 0.8 to 2.0 steps `Ctrl+Shift+Plus` walks, and the
-  text size Omarchy itself owns, shown as the fact it is. Flea reads the desktop's base size and
-  never carries one of its own.
+- **Display.** Text size follows Omarchy by default, and that is the whole of it until you switch
+  the row to Override, which pins one of Omarchy's own seven stops: 9, 10, 11, 12, 14, 16 or 20 px.
+  `Ctrl+Shift+Plus` and `Ctrl+Shift+Minus` walk the same stops and `Ctrl+Shift+0` goes back to
+  following, so the chord and the row are one setting and not two. Body text, captions, padding,
+  row height, icon slots and marks all derive from the size in force. The monitor scale and the
+  corner rounding are read-only beside it: Flea shows the compositor's values and never steps one.
 - **Menus.** Every action the context menu can build, switched on or off one at a time, with a
   tri-state master over Cut, Copy, Paste, Duplicate, Rename and Move to Trash that reads the
   enabled count, "5 of 6". Open and Show hidden files are listed but locked: a menu that cannot
@@ -352,8 +357,10 @@ row:
   is shared and answers under both; the preset carries only the chords where they differ, and it
   rebinds in the window at once. Press `?` for the whole map.
 
-The choices live in `~/.config/flea/view.json` beside the hidden columns and the scale, and a value
-this build does not recognise falls back on its own without disturbing the rest of the file.
+The choices live in `~/.config/flea/view.json` beside the hidden columns, with the text size stored
+as `{"mode":"system"}` while it follows Omarchy and `{"mode":"override","px":16}` once it does not.
+A value this build does not recognise falls back on its own without disturbing the rest of the
+file, and deleting the file puts every section back on its default.
 
 ## The Omarchy cut
 
@@ -484,7 +491,7 @@ and the application cannot disagree.
 | Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid, under the Mac preset |
 | Ctrl-Shift-1, Ctrl-Shift-2, Ctrl-Shift-3 | The same three, under the Windows preset |
 | Ctrl-h | Show hidden files, under the Windows preset |
-| Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Interface scale up, down, back to the desktop's own |
+| Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Text size up a stop, down a stop, back to following Omarchy |
 | `,`, Ctrl-, | Open the settings panel, from either view |
 | `m` | Open the context menu on the cursor row; in the rail, eject or unmount |
 | `s`, `S` | Step the sort column, reverse the sort |

@@ -1,6 +1,7 @@
 .import "../../ui/js/Settings.js" as Settings
 .import "../../ui/js/Keymap.js" as Keymap
 .import "../../ui/js/Menu.js" as Menu
+.import "../../ui/js/TextSize.js" as TextSize
 
 // The settings panel's model. ui/SettingsPanel.qml only paints what rows() returns, so every row a
 // section can draw, and every value a control can hold, is assertable here without a window.
@@ -46,6 +47,13 @@ function runInventory(check) {
     var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
     check("and no row the menu builds is left without one",
           Object.keys(built).filter(function (id) { return reachable.indexOf(id) < 0 }).join(","), "")
+}
+
+// The Display state ui/SettingsPanel.qml passes in: the stored mode, the size ui/Theme.qml resolved
+// from it, and the two numbers Flea reads off the compositor and never writes.
+function displayState(textSize, baseSize, monitorScale) {
+    return { textSize: textSize, baseSize: baseSize,
+             monitorScale: monitorScale === undefined ? 1 : monitorScale, cornerRadius: 8 }
 }
 
 function kinds(rows) {
@@ -94,18 +102,33 @@ function runMaster(check) {
 }
 
 function runRows(check) {
-    var display = Settings.rows("display", { scale: 1, baseSize: 14, textSize: 13 })
-    check("the Display section is a heading, the scale stepper, its hint and the text-size fact",
-          kinds(display), "group|stepper|hint|fact|hint")
-    check("the stepper shows the scale as a percentage", find(display, "scale").value, "100%")
-    check("a stepped scale is what the row shows",
-          find(Settings.rows("display", { scale: 1.2, baseSize: 14, textSize: 16 }), "scale").value,
-          "120%")
-    // Flea reads Omarchy's base size for its type and never hardcodes one, so the fact row is the
-    // live token and the hint says what this scale does with it.
-    check("the text-size row reports Omarchy's own base size", display[3].value, "14px")
-    check("and the hint names the size Flea actually draws at",
-          display[4].label.indexOf("13px") >= 0, true)
+    var display = Settings.rows("display", displayState(TextSize.follow(), 14))
+    // The board's Display card: the text-size mode over its effective size, then the compositor's
+    // two read-only facts. No monitor-scale control, because Flea does not step or cycle that one.
+    check("the Display section is text size, then Scale, then Appearance",
+          kinds(display), "group|choice|fact|hint|group|fact|hint|group|fact")
+    check("its one control opens on Follow Omarchy", find(display, "textMode").value,
+          "Follow Omarchy")
+    check("and the effective row reports Omarchy's own size", display[2].value, "14px")
+    check("the hint names every stop the override can take",
+          display[3].label.indexOf("9, 10, 11, 12, 14, 16, 20 px") >= 0, true)
+    check("the monitor scale is drawn as the compositor reports it", display[5].value, "1x")
+    check("a fractional one keeps its fraction",
+          Settings.rows("display", displayState(TextSize.follow(), 14, 1.25))[5].value, "1.25x")
+    check("and an unanswered query says so rather than claiming 1x",
+          Settings.rows("display", displayState(TextSize.follow(), 14, 0))[5].value, "not reported")
+    check("its hint is the board's own sentence, so no reader expects a control",
+          display[6].label, "Flea follows the compositor value and does not step or cycle it.")
+    check("the rounding Flea mirrors is drawn beside it", display[8].value, "rounding 8")
+
+    // Switching to Override adds the stop row, and nothing else about the section moves.
+    var pinned = Settings.rows("display", displayState({ mode: "override", px: 16 }, 16))
+    check("an override adds one row and one only", pinned.length, display.length + 1)
+    check("the mode row says which mode it is in", find(pinned, "textMode").value, "Override")
+    check("the stop row carries the pinned size", find(pinned, "textStop").value, "16px")
+    check("and the effective row agrees with it", pinned[3].value, "16px")
+    check("while following draws no stop row at all",
+          find(display, "textStop").id === undefined, true)
 
     var menus = Settings.rows("menus", { hidden: ["paste"] })
     check("the Menus section leads with the master row under its own heading",
@@ -144,11 +167,16 @@ function runCursor(check) {
     check("a step down crosses the heading between two groups",
           Settings.focusable(menus[Settings.stepRow(menus, 7, 1)]), true)
 
-    var display = Settings.rows("display", { scale: 1, baseSize: 14, textSize: 13 })
+    var display = Settings.rows("display", displayState(TextSize.follow(), 14))
     check("the Display section's only control is where its cursor opens",
           Settings.firstRow(display), 1)
-    check("and neither the fact nor its hint takes the cursor",
+    check("and no read-only fact below it takes the cursor",
           Settings.stepRow(display, 1, 1), 1)
+    var pinned = Settings.rows("display", displayState({ mode: "override", px: 16 }, 16))
+    check("an override gives the cursor a second stop to walk to",
+          Settings.stepRow(pinned, 1, 1), 2)
+    check("and the compositor's rows still take none",
+          Settings.stepRow(pinned, 2, 1), 2)
 }
 
 // The two-value toggle over the one key table. Each row the Keys section lists is resolved back

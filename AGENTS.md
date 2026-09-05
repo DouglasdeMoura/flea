@@ -459,8 +459,14 @@ huge pages" below for what it is worth and what it cost.
   snapshot carries a cursor and a selection only across a switch that re-lists nothing, because an
   index names a row and a re-read can put a different file behind the same number.
 - `ui/js/Trash.js` is the dd pair's arm-and-fire policy, split out of `Focus.js` at its cap.
-- `ui/js/Scale.js` is the interface scale's step, clamp and sentence; `ui/ViewState.qml` stores it
-  and `ui/Theme.qml` multiplies its own tokens by it, so no surface reads the chord itself.
+- `ui/js/TextSize.js` is the Display section's text size: the seven stops the SettingsScale board
+  documents, 9, 10, 11, 12, 14, 16 and 20 px, the two modes it names, and the sentence a chord
+  announces. `ui/ViewState.qml` stores `{"mode":"system"}` or `{"mode":"override","px":N}` and owns
+  the writers, `ui/Theme.qml` derives its whole token ladder from the size in force, and `keys.toml`
+  aliases `textSizeUp`, `textSizeDown` and `textSizeReset` onto the same three writers, so no
+  surface reads the chord itself and a chord and a row cannot hold two different sizes. The monitor
+  scale is the compositor's: `ui/Theme.qml` reads it once from `hyprctl monitors -j` and the panel
+  shows it read-only, because the board rules that Flea does not step or cycle it.
 - `ui/js/Settings.js` is the settings panel's whole model: the three sections, the context-menu
   action inventory and its groups, the tri-state master derived from `menuHidden`, and the row list
   each section draws. Pure, so `tests/js/settings.js` drives every control without a window.

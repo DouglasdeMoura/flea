@@ -88,10 +88,10 @@ function run(check) {
 
     // Issue 9's pair. Equal and Underscore are the same chords on an unshifted key, bound so the
     // hand gets the scale whichever way the layout reports the keypress.
-    check("ctrl shift plus scales up", Keymap.lookup(Qt.Key_Plus, "", ctrl | shift), "scaleUp")
-    check("ctrl shift equal is the same chord", Keymap.lookup(Qt.Key_Equal, "", ctrl | shift), "scaleUp")
-    check("ctrl shift minus scales down", Keymap.lookup(Qt.Key_Minus, "", ctrl | shift), "scaleDown")
-    check("ctrl shift zero resets", Keymap.lookup(Qt.Key_0, "", ctrl | shift), "scaleReset")
+    check("ctrl shift plus grows the text", Keymap.lookup(Qt.Key_Plus, "", ctrl | shift), "textSizeUp")
+    check("ctrl shift equal is the same chord", Keymap.lookup(Qt.Key_Equal, "", ctrl | shift), "textSizeUp")
+    check("ctrl shift minus shrinks it", Keymap.lookup(Qt.Key_Minus, "", ctrl | shift), "textSizeDown")
+    check("ctrl shift zero follows Omarchy again", Keymap.lookup(Qt.Key_0, "", ctrl | shift), "textSizeReset")
     // Bare minus is the PDF zoom and must not have been taken by the chord above.
     check("bare minus still zooms a PDF out", Keymap.lookup(Qt.Key_Minus, "-", none), "zoomOut")
 

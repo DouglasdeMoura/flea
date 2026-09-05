@@ -276,7 +276,7 @@ QtObject {
             var mark = root.fleaWindow.itemRect(items[0])
             var heading = root.fleaWindow.itemRect(items[1])
             var slot = heading.x + heading.width - Style.spacing.rowPaddingX - Theme.font.caption / 2
-            return ViewState.uiScale.toFixed(1) + "|" + Math.round(mark.x + mark.width / 2) + "|" + Math.round(slot)
+            return Theme.baseSize + "|" + Math.round(mark.x + mark.width / 2) + "|" + Math.round(slot)
         }
         // A protocol chip carries a label and no tree, so a test clicks its centre the way it does a row.
         function networkChipCentre(name: string): string { return root.fleaWindow.centreOf(root.networkDialog.formChip(name)) }

@@ -1,4 +1,5 @@
 .pragma library
+.import "TextSize.js" as TextSize
 
 // The settings panel's whole model, so every row it draws is a value a test can read without a
 // window: ui/SettingsPanel.qml only paints what rows() returns. The Settings, SettingsScale,
@@ -113,10 +114,10 @@ function toggleId(hidden, id) {
 // One row per line of the panel's pane. kind decides what ui/SettingsPanel.qml draws and whether the
 // row is a focus stop: group, hint, fact and lock rows are read-only and the cursor steps over them.
 function focusable(row) {
-    return row.kind === "check" || row.kind === "master" || row.kind === "choice" || row.kind === "stepper"
+    return row.kind === "check" || row.kind === "master" || row.kind === "choice"
 }
 
-// state: { scale, hidden, preset, baseSize, textSize }
+// state: { textSize, hidden, preset, baseSize, monitorScale, cornerRadius, presetKeys }
 function rows(section, state) {
     if (section === "display")
         return displayRows(state)
@@ -125,19 +126,39 @@ function rows(section, state) {
     return keyRows(state)
 }
 
-// The interface scale drives ui/js/Scale.js, the one engine Ctrl+Shift+Plus already steps, so the
-// row and the chord cannot disagree. Text size is a fact and not a second scale: Flea reads
-// Omarchy's own base size and reports what this scale makes of it.
+// The SettingsScale board's own division: Flea owns its text override and Omarchy owns the rest.
+// The size follows the desktop until one of TextSize's seven stops is pinned, and the monitor
+// scale and the corner rounding are the compositor's, drawn as the read-only facts they are.
 function displayRows(state) {
-    var percent = Math.round(state.scale * 100) + "%"
-    return [
+    var follows = TextSize.following(state.textSize)
+    var out = [
         { kind: "group", label: "Text size" },
-        { kind: "stepper", id: "scale", label: "Interface scale", value: percent },
-        { kind: "hint", label: "Ctrl+Shift+Plus and Ctrl+Shift+Minus step it, Ctrl+Shift+0 resets." },
-        { kind: "fact", label: "Text size", value: state.baseSize + "px" },
-        { kind: "hint", label: "Omarchy owns the base size. Flea draws its running text at "
-                               + state.textSize + "px with this scale at " + percent + "." }
+        { kind: "choice", id: "textMode", label: "Text size",
+          value: follows ? "Follow Omarchy" : "Override" }
     ]
+    if (!follows)
+        out.push({ kind: "choice", id: "textStop", label: "Size", value: state.baseSize + "px" })
+    out.push({ kind: "fact", label: "Effective", value: state.baseSize + "px" })
+    out.push({ kind: "hint", label: "Omarchy owns the size until you override it, and an override "
+                                    + "takes one of its own stops, " + TextSize.STOPS.join(", ")
+                                    + " px. Ctrl+Shift+Plus and Ctrl+Shift+Minus walk them, and "
+                                    + "Ctrl+Shift+0 follows Omarchy again." })
+    out.push({ kind: "group", label: "Scale" })
+    out.push({ kind: "fact", label: "Scale", value: scaleLabel(state.monitorScale) })
+    out.push({ kind: "hint",
+               label: "Flea follows the compositor value and does not step or cycle it." })
+    out.push({ kind: "group", label: "Appearance" })
+    out.push({ kind: "fact", label: "Hyprland-aware corners",
+               value: "rounding " + Math.round(state.cornerRadius) })
+    return out
+}
+
+// The compositor's number as Hyprland writes it, 1.00 and 1.25; an unanswered query says so rather
+// than reading as 1x, because a wrong number here looks exactly like a right one.
+function scaleLabel(scale) {
+    if (!(scale > 0))
+        return "not reported"
+    return (Math.round(scale * 100) / 100) + "x"
 }
 
 function menuRows(hidden) {

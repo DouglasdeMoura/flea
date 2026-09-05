@@ -13,7 +13,7 @@ Item {
     property bool current: false
 
     signal activated()
-    // A choice and a stepper both step, so h/l and the two chevrons fire one signal, never two.
+    // Every steppable row steps the same way, so h/l and the two chevrons fire one signal, never two.
     signal stepped(int direction)
 
     readonly property string kind: root.row.kind || "fact"
@@ -21,7 +21,7 @@ Item {
     readonly property bool isHint: root.kind === "hint"
     readonly property bool isLock: root.kind === "lock"
     readonly property bool hasBox: root.kind === "check" || root.kind === "master"
-    readonly property bool hasSteps: root.kind === "choice" || root.kind === "stepper"
+    readonly property bool hasSteps: root.kind === "choice"
     // The hover lift ui/MenuRow.qml uses, so a settings row and a menu row read alike.
     readonly property real hoverOpacity: 0.08
     // The tri-state master: all six on is a check, some on is a dash, none is an empty box.
@@ -104,8 +104,8 @@ Item {
             }
         }
 
-        // The master's count, a stepper's percentage, a choice's name and a fact's value are all
-        // one thing: the value the row currently holds, drawn on the right the way the boards draw it.
+        // The master's count, a choice's name and a fact's value are all one thing: the value the
+        // row currently holds, drawn on the right the way the boards draw it.
         Text {
             visible: root.kind === "fact" || root.hasSteps || root.kind === "master"
             height: Theme.markSize

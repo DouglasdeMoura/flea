@@ -63,27 +63,29 @@ action = "settings"
 key = "N"
 action = "newFolder"
 
-# Issue 9: foot's own zoom chords. Plus and Equal both, because + is Shift+= on this layout and
-# the hand presses the one key either way; 0 resets, so a scale is never a state you are stuck in.
+# Issue 9: foot's own zoom chords, which in foot are a text size and are one here too. They are an
+# alias onto the Display section's own control and its one stored stop, never a second engine. Plus
+# and Equal both, because + is Shift+= on this layout and the hand presses the one key either way;
+# 0 goes back to following Omarchy, so an override is never a state you are stuck in.
 [[ctrlshift]]
 key = "Plus"
-action = "scaleUp"
+action = "textSizeUp"
 
 [[ctrlshift]]
 key = "Equal"
-action = "scaleUp"
+action = "textSizeUp"
 
 [[ctrlshift]]
 key = "Minus"
-action = "scaleDown"
+action = "textSizeDown"
 
 [[ctrlshift]]
 key = "Underscore"
-action = "scaleDown"
+action = "textSizeDown"
 
 [[ctrlshift]]
 key = "0"
-action = "scaleReset"
+action = "textSizeReset"
 
 [[ctrlshift]]
 key = "Greater"
@@ -544,13 +546,13 @@ label = "eject"
 
 [[sheet]]
 keys = "^+"
-action = "scaleUp"
-label = "scale up"
+action = "textSizeUp"
+label = "text size up"
 
 [[sheet]]
 keys = "^-"
-action = "scaleDown"
-label = "scale down"
+action = "textSizeDown"
+label = "text size down"
 
 [[sheet]]
 keys = ","

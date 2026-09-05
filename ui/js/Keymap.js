@@ -48,11 +48,11 @@ function lookup(key, text, modifiers) {
     if (modifiers & Qt.ControlModifier) {
         if (modifiers & Qt.ShiftModifier) {
             if (key === Qt.Key_N) return "newFolder"
-            if (key === Qt.Key_Plus) return "scaleUp"
-            if (key === Qt.Key_Equal) return "scaleUp"
-            if (key === Qt.Key_Minus) return "scaleDown"
-            if (key === Qt.Key_Underscore) return "scaleDown"
-            if (key === Qt.Key_0) return "scaleReset"
+            if (key === Qt.Key_Plus) return "textSizeUp"
+            if (key === Qt.Key_Equal) return "textSizeUp"
+            if (key === Qt.Key_Minus) return "textSizeDown"
+            if (key === Qt.Key_Underscore) return "textSizeDown"
+            if (key === Qt.Key_0) return "textSizeReset"
             if (key === Qt.Key_Greater) return "toggleHidden"
             if (key === Qt.Key_Period) return "toggleHidden"
         }
@@ -154,8 +154,8 @@ var SHEET = [
     { keys: "a", action: "addNetwork", label: "add network place" },
     { keys: "m", action: "menu", label: "context menu" },
     { keys: "^e", action: "eject", label: "eject" },
-    { keys: "^+", action: "scaleUp", label: "scale up" },
-    { keys: "^-", action: "scaleDown", label: "scale down" },
+    { keys: "^+", action: "textSizeUp", label: "text size up" },
+    { keys: "^-", action: "textSizeDown", label: "text size down" },
     { keys: ",", action: "settings", label: "settings" },
     { keys: "?", action: "keymapSheet", label: "this sheet" },
 ]

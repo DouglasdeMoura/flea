@@ -19,10 +19,6 @@ Item {
     // "rail" or "pane", which side Tab last gave the cursor to.
     property string side: "pane"
 
-    // The interface scale goes back out to shell.qml's one applyScale, so this stepper and
-    // Ctrl+Shift+Plus drive the same ui/js/Scale.js engine rather than two that can drift.
-    signal scaleRequested(int direction)
-
     // Border-box 560 wide with a 150 rail, the board's own two numbers, in the scaled space token.
     readonly property int panelWidth: Theme.space(560)
     readonly property int railWidth: Theme.space(150)
@@ -32,11 +28,12 @@ Item {
     readonly property real groundOpacity: 0.5
 
     readonly property var rows: Settings.rows(root.section, {
-        scale: ViewState.uiScale,
+        textSize: ViewState.textSize,
         hidden: ViewState.menuHidden,
         preset: ViewState.keysPreset,
-        baseSize: Style.font.baseSize,
-        textSize: Theme.font.bodySmall,
+        baseSize: Theme.baseSize,
+        monitorScale: Theme.monitorScale,
+        cornerRadius: Style.cornerRadius,
         presetKeys: Keymap.PRESET_KEYS
     })
 
@@ -73,8 +70,8 @@ Item {
         flick.contentY = 0
     }
 
-    // Enter and Space both land here. A choice steps rather than toggling, because two values need
-    // no menu of their own, and the stepper's own activate is a reset to Omarchy's size.
+    // Enter and Space both land here. A choice steps rather than opening a menu of its own, because
+    // no control the panel draws has more values than a walk can reach.
     function activate(index) {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
@@ -83,23 +80,24 @@ Item {
             ViewState.toggleMenuAction(row.id)
         else if (row.kind === "master")
             ViewState.toggleMenuBasic()
-        else if (row.kind === "stepper")
-            root.scaleRequested(0)
         else
             root.stepRowValue(index, 1)
     }
 
-    // h, l and the two chevrons. A stepper walks ui/js/Scale.js; a choice walks its own value list.
+    // h, l and the two chevrons. Every writer is ui/ViewState.qml's own, which is the same state the
+    // Ctrl+Shift chords reach, so a keystroke and a control can never hold two different sizes.
     function stepRowValue(index, direction) {
         var row = root.rows[index]
-        if (!row)
+        if (!row || row.kind !== "choice")
             return
-        if (row.kind === "stepper") {
-            root.scaleRequested(direction)
+        if (row.id === "textMode") {
+            ViewState.toggleTextFollow()
             return
         }
-        if (row.kind !== "choice")
+        if (row.id === "textStop") {
+            ViewState.stepTextSize(direction)
             return
+        }
         var at = Settings.PRESETS.indexOf(ViewState.keysPreset)
         var next = (at + direction + Settings.PRESETS.length) % Settings.PRESETS.length
         ViewState.keysPreset = Settings.PRESETS[next]
