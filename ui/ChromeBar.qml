@@ -29,7 +29,7 @@ Item {
     signal editClosed()
     signal completeRequested(string dir, bool hidden)
     signal said(string text)
-    // The first of the Settings board's three doors, and the only one a pointer alone can find.
+    // The settings panel's pointer door, beside the comma key; see ui/shell.qml for the third.
     signal settingsRequested()
 
     // The path bar: the same strip, typed instead of drawn. ":" and Ctrl+L open it, so does a double

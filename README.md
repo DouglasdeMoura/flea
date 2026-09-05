@@ -328,8 +328,7 @@ the name is one typed word away.
   Kind; the choice outlives the window, and the pane's width still wins over a column it cannot
   carry. `Ctrl+Shift+Plus` and `Minus` scale the whole interface, `Ctrl+Shift+0` puts it back, and
   the settings panel's own stepper drives that same scale.
-- **A settings panel** on `,`, on the toolbar's sliders button and on the background menu, with
-  three working groups: the interface scale, which drives the same engine `Ctrl+Shift+Plus` does;
+- **A settings panel** on `,` and on the toolbar's sliders button, with three working groups: the interface scale, which drives the same engine `Ctrl+Shift+Plus` does;
   per-action context-menu visibility with one tri-state master over the six basic actions; and a
   Mac/Windows keyboard preset over that one key table. Nothing else is in it yet.
 - **It looks like Omarchy** because it reads the live palette, the same tokens the shell
@@ -337,9 +336,9 @@ the name is one typed word away.
 
 ## Settings
 
-`,` from anywhere in the window, the sliders button at the right end of the toolbar, or the
-Settings row on the background menu. Three sections, and only three, because a rail row onto a
-page with no working control is worse than no row:
+`,` from anywhere in the window, or the sliders button at the right end of the toolbar. Three
+sections, and only three, because a rail row onto a page with no working control is worse than no
+row:
 
 - **Display.** The interface scale, in the same 0.8 to 2.0 steps `Ctrl+Shift+Plus` walks, and the
   text size Omarchy itself owns, shown as the fact it is. Flea reads the desktop's base size and

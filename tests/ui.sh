@@ -1039,8 +1039,16 @@ case_menu() {
     : > "$dir/b.txt"
     : > "$dir/c.txt"
     : > "$dir/plain.txt"
+    # Five more rows than this case used to need: with the six basic actions drawn, Rename is the
+    # eighth menu row and no list row lay under it on a five-row listing, which the check below says
+    # out loud rather than passing on a click that hit nothing.
+    : > "$dir/z1.txt"
+    : > "$dir/z2.txt"
+    : > "$dir/z3.txt"
+    : > "$dir/z4.txt"
+    : > "$dir/z5.txt"
     launch "$dir"
-    wait_listing 5
+    wait_listing 10
     local row_height row_padding_x centre cx cy wx wy ww wh row_left beneath_y metrics
     metrics=$(ipc metrics) || fail "menu: metrics unavailable"
     read -r _body _caption row_padding_x row_height <<< "$metrics"
@@ -4085,8 +4093,8 @@ case_settings() {
     kill_flea
 }
 
-# The Settings board draws three doors onto one panel: the toolbar's sliders button, the comma key
-# from anywhere in the window, and the background menu's own row.
+# Two of the three doors the Settings board draws: the comma key from either view and the toolbar's
+# sliders button. The third is a background-menu row this product has no background menu for.
 settings_doors() {
     key , >/dev/null
     settle
@@ -4108,25 +4116,14 @@ settings_doors() {
     key -k Escape >/dev/null
     settle
 
-    # A row menu has a row to act on, so the board gives it no Settings row; the background one is
-    # the whole menu on empty space, which is where the third door lives.
+    # The board draws a third door on the background menu, and this product has no background menu to
+    # put it on: ui/ContextMenu.qml's hasRow has no writer anywhere in ui/, and the listing's only
+    # right-click route is a row delegate's own TapHandler. So no menu offers a Settings row, and
+    # this asserts that rather than shipping one nothing can reach.
     click_row 0 right
     settle
-    [[ "|$(ipc contextMenuEntries)|" != *"|Settings|"* ]] || fail "settings: a row menu offered the Settings row"
-    key -k Escape >/dev/null
-    settle
-    local cx cy row_height
-    row_height=$(ipc metrics | cut -d' ' -f4)
-    read -r cx cy <<< "$(ipc rowCentre 1)"
-    omarchy-drive click "$((wx + cx))" "$((wy + cy + 4 * row_height))" right >/dev/null
-    settle
-    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "settings: a right click on empty space opened no menu"
-    [[ "|$(ipc contextMenuEntries)|" == *"|Settings|"* ]] \
-        || fail "settings: the background menu has no Settings row, got $(ipc contextMenuEntries)"
-    menu_seek "Settings"
-    key -k Return >/dev/null
-    settle
-    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the background menu's own row opened no panel"
+    [[ "|$(ipc contextMenuEntries)|" != *"|Settings|"* ]] \
+        || fail "settings: a menu offered a Settings row, and no menu in this product can reach one"
     key -k Escape >/dev/null
     settle
 }

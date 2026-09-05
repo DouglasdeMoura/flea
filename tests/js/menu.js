@@ -89,14 +89,16 @@ function runMenu(check) {
     check("and its label flips with the state",
           Menu.hiddenRow(false).label + "|" + Menu.hiddenRow(true).label,
           "Show hidden files|Hide hidden files")
-    // The Settings board's third door, and the board's own placement: a row menu has a row to act
-    // on, so the panel is offered only where the background menu is the whole menu.
-    check("an empty listing offers New folder, Settings and the hidden toggle",
+    // The board's background menu is not reachable in this product: hasRow has no writer anywhere in
+    // ui/, and the listing's only right-click route is a row delegate's own TapHandler, so this
+    // branch is what a background menu WOULD hold. The settings panel therefore takes the two doors
+    // that do exist, the comma key and the toolbar's sliders button, and no row here.
+    check("an empty listing offers New folder and the hidden toggle",
           labels(Menu.listingEntries({ showHidden: false, hasRow: false, rowInDropbox: false,
                                        dropboxPath: "", taildropPeers: [], archiveFormats: [],
                                        rowIsArchive: false, rowIsImage: false, canConvert: false })),
-          "New folder|Settings|Show hidden files")
-    check("and a row menu offers no Settings row, because the background one is the door",
+          "New folder|Show hidden files")
+    check("and no menu offers a Settings row, because no menu can reach one",
           findEntry(full, "settings").label, undefined)
 
     runHidden(check, full)

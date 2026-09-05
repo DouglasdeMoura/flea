@@ -41,9 +41,9 @@ function runInventory(check) {
           switched.filter(function (id) { return built[id] === undefined }).join(","), "")
     check("and each switch carries that row's own wording, so the two cannot drift",
           switched.filter(function (id) { return Settings.label(id) !== built[id] }).join(","), "")
-    // New folder and Settings are background rows the board gives no switch, and the two locked ones
-    // are drawn locked; anything else without a switch would be a row the panel cannot reach.
-    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder", "settings"])
+    // New folder is a row the board gives no switch and the two locked ones are drawn locked;
+    // anything else without a switch would be a row the panel cannot reach.
+    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
     check("and no row the menu builds is left without one",
           Object.keys(built).filter(function (id) { return reachable.indexOf(id) < 0 }).join(","), "")
 }

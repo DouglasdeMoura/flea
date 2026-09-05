@@ -50,7 +50,7 @@ key = "L"
 action = "pathBar"
 
 # The settings panel's own chord, spelled ctrl-, by both presets and by every editor that has one;
-# the bare comma below is the key the Settings board draws as the second of its three doors.
+# the bare comma below is the key the Settings board draws beside the toolbar's sliders button.
 [[ctrl]]
 key = "Comma"
 action = "settings"
@@ -384,7 +384,7 @@ action = "addNetwork"
 char = "m"
 action = "menu"
 
-# The Settings board's second door: "," from anywhere in the window, no modifier chord, because
+# The Settings board's own key: "," from anywhere in the window, no modifier chord, because
 # Omarchy's universal clipboard consumes SUPER+C/V/X and a settings panel is the last place to
 # fight for one. ui/Pane.qml routes it from the list and from the rail alike.
 [[text]]

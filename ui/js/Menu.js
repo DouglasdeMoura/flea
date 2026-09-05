@@ -70,10 +70,6 @@ function listingEntries(p) {
     // The last group is the rows that need no row under the cursor, which is also the whole menu
     // on a listing's empty space.
     out.push({ label: "New folder", action: "newFolder", glyph: "folder-plus" })
-    // The background menu's own door to the settings panel, the third the Settings board draws
-    // beside the toolbar button and the comma key. A row menu has a row to act on, so it keeps none.
-    if (!p.hasRow)
-        out.push({ label: "Settings", action: "settings", glyph: "sliders" })
     out.push(hiddenRow(p.showHidden))
     return applyHidden(out, p.hiddenActions)
 }

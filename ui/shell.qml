@@ -157,8 +157,9 @@ ShellRoot {
                 anchors.fill: parent
             }
 
-            // The settings panel, reached by the comma key, the toolbar's sliders button and the
-            // background menu's own row: the Settings board's three doors onto one surface.
+            // The settings panel, reached by the comma key from either view and by the toolbar's
+            // sliders button. The Settings board draws a third door on the background menu, and this
+            // product has no background menu: ui/ContextMenu.qml's hasRow has no writer.
             Flea.SettingsPanel {
                 id: settingsPanel
                 anchors.fill: parent
