@@ -157,7 +157,23 @@ writes one key to `~/.config/xdg-desktop-portal/portals.conf`:
 org.freedesktop.impl.portal.FileChooser=flea;gtk
 ```
 
-and says what it wrote. **It writes no `default=` line**, and that is the whole design. xdg-desktop-portal
+and it writes one more thing, an additive block in `~/.config/hypr/bindings.lua` beside the one
+`flea --default` writes:
+
+```lua
+-- flea --picker: begin. Written by `flea --picker`; `flea --picker off` removes the block whole.
+o.window("com.thisisgm.flea.picker", { tag = "+floating-window" })
+-- flea --picker: end.
+```
+
+That is Omarchy's own treatment for a prompt, not a size Flea invented:
+`/usr/share/omarchy/default/hypr/apps/system.lua` tags `xdg-desktop-portal-gtk`'s windows the same
+way, and Omarchy's tag rules are what then float, centre and size them. The picker carries its own
+app id, `com.thisisgm.flea.picker`, so this rule reaches the chooser and never the file manager
+window. As with the keys, the file is written, `hyprctl reload` runs, `hyprctl configerrors` is read,
+and a config that no longer loads is put back as it was.
+
+**It writes no `default=` line**, and that is the whole design. xdg-desktop-portal
 collects every configuration file it can find into an ordered list, the user's first, and resolves each
 interface through them in turn: an interface this file does not name falls through to the next file,
 which on Omarchy is `/usr/share/xdg-desktop-portal/hyprland-portals.conf` and its `default=hyprland;gtk`.
@@ -183,8 +199,8 @@ chooser that sends on a stray keypress is worse than one that asks twice.
 flea --picker off
 ```
 
-removes that one key, and removes the file too when the key was all it held. Restart
-xdg-desktop-portal again and the GTK chooser is back.
+removes that one key, and removes the file too when the key was all it held, and removes the
+Hyprland block byte for byte. Restart xdg-desktop-portal again and the GTK chooser is back.
 
 ### What `pacman -Rns flea` leaves behind
 

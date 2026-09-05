@@ -1,4 +1,5 @@
 // flea --picker: the per-user step that routes the desktop's file chooser here, see docs/install.md.
+use crate::hyprkeys;
 use crate::userfile::{config_home, create_file, env_dir, home, replace_file};
 use std::fs;
 use std::path::PathBuf;
@@ -20,29 +21,31 @@ pub fn claim() -> i32 {
         );
         return 1;
     }
-    let status = report(claim_chooser());
-    println!("undo with: flea --picker off");
+    let status = report(claim_chooser(), hyprkeys::float_claim());
+    println!("undo both with: flea --picker off");
     status
 }
 
 // flea --picker off
 pub fn release() -> i32 {
-    report(release_chooser())
+    report(release_chooser(), hyprkeys::float_release())
 }
 
-fn report(result: Result<String, String>) -> i32 {
-    match result {
-        Ok(line) => {
-            println!("{}", line);
-            // The portal reads its configuration once, at startup, so a live session keeps the old routing.
-            println!("xdg-desktop-portal reads this at startup: systemctl --user restart xdg-desktop-portal");
-            0
-        }
-        Err(why) => {
-            eprintln!("flea: {}", why);
-            1
+// Each half stands on its own, so a failure in one still leaves the other's line on screen.
+fn report(routing: Result<String, String>, window: Result<String, String>) -> i32 {
+    let mut status = 0;
+    for half in [routing, window] {
+        match half {
+            Ok(line) => println!("{}", line),
+            Err(why) => {
+                eprintln!("flea: {}", why);
+                status = 1;
+            }
         }
     }
+    // The portal reads its configuration once, at startup, so a live session keeps the old routing.
+    println!("xdg-desktop-portal reads this at startup: systemctl --user restart xdg-desktop-portal");
+    status
 }
 
 fn claim_chooser() -> Result<String, String> {

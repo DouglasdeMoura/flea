@@ -1,4 +1,6 @@
-//@ pragma AppId com.thisisgm.flea
+// Its own app id, so one Hyprland rule can give the chooser the floating treatment Omarchy already
+// gives xdg-desktop-portal-gtk without touching the window; flea --picker writes that rule.
+//@ pragma AppId com.thisisgm.flea.picker
 //@ pragma ShellId fleapicker
 //@ pragma NativeTextRendering
 //@ pragma CacheDir $BASE/flea
@@ -313,6 +315,9 @@ ShellRoot {
         Component.onCompleted: {
             var start = win.req.folder.length > 0 ? win.req.folder : win.home
             win.openWithoutHistory(start)
+            // Measured on the box: without this the window has the keyboard but the list does not,
+            // so Escape reached the surface below and every other key was dropped.
+            list.forceActiveFocus()
         }
 
         // The seam tests/picker.sh drives, the same read-only shape ui/Ipc.qml has for the window.
@@ -329,6 +334,7 @@ ShellRoot {
             function state(): string { return win.listingState }
             function accept(): string { return Picker.acceptLabel(win.req, win.marks.length) }
             function chip(): int { return win.filterIndex }
+            function saveName(): string { return win.saveName }
             function message(): string { return win.message }
         }
     }

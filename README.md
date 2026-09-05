@@ -49,7 +49,8 @@ systemctl --user restart xdg-desktop-portal
 Flea implements `org.freedesktop.impl.portal.FileChooser`, so this replaces the GTK dialog for every
 portal caller on the box at once. It writes one interface key to
 `~/.config/xdg-desktop-portal/portals.conf` and no default, so screen sharing, screenshots and every
-other portal keep the backend they already had. `flea --picker off` puts the GTK chooser back.
+other portal keep the backend they already had. It also adds one Hyprland rule that gives the chooser
+the same floating treatment Omarchy already gives the GTK one. `flea --picker off` puts both back.
 
 To track `main` instead of releases, use the AUR package:
 
