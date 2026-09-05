@@ -231,14 +231,18 @@ mod tests {
     fn copied_directory_rename_removes_its_partial_target_after_copy_failure() {
         let d = TestDir::new("copyrenamepartial");
         let source = d.dir("source");
-        let _socket = std::os::unix::net::UnixListener::bind(source.join("socket")).unwrap();
+        // A socket used to be the failure here, until backend/copynode.rs learned to recreate one;
+        // a file with no permission bits answers EACCES to open(2) for every uid but root instead.
+        let child = source.join("unreadable");
+        std::fs::write(&child, "body").unwrap();
+        std::fs::set_permissions(&child, std::fs::Permissions::from_mode(0o000)).unwrap();
         let target = d.join("target");
-        let error = copy_then_remove(&source, &target).expect_err("a socket cannot be copied");
-        assert!(source.join("socket").exists(), "the source remains after a failed copy");
+        let error = copy_then_remove(&source, &target).expect_err("an unreadable child cannot be copied");
+        assert!(child.exists(), "the source remains after a failed copy");
         assert!(!target.exists(), "the failed rename leaves no unjournaled partial target");
         assert_eq!(
             error.path,
-            source.join("socket").to_string_lossy(),
+            child.to_string_lossy(),
             "the copy failed on a child, so the target directory the cleanup removed had been created"
         );
     }
