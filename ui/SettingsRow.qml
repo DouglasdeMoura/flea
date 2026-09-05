@@ -50,6 +50,9 @@ Item {
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         font.bold: true
+        // The canvas sets every group eyebrow in small caps, the same treatment the rail's own headings take.
+        font.capitalization: Font.AllUppercase
+        font.letterSpacing: 1
         textFormat: Text.PlainText
     }
 

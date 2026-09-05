@@ -135,7 +135,8 @@ Item {
     function formPasswordState() { return form.passwordState() }
     function formPasswordEyeCentre() { return form.passwordEyeCentre() }
     function formNote() { return form.protocol === "NFS" ? "No credentials: NFS trusts the client host" : "" }
-    function formAction() { return root.retrying ? "Retry" : "Save" }
+    // The canvas labels this "Connect and save" on every protocol card, and it is the accurate name: the save mounts as well as writing the bookmark.
+    function formAction() { return root.retrying ? "Retry" : "Connect and save" }
     function formMetrics() { return Math.round(card.padding) + "|" + Math.round(content.spacing) }
     function formMetricTargets() { return Style.space(16) + "|" + Style.space(12) }
 

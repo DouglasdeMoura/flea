@@ -62,6 +62,8 @@ Item {
         Flea.Glyph {
             anchors.fill: parent
             visible: !root.thumbDrawn
+            // The tile is the mark's own slot: without its own ceiling Glyph caps a 46 px tile at the 19 px row mark.
+            maxSize: Theme.grid.iconSize
             name: root.row ? Icons.glyphFor(root.row.i) : "file"
             color: root.cursor || root.selected ? Theme.color.accent : Theme.color.muted
         }

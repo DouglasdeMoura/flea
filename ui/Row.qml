@@ -230,6 +230,7 @@ Item {
         color: root.cellColor()
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
+        horizontalAlignment: Text.AlignRight
         elide: Text.ElideRight
         textFormat: Text.PlainText
     }
@@ -246,6 +247,7 @@ Item {
         color: root.cellColor()
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
+        horizontalAlignment: Text.AlignRight
         elide: Text.ElideRight
         textFormat: Text.PlainText
     }
@@ -317,7 +319,7 @@ Item {
             return Format.size(root.row.s)
         }
         if (!root.dirSize) {
-            return "-"
+            return "·"
         }
         return (root.dirSize.partial ? ">" : "") + Format.size(root.dirSize.bytes)
     }
