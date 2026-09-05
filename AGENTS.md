@@ -3768,6 +3768,12 @@ rewritten and every other line byte-identical, and a name carrying an embedded n
 produces a file with the same line count it started with, the newline gone rather than splitting
 one bookmark into two.
 
+Round 2 of advloop closed a third gap, the asymmetry from the other side: `relabel` read each line
+raw while `Mounts.removeBookmark()` reads it trimmed, so an indented bookmark line was one `Remove`
+could drop and `Rename` could only ever duplicate, appending a second line for a uri the file
+already carried. `relabel` trims first now, the same way, and the line it rewrites loses its
+indentation along with its old label.
+
 ### Flea ends when its last window closes, and a wedged listing no longer freezes the rail
 
 Three fixes on 2026-09-02, one on the way out and two on the rail. None of them had a line here.
