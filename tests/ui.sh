@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives the real Quickshell window with omarchy-drive and asserts through the read-only IPC seam.
-# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs ...]; networklive is opt-in.
+# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal ...]; networklive is opt-in.
 set -u
 set -o pipefail
 # Hard rule 9's guard, which owns FIXTURE_ROOT and every create and delete this suite makes.
@@ -39,6 +39,20 @@ fi
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 flea_ui="$repo/ui"
 flea_bin="${FLEA_BIN:-$repo/target/release/flea}"
+# Sample input: let finished = Command::new("gio")
+# Every opener stub below is named from the product's own exec target, the same derivation
+# tests/modes.sh makes: a stub named by hand goes stale the day the target is renamed, and the run
+# then resolves the operator's real launcher instead. That is what left three editor pairs resident
+# on this box, and this suite is the one that did it.
+handoff_in() {
+    grep -ho 'Command::new("[a-z0-9-]\+")' "$1" | cut -d'"' -f2 | sort -u
+}
+open_handoff=$(handoff_in "$repo/src/open.rs")
+# Fail closed rather than write a stub nothing calls, which is the fall-through this prevents: a
+# suite that stubs the wrong name reports green having handed the operator's own launcher a file.
+case "$open_handoff" in
+    ''|*[!a-z0-9-]*) fail "src/open.rs must name exactly one handoff; got '$open_handoff'" ;;
+esac
 bench_dir="${FLEA_BENCH_DIR:-$FIXTURE_ROOT/flea-bench-btrfs}"
 # Every root sits under the fixture root and takes no override, because a root the environment can
 # replace is a root nothing checks: these four are deleted whole on every exit path.
@@ -604,6 +618,21 @@ probe_network_mark_target() {
 
 # A single IPC call may consume its own two-second timeout, so count wall time and bound each read;
 # a retry count alone turned one nominal 25-second wait into more than eight minutes.
+
+# ui/Opener.qml spawns flea --terminal and returns, so the stub's line lands after the key has
+# been answered: waited for, never slept at, and the path it carries is checked here rather than
+# by the caller so a wrong directory reads as a timeout with the log printed.
+wait_terminal() {
+    local log="$1" want="$2" what="$3" waited
+    for waited in $(seq 1 200); do
+        grep -q "^TERMINAL $want$" "$log" && return 0
+        sleep 0.05
+    done
+    fail "openterminal: $what started no terminal in $want, log is $(cat "$log")"
+}
+
+# The status bar clears a transient after 4000 ms and an eject verdict arrives on the rail's own
+# 5000 ms poll, so a sentence that lands after a poll has to be caught as it lands, never slept for.
 wait_message() {
     local want="$1" seen="" deadline=$(( $(date +%s%3N) + 25000 ))
     while (( $(date +%s%3N) < deadline )); do
@@ -819,8 +848,15 @@ case_open() {
     ln -s "$dir/nowhere" "$dir/broken"
     local opened="$dir/opened.log"
     : > "$opened"
-    printf '#!/bin/sh\nprintf "OPENED %%s\\n" "$1" >> %q\n' "$opened" > "$dir/bin/xdg-open"
-    chmod +x "$dir/bin/xdg-open"
+    # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
+    # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
+    # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = open ] || exec /usr/bin/gio "$@"\n'
+      printf 'printf "OPENED %%s\\n" "$2" >> %q\n' "$opened"
+    } > "$dir/bin/$open_handoff"
+    chmod +x "$dir/bin/$open_handoff"
 
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
@@ -835,7 +871,7 @@ case_open() {
     wait_path "$dir/subdir"
     omarchy-drive wait ipc -p "$flea_ui" flea state empty --timeout 10 >/dev/null \
         || fail "open: subdir never reached its empty listing, state is $(ipc state)"
-    [[ ! -s "$opened" ]] || fail "l on a directory handed $(cat "$opened") to xdg-open"
+    [[ ! -s "$opened" ]] || fail "l on a directory handed $(cat "$opened") to $open_handoff open"
     [[ -z "$(ipc lastMessage)" ]] || fail "open: entering the empty subdir said $(ipc lastMessage)"
     key l >/dev/null
     settle
@@ -845,13 +881,13 @@ case_open() {
     [[ "$(ipc lastMessage)" == "Press / to filter this listing by name." ]] \
         || fail "open: unbound q said $(ipc lastMessage), so the empty-row l check has no negative control"
 
-    # Bare l enters a symlink to a directory without handing it to xdg-open.
+    # Bare l enters a symlink to a directory without handing it to the opener.
     key -k Backspace >/dev/null
     wait_path "$dir"
     seek_row_named linkdir
     key l >/dev/null
     wait_path "$dir/linkdir"
-    [[ ! -s "$opened" ]] || fail "l on a symlink directory handed $(cat "$opened") to xdg-open"
+    [[ ! -s "$opened" ]] || fail "l on a symlink directory handed $(cat "$opened") to $open_handoff open"
 
     # Return on a symlink to a directory keeps its existing navigation and opener coverage.
     key -k Backspace >/dev/null
@@ -859,7 +895,7 @@ case_open() {
     seek_row_named linkdir
     key -k Return >/dev/null
     wait_path "$dir/linkdir"
-    [[ ! -s "$opened" ]] || fail "Enter on a symlink directory handed $(cat "$opened") to xdg-open"
+    [[ ! -s "$opened" ]] || fail "Enter on a symlink directory handed $(cat "$opened") to $open_handoff open"
 
     # Return on a symlink to a file still resolves and opens its target.
     key -k Backspace >/dev/null
@@ -889,8 +925,123 @@ case_open() {
     shot open-broken
     [[ -n "$(ipc lastMessage)" ]] || fail "Enter on a broken symlink said nothing"
     [[ "$(ipc path)" == "$dir" ]] || fail "Enter on a broken symlink moved to $(ipc path)"
-    [[ "$(grep -c OPENED "$opened")" == "1" ]] || fail "a broken symlink was handed to xdg-open"
+    [[ "$(grep -c OPENED "$opened")" == "1" ]] || fail "a broken symlink was handed to $open_handoff open"
     [[ "$(ipc total)" == "7" ]] || fail "the listing did not survive Enter on a broken symlink"
+}
+
+# PR 34's terminal route. Nothing else in this suite reaches it: before this case, openTerminal,
+# terminalRequested, terminalFailed and --terminal appeared nowhere in this file, so the topbar
+# button, its wiring in ui/shell.qml and the chord's interception in ui/js/Focus.js were all
+# deletable with the display suite still green.
+case_openterminal() {
+    local dir="$fixture_root/openterminal"
+    sandbox_scratch "$dir"
+    mkdir -p "$dir/bin"
+    printf 'abc' > "$dir/target.txt"
+    local ran="$dir/ran.log" opened="$dir/opened.log" real_bin="$flea_bin"
+    : > "$ran"
+    : > "$opened"
+    # FLEA_BIN is the backend's binary as well as the opener's, so only --terminal is intercepted
+    # and every other mode execs the real one: a stub that swallowed --backend would leave the
+    # window with no listing to press a key in. The sleep is what makes the single-flight guard and
+    # the two-paths-at-once check observable at all.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = --terminal ] || exec %q "$@"\n' "$real_bin"
+      printf 'sleep 1\n'
+      printf 'printf "TERMINAL %%s\\n" "$2" >> %q\n' "$ran"
+      printf 'exit 0\n'
+    } > "$dir/bin/flea"
+    chmod +x "$dir/bin/flea"
+    # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
+    # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
+    # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = open ] || exec /usr/bin/gio "$@"\n'
+      printf 'printf "OPENED %%s\\n" "$2" >> %q\n' "$opened"
+    } > "$dir/bin/$open_handoff"
+    chmod +x "$dir/bin/$open_handoff"
+
+    local saved_path="$PATH"
+    export PATH="$dir/bin:$PATH"
+    flea_bin="$dir/bin/flea"
+    launch "$dir"
+    export PATH="$saved_path"
+    flea_bin="$real_bin"
+    # bin, opened.log, ran.log, target.txt.
+    wait_listing 4
+
+    # The pointer half: the topbar button, by its glyph, which is the same action the chord raises.
+    click_chrome terminal
+    wait_terminal "$ran" "$dir" "the topbar button"
+    printf 'OPENTERMINAL button log=%q\n' "$(cat "$ran")"
+
+    # The keyboard half, from the list.
+    : > "$ran"
+    hotkey --global ctrl t flea >/dev/null
+    wait_terminal "$ran" "$dir" "ctrl+t in the list"
+
+    # And from the rail, which owns its own keys and would otherwise swallow the chord.
+    : > "$ran"
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc focusView)" == "rail" ]] || fail "openterminal: tab did not reach the rail"
+    hotkey --global ctrl t flea >/dev/null
+    wait_terminal "$ran" "$dir" "ctrl+t on the rail"
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc focusView)" == "list" ]] || fail "openterminal: escape did not return to the list"
+
+    # A second request while the first terminal is still starting is dropped, and the third, once it
+    # has exited, is not: without the second half this check passes for a key that does nothing.
+    # The drop is announced, because a swallowed keypress with nothing on screen is the defect.
+    : > "$ran"
+    hotkey --global ctrl t flea >/dev/null
+    settle
+    hotkey --global ctrl t flea >/dev/null
+    wait_message "Still opening the last terminal; try again in a moment."
+    wait_terminal "$ran" "$dir" "the single-flight guard"
+    sleep 1
+    [[ "$(grep -c . "$ran")" == "1" ]] || fail "openterminal: two terminals were started, log is $(cat "$ran")"
+    : > "$ran"
+    hotkey --global ctrl t flea >/dev/null
+    wait_terminal "$ran" "$dir" "a request after the child exited"
+
+    # Both at once: the terminal child is still sleeping when Enter opens a file, so a shared path or
+    # a shared Process would show up as one of the two logs carrying the other's argument.
+    : > "$ran"
+    : > "$opened"
+    hotkey --global ctrl t flea >/dev/null
+    seek_row_named target.txt
+    key -k Return >/dev/null
+    local waited
+    for waited in $(seq 1 100); do
+        grep -q "^OPENED $dir/target.txt$" "$opened" && break
+        sleep 0.05
+    done
+    grep -q "^OPENED $dir/target.txt$" "$opened" \
+        || fail "openterminal: a file open during a terminal launch never reached $open_handoff, log is $(cat "$opened")"
+    wait_terminal "$ran" "$dir" "the terminal launched beside a file open"
+    printf 'OPENTERMINAL crossed terminal=%q opened=%q\n' "$(cat "$ran")" "$(cat "$opened")"
+    [[ "$(grep -c . "$opened")" == "1" ]] || fail "openterminal: the opener ran twice, log is $(cat "$opened")"
+
+    # A nonzero exit reaches the status line as one sentence. The stub is rewritten rather than
+    # relaunched, because a fresh exec reads the file again.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = --terminal ] || exec %q "$@"\n' "$real_bin"
+      printf 'exit 2\n'
+    } > "$dir/bin/flea"
+    chmod +x "$dir/bin/flea"
+    : > "$ran"
+    hotkey --global ctrl t flea >/dev/null
+    wait_message "That directory could not be opened in a terminal; nothing on this system took it."
+    shot openterminal-failed
+    [[ ! -s "$ran" ]] || fail "openterminal: the failing stub still logged $(cat "$ran")"
+
+    printf 'OPENTERMINAL button=ok list=ok rail=ok single-flight=ok crossed=ok failure=ok\n'
+    kill_flea
 }
 
 # The operator's defect of 2026-09-02, in their own words: "when clicking a single click opens the
@@ -907,8 +1058,15 @@ case_click() {
     printf 'gamma\n' > "$dir/gamma.txt"
     local opened="$dir/opened.log"
     : > "$opened"
-    printf '#!/bin/sh\nprintf "OPENED %%s\\n" "$1" >> %q\n' "$opened" > "$dir/bin/xdg-open"
-    chmod +x "$dir/bin/xdg-open"
+    # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
+    # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
+    # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = open ] || exec /usr/bin/gio "$@"\n'
+      printf 'printf "OPENED %%s\\n" "$2" >> %q\n' "$opened"
+    } > "$dir/bin/$open_handoff"
+    chmod +x "$dir/bin/$open_handoff"
 
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
@@ -1982,7 +2140,7 @@ case_focus() {
     key -k Return >/dev/null
     wait_path "$HOME"
     [[ "$(ipc path)" == "$HOME" ]] || fail "focus: Enter on Home did not open $HOME, path is $(ipc path)"
-    # railAct's open case only emits sidebar.opened; nothing there hands focus back to the list.
+    # RailKeys.act's open case only emits sidebar.opened; nothing there hands focus back to the list.
     [[ "$(ipc focusView)" == "rail" ]] || fail "focus: opening a favourite unexpectedly moved focus off the rail"
     shot focus-opened
     key -k Escape >/dev/null
@@ -2047,11 +2205,18 @@ case_preview() {
     local dir="$fixture_root/preview"
     sandbox_scratch "$dir"
     mkdir -p "$dir/bin"
-    # The double click below opens the row, so notes.md would hit the real xdg-open without this stub, the same hazard case_open already fixed.
+    # The double click below opens the row, so notes.md would hit the real gio open without this stub, the same hazard case_open already fixed.
     local opened="$dir/opened.log"
     : > "$opened"
-    printf '#!/bin/sh\nprintf "OPENED %%s\\n" "$1" >> %q\n' "$opened" > "$dir/bin/xdg-open"
-    chmod +x "$dir/bin/xdg-open"
+    # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
+    # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
+    # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = open ] || exec /usr/bin/gio "$@"\n'
+      printf 'printf "OPENED %%s\\n" "$2" >> %q\n' "$opened"
+    } > "$dir/bin/$open_handoff"
+    chmod +x "$dir/bin/$open_handoff"
     printf 'hello from flea\n' > "$dir/sample.txt"
     printf '# Notes\n\nSome *text*.\n' > "$dir/notes.md"
     truncate -s 2M "$dir/big.txt"
@@ -2089,7 +2254,7 @@ PYEOF
     export PATH="$dir/bin:$PATH"
     launch "$dir"
     export PATH="$saved_path"
-    # bin/ and opened.log are the xdg-open stub's own fixture entries, alongside the six under test.
+    # bin/ and opened.log are the gio stub's own fixture entries, alongside the six under test.
     wait_listing 8
 
     # A single click must move the cursor and nothing else: no preview, and since 2026-09-02 no open
@@ -3398,7 +3563,7 @@ EOS
     [[ "$(ipc shareBrowserOpen)" == "false" ]] || fail "sharebrowser: Escape did not close the overlay"
     [[ "$(ipc path)" == "$dir" ]] || fail "sharebrowser: Escape navigated to $(ipc path)"
     [[ "$(ipc total)" == "3" ]] || fail "sharebrowser: Escape changed the listing underneath"
-    # A second Escape hands focus back to the list, ui/js/Focus.js "railAct"'s own escape case;
+    # A second Escape hands focus back to the list, ui/js/RailKeys.js "act"'s own escape case;
     # case_network's own post-dialog check relies on the exact same mechanism.
     key -k Escape >/dev/null
     settle
@@ -3860,15 +4025,22 @@ case_taildrop() {
     mkdir -p "$dir/adir" "$dir/bin"
     printf 'taildrop test payload\n' > "$dir/send-me.txt"
     # The third site of a hazard case_open and case_preview each fixed once. Without this the case
-    # reached the REAL xdg-open on send-me.txt and left an editor running: two were still resident
+    # reached the real opener on send-me.txt and left an editor running: two were still resident
     # eighteen hours later. The stub goes in before the FIRST launch, not before the second, because
     # a stub the earlier half of the case cannot see is not a stub.
     # The log lives inside bin/, whose contents are not listed, so the row count and every click_row
     # index in this case stay exactly as they were.
     local opened="$dir/bin/opened.log"
     : > "$opened"
-    printf '#!/bin/sh\nprintf "OPENED %%s\\n" "$1" >> %q\n' "$opened" > "$dir/bin/xdg-open"
-    chmod +x "$dir/bin/xdg-open"
+    # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
+    # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
+    # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = open ] || exec /usr/bin/gio "$@"\n'
+      printf 'printf "OPENED %%s\\n" "$2" >> %q\n' "$opened"
+    } > "$dir/bin/$open_handoff"
+    chmod +x "$dir/bin/$open_handoff"
 
     local first_path="$PATH"
     export PATH="$dir/bin:$PATH"
@@ -4096,7 +4268,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal)
 
 : > "$run_log"
 : > "$flea_log"

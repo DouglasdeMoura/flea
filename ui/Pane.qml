@@ -4,6 +4,7 @@ import "." as Flea
 import "js/DirSizes.js" as DirSizes
 import "js/Filter.js" as Filter
 import "js/Focus.js" as Focus
+import "js/Menu.js" as Menu
 import "js/Search.js" as Search
 import "js/Archive.js" as Archive
 import "js/Nav.js" as Nav
@@ -27,6 +28,8 @@ FocusScope {
     property int lockedMode: 0
     // Off by default: dotfiles stay out of every listing until the context menu or "." turns them on.
     property bool showHidden: false
+    // Issue 27's state-file key: with it on a cursor step past an end comes round; ui/js/Focus.js step is the only reader.
+    readonly property bool wrapAtEnds: ViewState.state.wrapAtEnds === true
     // When the first d of the dd pair landed; ui/js/Focus.js reads it and Nav's reset clears it.
     property double trashArmedAt: 0
     // "" off, "typing" while the query line has the keyboard, "results" once a walk was asked for; ui/js/Search.js owns every transition.
@@ -34,6 +37,8 @@ FocusScope {
     // Where the search was started from, which a home-wide walk leaves behind; see ui/js/Search.js.
     property string searchFrom: ""
     property string searchQuery: ""
+    // Issue 30: which scope the next walk takes, flipped by tab on the query line; see ui/js/Search.js.
+    property bool searchHere: false
     property bool searchRunning: false
     property bool searchCancelled: false
     // The query narrowing the listing in place, and whether its line still has the keyboard;
@@ -198,9 +203,8 @@ FocusScope {
     // shell.qml's IPC thumbFile reader calls this; the lookup lives with the thumbnail machinery in ui/List.qml.
     function thumbFor(index) { return list.thumbFor(index) }
 
-    // Lifted to Focus.act and Focus.railAct, see ui/js/Focus.js; each just names its own target.
+    // Lifted to Focus.act; the rail's keys are ui/js/RailKeys.js's, reached by Focus.handleKey.
     function act(action) { Focus.act(action, root) }
-    function railAct(action) { Focus.railAct(action, root, sidebar) }
 
     // index is a listing row, which is what every caller outside ui/js/Filter.js holds; the clamp
     // and the scroll both happen in view space, because a filter can be narrowing what is drawn.
@@ -218,6 +222,9 @@ FocusScope {
 
     // A path the caller already resolved, for the columns view's neighbour rows, which have no cursor.
     function openFile(path) { wire.opener.open(path) }
+
+    // A terminal in the directory being shown, through ui/Opener.qml's flea --terminal.
+    function openTerminal() { wire.opener.openTerminal(root.path) }
 
     function openParent() { Nav.parent(root) }
 
@@ -259,7 +266,7 @@ FocusScope {
         onMenuRequested: function (pos) { menu.openForHeader(pos) }
         searchMode: root.searchMode
         searchQuery: root.searchQuery
-        searchScope: Search.scope(Search.scopeRoot(root.path, root.home), root.home)
+        searchScope: Search.scope(Search.scopeRoot(root.path, root.home, root.searchHere), root.home)
         searchNote: Search.note(root.total, root.searchRunning, root.searchCancelled)
     }
 
@@ -351,7 +358,6 @@ FocusScope {
         dropboxPath: sidebar.dropboxReady ? root.home + "/Dropbox" : ""
         // The separator is part of the test, or /home/gm/DropboxBackup would count as inside Dropbox.
         rowInDropbox: root.path === root.home + "/Dropbox" || root.path.indexOf(root.home + "/Dropbox/") === 0
-        // The Open row's muted tail: the app xdg-open would choose, resolved as the cursor moves; empty for a directory.
         onChosen: function (action) {
             if (action.indexOf("taildrop:") === 0) { root.sendTaildrop(action.substring("taildrop:".length)); return }
             if (action === "copypath") { wire.opener.copyText(root.path + "/" + root.cursorRow.n); return }
@@ -371,15 +377,8 @@ FocusScope {
     function copyShareLink() { wire.shareLink.copy(root.join(root.path, root.cursorRow ? root.cursorRow.n : "")) }
     function sendTaildrop(peerId) { Ops.sendTaildrop(root, wire.taildrop, peerId) }
 
-    // The keyboard's own entrance to the row menu, under the cursor row the way the rail's opens under
-    // its own; setCursor first, because a wheel scroll in the grid can leave the cursor off screen.
-    function openCursorMenu() {
-        root.setCursor(root.cursorIndex)
-        var row = root.visibleItemFor(root.cursorIndex)
-        if (row)
-            menu.openAt(row.mapToItem(null, Theme.spacing.rowPaddingX, row.height))
-        return row !== null
-    }
+    // The keyboard's own entrance to the row menu; the placement itself is ui/js/Menu.js's.
+    function openCursorMenu() { return Menu.openAtCursor(root, menu, Theme.spacing.rowPaddingX) }
 
     Flea.StateMessage {
         anchors.fill: root.listArea

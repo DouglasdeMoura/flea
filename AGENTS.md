@@ -313,20 +313,84 @@ unlinking a caller-supplied path is not this function's job even when that path 
 from a broken caller. The exit status is the contract: a caller must check it before
 trusting whatever `dest` currently holds.
 
+## The state file
+
+`~/.local/state/flea/ui.json`, or `$XDG_STATE_HOME/flea/ui.json` when that is set and not empty, is
+the one file Flea writes for itself. `src/uischema.rs` holds the shipped shape and every default,
+copied from the 0.1.4 build handoff; `src/uistate.rs` holds the merges; `src/uistore.rs` holds the
+paths, the lock and the write.
+
+**One update path, and both front ends go through it.** `flea --ui-state` prints the merged
+document and writes nothing. `flea --ui-state '<json object>'` merges that patch through the lock
+and prints the result. The window reaches it from `ui/ViewState.qml` through a `Process`; the
+terminal interface, when it is built, submits patches for `view`, `hidden` and `sort` only, because
+scale, menus and places are the window's.
+
+**The lock is the sibling `ui.json.lock`.** `File::lock()` is `flock(2)` here: advisory, exclusive
+and cross-process, held across the re-read, the per-key validation, the caller-key merge, the temp
+write and the rename, so a second Flea cannot land between this one's read and its write. Measured
+on the box with the lock taken out, twelve concurrent writers landed 1 of their 12 keys; with it in,
+12 of 12.
+
+**Failure is per key, never per file.** A document that does not parse reads as the full default
+shape rather than throwing. A value a key cannot take costs that key alone, and every other key in
+the file stands. A key this Flea does not know is kept and rewritten as it was read, at the top
+level and inside a nested object, so an older Flea cannot eat a newer one's settings. A patch is the
+other way round: it is checked whole before any of it lands, and one bad key refuses the whole patch
+with a sentence naming it, because a patch comes from Flea and not from a text editor.
+
+**`wrapAtEnds` is read by the window and by nothing else.** `ui/Pane.qml` exposes it off the
+document `ui/ViewState.qml` already holds, and `ui/js/Focus.js` `step` is its only reader: with the
+key off a cursor step past an end clamps, and with it on a step taken from an end comes round. It
+ships off because issue 27 asked for the wrap and another operator reported the same jump as a bug.
+
+**`menu.hidden` stores what is hidden**, and its rule is deliberately open, an action id rather than
+a closed list, because a closed list would make this Flea drop an id a newer one hid.
+
+**`display.textSize.mode` is `"system"` or one Omarchy stop**, one of 9, 10, 11, 12, 14, 16 and 20.
+It is one key and not two, so there is nowhere for a free number to be stored.
+
+**The write is a temp plus a rename, never a truncation**, created at mode 0600 in the `open()` call
+inside a directory created at 0700, and a symbolic link at either the file or the lock is refused
+rather than written through. Proven by holding an fd open across an update and reading the old bytes
+back through it, and by a sweep of 120 `SIGKILL`s during the write, none of which left the file as
+anything but the old document or the new one.
+
+**0.1.3 did store something, and it is migrated.** `ui/ViewState.qml` wrote `hiddenCols` and
+`uiScale` to `$XDG_CONFIG_HOME/flea/view.json`, so the handoff's "0.1.3 stored nothing" is wrong.
+`hiddenCols` named what was HIDDEN and `columns` names what is SHOWN, so the migration inverts it;
+`uiScale` is dropped on the operator's ruling, because 0.1.4 stores an Omarchy stop and never a free
+multiplier. `main()` runs the migration once before it hands off to `qs`, so the first paint after an
+upgrade already reads the migrated columns. A `ui.json` that exists is never re-migrated, and
+`view.json` is never written again.
+
 ## Modes
 
 `main.rs` dispatches on argv before anything else runs, but only `--backend` is fully insulated
-from the flag parsing below: it is matched anywhere in argv and always wins. `--prewarm` and
-`--open` are matched only in their exact well-formed shape, `args.len() == 5` and
-`args.len() == 3` with the flag in argv[1], so a MALFORMED one is not caught here at all. It
+from the flag parsing below: it is matched anywhere in argv and always wins. `--prewarm`,
+`--open` and `--terminal` are matched only in their exact well-formed shape, `args.len() == 5`
+for the first and `args.len() == 3` with the flag in argv[1] for the other two, so a MALFORMED one
+is not caught here at all. It
 falls through to the parsing below and leaves by the unknown-flag branch, which names the flag
 and exits 2; `flea --open` with no path and `flea --open a b` are both that case. The looseness
-predates this branch for `--prewarm` and this branch extended it to `--open`. `--open` takes exactly one path and exits with the whole of its contract: `0` is a
+predates this branch for `--prewarm` and this branch extended it to `--open` and `--terminal`. `--open` takes exactly one path and exits with the whole of its contract: `0` is a
 successful handoff, `2` is anything that could not be opened and carries one elided
 sentence, and `3` means the resolved target is a directory and carries no output at all. A
 directory is refused rather than handed on because `xdg-mime query default inode/directory`
-here is `org.gnome.Nautilus.desktop`, so handing one to `xdg-open` from inside a file
+here is `org.gnome.Nautilus.desktop`, so handing one to the desktop's opener from inside a file
 manager opens a different file manager; the caller navigates instead. See "Opening a file".
+
+`--terminal` takes exactly one directory and has a two-value contract: `0` is a successful handoff
+to `xdg-terminal-exec`, and `2` is everything else, carrying one elided sentence on stderr. A path
+that does not resolve and a path that resolves to something other than a directory both answer
+`that directory could not be opened in a terminal, check that it still exists`; a handler that
+could not be run at all answers `nothing on this system could be asked to open a terminal there`,
+so the pair tells a refusal from an unimplemented mode the way `--open`'s does. There is no third
+status: a terminal has no `IS_DIRECTORY` case to report. See "Opening a file".
+
+`--ui-state` is matched on `args[1]` alone and handles its own shapes: none reads the state file,
+one merges that JSON object through the shared update path, and anything more is a usage error. See
+"The state file".
 
 `--default` and `--default off` are matched the same way, in their own exact shape
 (`args.len() == 2`, and `args.len() == 3` with `args[2] == "off"`), dispatching to
@@ -379,12 +443,14 @@ huge pages" below for what it is worth and what it cost.
 
 - `main.rs` dispatches on argv: `--backend` runs the command loop, `--prewarm <path>
   <first> <dest>` writes the prewarm file, `--open <path>` hands one file to the desktop's
-  handler, `--default [off]` claims or releases the OS-level default, and anything else
+  handler, `--terminal <dir>` opens the configured terminal there, `--default [off]` claims or
+  releases the OS-level default, and anything else
   opens the window unless explicit `--tui` requests the terminal interface, see "Modes".
 - `paths.rs` resolves the UI directory and whether a display is available.
 - `gui.rs` execs `qs` against the resolved UI directory.
 - `thp.rs` the one `prctl(PR_SET_THP_DISABLE)` declaration, `disable()` and `enable()`.
-- `open.rs` hands one file to `xdg-open`, see "Opening a file".
+- `open.rs` hands one file to `gio open` and waits for it, see "Opening a file".
+- `terminal.rs` hands one directory to `xdg-terminal-exec --dir=` and does not wait, see "Opening a file".
 - `defaults.rs` claims or releases the OS-level default: the desktop-entry install check,
   the `inode/directory` MIME default via `xdg-mime`, and reporting each half, see "Modes".
 - `hyprkeys.rs` adds or removes the additive, markered block in Omarchy's
@@ -392,7 +458,11 @@ huge pages" below for what it is worth and what it cost.
 - `userfile.rs` resolves `$HOME` and `$XDG_CONFIG_HOME` and rewrites a per-user file through
   an exclusive temp plus rename, see "Predictable path writes".
 - `error.rs` the one error type, naming the failing operation and input.
-- `json.rs` the whole of this tree's JSON: read one named field out of a line, escape one string into one.
+- `json.rs` the wire's JSON: read one named field out of one line, escape one string into one.
+- `jsondoc.rs` one whole JSON document in and out, which the one-line scanner above deliberately is not.
+- `uischema.rs` the shipped `ui.json` shape and the rule each key is measured against.
+- `uistate.rs` the `ui.json` merges: a file onto the defaults, one caller patch, and 0.1.3's `view.json`.
+- `uistore.rs` where `ui.json` lives and the one locked, atomic way it is rewritten, see "The state file".
 - `backend/mod.rs` is module declarations and nothing else, the `#[cfg(test)]` ones included. It
   declares more modules than the list below names, which is the load-bearing ones and not a census.
 - `backend/listing.rs` the arena-backed `Listing`.
@@ -430,6 +500,8 @@ huge pages" below for what it is worth and what it cost.
 - `ui/shell.qml` owns the pragmas, window, startup path and read-only IPC seam.
 - `ui/Backend.qml` is the only QML component that talks to the Rust child, and carries
   `thumb` and `thumbcancel` out and `thumbed` in alongside `list`, `window` and `sort`.
+- `ui/ViewState.qml` reads `ui.json` once at startup with a blocking `FileView` and writes nothing
+  itself: every change goes back out through `flea --ui-state`, see "The state file".
 - `ui/Theme.qml` owns the singleton palette, type and spacing tokens from the Omarchy
   theme plus the user override.
 - `ui/Pane.qml` owns one directory view, its integer model, held window, actions, the
@@ -441,8 +513,9 @@ huge pages" below for what it is worth and what it cost.
   was lifted out of `Pane.qml` at the 400-line hard cap and has no behaviour.
 - `ui/Row.qml` renders one row delegate: the icon slot, which a thumbnail replaces in
   place, the PlainText name and the semantic colours.
-- `ui/Opener.qml` is the only component that launches a foreign program, by running
-  `flea --open`, see "Opening a file".
+- `ui/Opener.qml` is the only component that runs Flea's own opening modes, by running
+  `flea --open`, `flea --terminal` and a one-line `sh` that pipes into `wl-copy`, which is why
+  `wl-clipboard` is a `depends` entry, see "Opening a file".
 - `ui/ContextMenu.qml` is the one pane-owned right-click popup and its single Open action.
 - `ui/StatusBar.qml` renders the path, row counts and transient messages.
 - `ui/TabBar.qml` is the window's tab strip, hidden with no height until a second tab exists.
@@ -460,8 +533,16 @@ huge pages" below for what it is worth and what it cost.
   snapshot carries a cursor and a selection only across a switch that re-lists nothing, because an
   index names a row and a re-read can put a different file behind the same number.
 - `ui/js/Trash.js` is the dd pair's arm-and-fire policy, split out of `Focus.js` at its cap.
-- `ui/js/Scale.js` is the interface scale's step, clamp and sentence; `ui/ViewState.qml` stores it
-  and `ui/Theme.qml` multiplies its own tokens by it, so no surface reads the chord itself.
+- `ui/js/PreviewKeys.js` is what the preview overlay does with a key, and the 5 s seek step only it
+  reads, split out of `Focus.js` at its cap the second time it reached one.
+- `ui/js/RailKeys.js` is what the rail does with a key, split out of `Focus.js` at its cap the third
+  time it reached one; `Focus.handleKey` calls it directly, as it already called `PreviewKeys`.
+- `ui/js/Menu.js` is what either menu holds and where its frame sits: the submenu test, the
+  edge clamp, the listing and header row lists, and `openAtCursor`, the keyboard's own entrance,
+  which came out of `ui/Pane.qml` when PR 34's `openTerminal` would have pushed it past its cap.
+- `ui/js/Scale.js` is the interface scale's step, clamp and sentence; `ui/ViewState.qml` holds it
+  for the window and `ui/Theme.qml` multiplies its own tokens by it, so no surface reads the chord
+  itself. It is a session value: the state file stores an Omarchy text-size stop and no multiplier.
 - `ui/js/PathBar.js` is what a typed path line means: the tilde, the relative name, the
   `file://` URI, the interior `.` and `..`, and what Tab makes of one directory's names. Pure,
   so `tests/js/pathbar.js` drives all of it; the field itself is `ui/ChromeBar.qml`'s.
@@ -715,13 +796,13 @@ under a deadline and reports `Ran::Succeeded`, `Ran::Failed` or `Ran::NotStarted
 knows about thumbnails, which is why the pool's `JOB_TIMEOUT` stays in `thumbs.rs` and is passed
 in.
 
-`ui/Pane.qml` is 398 lines by `wc -l`, over the soft budget and 2 lines under the hard cap. It stood at
+`ui/Pane.qml` is 393 lines by `wc -l`, over the soft budget and 7 lines under the hard cap. It stood at
 exactly 400 of 400 and could not gain a line, which is why `ui/Header.qml` came out of it
 first and alone, before any behaviour was added; it then took on the settle timer, the
 thumbnail row map, the opener wiring, the input-to-rows stamps and the first-screen settle, and
-still ends under the cap. **There is almost no room left**: the next change of any size lifts a helper into
-`ui/js/Thumbs.js` or takes another band out the way the header went, and does not lift the
-cap. It stays one
+reached 398. **There was almost no room left**, and PR 34's three-line `openTerminal` would have
+put it at 401, so `openCursorMenu`'s body was the helper that went: it is menu placement, and
+`ui/js/Menu.js` already owned where a frame sits when it opens at a point. It stays one
 component because the integer model, held window, list-reply pairing, focus and action
 dispatch share one state owner; splitting them would add a state boundary in the exact
 path that prevents untagged backend replies from crossing directory navigation.
@@ -740,9 +821,12 @@ what makes the move provable rather than merely asserted.
 which answers a thumbnail URL when the pane holds one for this row and the OEM two-step icon
 lookup otherwise.
 
-`ui/Opener.qml` is 41 lines, well inside both budgets: one `Process`, one `open()` and two
-signals. `flea --open` decides and exits in milliseconds, so one process serves every open,
-and this is the only component in the tree that launches a foreign program.
+`ui/Opener.qml` is 92 lines, well inside both budgets: three `Process` objects, three functions
+(`open`, `openTerminal` and `copyText`) and five signals. `flea --open` waits for `gio open` and
+not for the application, which is 11 to 15 ms against an `Exec=` handler but 0.32 to 0.75 s against
+a `DBusActivatable` one, so one process serves every open and a second Enter is dropped for that
+long and told to try again; this is the only component in the tree that runs `flea --open` or
+`flea --terminal`.
 
 `ui/js/Thumbs.js` is 77 lines by `wc -l` against a 200-line soft budget, and its suite
 `tests/js/thumbs.js` is 66. It is arithmetic over the row map and nothing else, with no QML
@@ -838,12 +922,21 @@ no second language. Do not restore the `awk`.
 
 A `[[pointer]]` table joined this on 2026-09-02, when a single left click stopped opening a
 row and the second tap started to. It declares what each button, modifier and tap count does
-in the listing, in the columns view's two neighbour columns and in the rail, and the generator
-emits it as `Keymap.POINTER`. `ui/js/Tap.js` is the only code that decides any of it and
-`tests/js/tap.js` drives every listing and neighbour row of the table through that file, so
-neither side can move without the other. `tests/ui.sh` case `click` then drives real clicks at
-the window, which is the half a JavaScript suite cannot reach: it is what says a delegate hands
-`Tap.tapped` the tap count and the modifiers the click actually carried.
+in five places, and the generator emits it as `Keymap.POINTER`: the listing, the columns view's
+two neighbour columns, the rail, the `window` itself and the `chrome`. `ui/js/Tap.js` is the
+only code that decides the first three and `tests/js/tap.js` drives every listing and neighbour
+row of the table through that file, so neither side can move without the other. `tests/ui.sh`
+case `click` then drives real clicks at the window, which is the half a JavaScript suite cannot
+reach: it is what says a delegate hands `Tap.tapped` the tap count and the modifiers the click
+actually carried.
+
+The last two rows landed with issues 20 and 45 and are not `Tap.js`'s. `window` is the mouse's
+back button, which belongs to no row: `ui/shell.qml` carries the handler and `ui/js/Nav.js`
+`mouseBack` decides between the history and the climb. `chrome` is the path above the listing,
+whose segments `ui/ChromeBar.qml` draws as their own click targets through `Nav.crumbs`. Neither
+`where` has a `pointercase_` driver in `tools/flea-acceptance-drive`, so both report as derived
+and undriven rather than as passes; `tests/js/tap.js` holds their counts, which is what stops a
+row being added to the table and reaching nothing at all.
 
 Its effect field is `does` and not `action`, and that is load bearing. `tools/flea-acceptance`
 derives its whole key checklist with one `sed` for `^action = ` over this file, with no table
@@ -873,7 +966,7 @@ waits for its consumer.
   this and cannot be rewritten, because the branch is shared:** its subject says nine suites
   were uninvoked and its body says seven, and the derived answer is zero of twelve. The runner
   builds both cargo profiles, since `protocol.sh` drives the debug binary and `thumbs.sh` the
-  release one, runs the nine suites that need nothing but a shell, and reads each suite's OWN
+  release one, runs the eleven suites that need nothing but a shell, and reads each suite's OWN
   exit code, never a pipeline's. It then names `ui.sh`, `drag.sh` and `bench.sh` with what each
   needs, so a suite it cannot run stays visible instead of being forgotten a second time.
 - **`./tests/drag.sh` is the internal drag's characterisation suite, 9 checks**, and it has to
@@ -1113,9 +1206,21 @@ waits for its consumer.
   the `prctl` is removed and it reddens if the call fails; a second check asserts the stub
   reported at all, so a broken stub cannot be mistaken for a passing gate. See "Transparent
   huge pages" under "Deliberate corners".
-- The `--open` checks inside `./tests/modes.sh` put a stub `xdg-open` on `PATH` that reports
-  its own argv and its own `THP_enabled`, which is what pins symlink resolution and the
-  handoff. The huge page half needs a second stub, because a bare `flea --open` runs in a
+- The `--open` checks inside `./tests/modes.sh` put a stub on `PATH` that reports
+  its own pid, argv count, argv and `THP_enabled`, which is what pins symlink resolution, the
+  handoff, a name starting with a dash and a name with a newline in it arriving as one absolute
+  argument. That stub's last write is what the read waits for, so it is exiting whatever `--open`
+  did and the reaped-launcher check on it cannot go red; a third stub in `lingerbin/` writes its pid
+  and then sleeps half a second, which is the arm that can, and it is the shape of the real
+  `DBusActivatable` wait in miniature. A second stub in
+  `failbin/` exits `3`, which is the check that `--open` reports a refusal instead of the `0` a
+  detached spawn reported. All three are named from `src/open.rs`'s own `Command::new` target, and the
+  `--terminal` stub from `src/terminal.rs`'s, rather than spelled in the test: when the target moved
+  from `xdg-open` to `gio` the hand-written name did not follow, so every `--open` in the block
+  resolved the real `/usr/bin/xdg-open` instead, and a stub named from the product cannot drift.
+  Issue 41 has its own case beside them, driving the real `gio` against an
+  isolated `XDG_DATA_HOME` and `XDG_CONFIG_HOME` holding one `Terminal=true` entry and a stub
+  `xdg-terminal-exec`, so the operator's own MIME state is never read or written. The huge page half needs a second stub, because a bare `flea --open` runs in a
   process where nothing disabled huge pages, so `thp::enable()` is a no-op there and that
   check cannot tell it from an empty function: the paired case launches `flea --gui` against a
   stub `qs` that reports what it inherited and then execs `flea --open`, and only that one
@@ -1127,10 +1232,11 @@ waits for its consumer.
   also raises an `unused import: std::os::unix::process::CommandExt` warning, but **that
   warning is not the guard**: it disappears the moment anything else in the file needs
   `CommandExt`, while the check keeps working.
-- The two `--open` error paths each need a check on the sentence, not just the status, because
+- The three `--open` error paths each need a check on the sentence, not just the status, because
   the unknown-flag branch also exits 2 and also prints no errno: against the pre-Task-4 binary
-  the status and errno checks of both pairs pass unchanged, and only `could not be opened` and
-  `nothing on this system could be asked` tell an implemented `--open` from an absent one.
+  the status and errno checks all pass unchanged, and only `could not be opened`,
+  `gio open refused that file` and `nothing on this system could be asked` tell an implemented
+  `--open` from an absent one.
 - `./tests/budget.sh` asserts `tools/flea-file-budget` itself rejects an oversized
   file and passes a clean tree.
 - `./tools/flea-acceptance` is the everything-works battery, and **its checklist is derived at run
@@ -1194,10 +1300,14 @@ waits for its consumer.
   `remember` evicts at the cap in insertion order. It reddens on a mutation because
   `ui/js/Thumbs.js` imports no QML.
 - `./tests/ui.sh` drives the real window through `omarchy-drive` and takes a case name to run
-  one of nine: `cursor`, `terminal`, `open`, `menu`, `colour`, `icons`, `thumbs`, `hashcache`
-  and `nosweep`. With no argument it runs all nine and then three whole-run checks, a backend
-  drain, a log grep and a cache count, so a clean run prints `0 of 12 checks failed`.
-  - `open` replaced the old `symlink` case. It puts a stub `xdg-open` on `PATH` and asserts
+  one of the `case_*` functions it defines; the file's own usage line lists them and
+  `grep -c '^case_[a-z]*()' tests/ui.sh` counts them. With no argument it runs all of them and
+  then three whole-run checks, a backend drain, a log grep and a cache count, so a clean run
+  prints `0 of N checks failed`, with N three more than that count. Neither the list nor either
+  number is written out here: both went stale the first time a case was added.
+  - `open` replaced the old `symlink` case. It puts a stub opener on `PATH`, named from
+    `src/open.rs`'s own `Command::new` target the way `tests/modes.sh` names its own, which
+    intercepts the `open` subcommand and execs the real `gio` for every other one, and asserts
     all three Enter answers on one listing: a symlink to a file hands the resolved target to
     the handler and does not leave the directory, a symlink to a directory navigates and is
     never handed to the handler, and a broken symlink says one sentence, moves nothing and
@@ -2722,7 +2832,7 @@ both measured to pay nothing for it: `ffmpegthumbnailer` on a fixture clip ran 8
 pages on against 89 to 92 ms off over five interleaved pairs, output byte-identical. A foreign program
 CAN now be launched from the window, because Enter on a file runs `flea --open`, and the undo the
 corner asked for ships with it: `open::open` calls `thp::enable()`, which is
-`prctl(PR_SET_THP_DISABLE, 0, ...)`, in the `flea --open` process before it spawns `xdg-open`, so the
+`prctl(PR_SET_THP_DISABLE, 0, ...)`, in the `flea --open` process before it spawns `gio open`, so the
 opened program inherits huge pages back on. That call lives in `src/open.rs`, after the
 `canonicalize` and after the directory refusal and immediately before the spawn, so a path that
 never reaches a handler never changes the setting, and `src/thp.rs` holds the one `extern "C"`
@@ -2754,11 +2864,21 @@ setting above is inherited by every descendant, so a program launched from QML w
 life with transparent huge pages disabled without ever asking; `open::open` hands the setting back
 before it spawns.
 
-It spawns `xdg-open` and exits, it does not `exec` into it. `/usr/bin/xdg-open` line 977 is
-`env "$command" "$@"` inside `search_desktop_file`, with no `exec` and no `&`, so `xdg-open` blocks
-for the whole life of the application it launched. An `exec` would therefore leave a Flea-descended
-process alive for that whole life, as a child of the `qs` process, which Quickshell may kill when
-Flea quits. `Command::spawn` is still argv-direct exec and never a shell, which is the binding
+It runs `gio open <path>` and waits for that one process, which is not the same as waiting for the
+application. `gio open` asks the desktop database for the handler, launches it and returns: measured
+on this box in the low tens of milliseconds against a stub handler that then ran for five seconds
+of its own, with the handler still running long after `gio` had been reaped. Ten runs against an isolated
+`XDG_DATA_HOME` holding one entry, whose `XDG_DATA_DIRS` was still the box's own 107 system
+entries, and ten more with the operator's 17 user entries on the search path as well, were the
+same 10 to 14 ms, so the size of the database is not what that number is made of. **That whole
+paragraph measures the `Exec=` path and is not a bound on the other one**: a `DBusActivatable` entry
+makes `gio open` wait on the `org.freedesktop.Application.Open` reply instead, which on this box's
+archive default is 0.32 to 0.75 s, and the `ui/Opener.qml` paragraph below carries those numbers.
+Waiting is what makes the exit status mean
+anything, and the detached `xdg-open` spawn it replaced answered `0` for a handoff that had not
+happened. It is still a spawn and never an `exec`, because an `exec` would leave a Flea-descended
+process alive for the application's whole life, as a child of the `qs` process, which Quickshell may
+kill when Flea quits. `Command::status` is argv-direct exec and never a shell, which is the binding
 requirement. The child gets `process_group(0)` so that nothing which later kills Flea's process group
 reaches the opened application.
 
@@ -2775,28 +2895,82 @@ which is the error path.
 
 The exit statuses are the whole contract: `0` is a successful handoff, `2` is anything that could not
 be opened and carries one elided sentence on stderr, and `3` means the resolved target is a directory
-and carries no output at all. A directory is refused rather than handed on because
+and carries no output at all. `2` now covers the launcher refusing as well as failing to start, and the three sentences are
+distinct because `std::fs::canonicalize` has already proved the file is there before `gio` is run at
+all: a path that does not resolve gets `that file could not be opened, check that it still exists`, a
+`gio open` that exits nonzero gets `gio open refused that file, so no application on this system took
+it`, and a `gio` that could not be run at all gets `nothing on this system could be asked to open that
+file`, so the set tells a refused open from an unimplemented one and neither one blames the path. A directory is refused rather than handed on because
 `xdg-mime query default inode/directory` is `org.gnome.Nautilus.desktop` here, so opening one through
-`xdg-open` from inside a file manager opens a different file manager; the caller navigates instead.
+the opener from inside a file manager opens a different file manager; the caller navigates instead.
 `flea --open` with no path and `flea --open a b` both fall through to the unknown-flag branch, which
 names the flag and exits 2.
 
-`ui/Opener.qml` is the window side of that contract and the only component in the tree that
-launches a foreign program. It holds one `Process`, because `flea --open` decides and exits in
-milliseconds, and its `onExited` is the whole mapping: `0` says nothing, `3` raises
+`ui/Opener.qml` is the window side of that contract and the only component in the tree that runs
+`flea --open` or `flea --terminal`. It holds a `Process` for each of the three it runs, and the
+opener's own `onExited` is the whole mapping for this half: `0` says nothing, `3` raises
 `isDirectory` and `Pane` navigates there, and anything else raises `failed` and `Pane` writes one
-sentence to the status line. `Pane.openCursor` sends a row with `d` true to `open()` and every
+sentence to the status line. That sentence names no cause, because `2` covers all three failures and
+`std::fs::canonicalize` has already disproved the one the window used to blame. A second `open()`
+while that `Process` is running is dropped rather than queued, and the drop raises `busy`, which
+`ui/PaneWire.qml` answers with one plain sentence in the same slot; `openTerminal()`'s guard raises
+`terminalBusy` the same way. The first press stays silent, so only a press that was refused speaks.
+
+**That window is a third of a second on an archive, not the low tens of milliseconds this file used
+to claim.** `gio open` on an `Exec=` entry forks and returns; on a `DBusActivatable` entry it waits
+on the `org.freedesktop.Application.Open` reply instead, which is a cold application start.
+Twenty-five of the twenty-six MIME types `org.gnome.Nautilus.desktop` claims resolve to it as this
+box's default (`gio mime application/zip` and twenty-four more), and an archive is a regular file
+that reaches `.status()` like any other. Measured on this box with Nautilus not running: 463, 317,
+318 and 340 ms idle, and 748, 709 and 707 ms with twenty-four spinners on twelve cores. With
+Nautilus already up it is 34 to 48 ms, and the `text/plain` `Exec=` control on the same harness is
+11 to 15 ms. Driven against the real window, `Return`, `Down`, `Return` sent as one `wtype` burst
+produced exactly one `gio open` call and an empty status line; the same `Return` on the same row
+after the wait cleared produced the second call, so the drop is the guard and not the driver.
+Saying something in the status bar is what the tree now does. Bounding the wait was declined because
+a deadline above the measured range is a guess and one below it cuts off a legitimate cold start, and
+queueing was declined because it fires an open after the operator gave up and answers a double Enter
+on one archive with two windows. `Pane.openCursor` sends a row with `d` true to `open()` and every
 other row to the opener, so a symlink to a directory reaches the opener, comes back 3 and
 navigates; `tests/ui.sh open` asserts all three answers on one listing.
 
-**`xdg-open` ignores `Terminal=true`, and that is the box's XDG configuration rather than Flea's
-to work around.** `search_desktop_file` reads only `Exec`, `Icon` and `Name`, so a handler that
-needs a terminal is run without one. `xdg-mime query default text/plain` is `nvim.desktop` here,
-so Enter on a text file spawns a headless `nvim` that maps no window and that the user never
-sees. The remedy belongs to the operator and it is `omarchy default editor`, which rewrites the
-association. Wrapping the handler in a terminal from inside Flea would mean Flea deciding which
-programs are terminal programs, and that is the judgement the desktop's own database exists to
-make.
+**Issue 41: `xdg-open` does not honour `Terminal=true`, which is why the handoff is `gio open`.**
+`xdg-mime query default text/plain` is `nvim.desktop` here, whose `Exec` is `nvim %F` and whose
+`Terminal` is `true`, and Enter on a text file mapped no window at all. Reproduced against an
+isolated `XDG_DATA_HOME` and `XDG_CONFIG_HOME` carrying one `Terminal=true` entry, so the operator's
+own MIME state was neither read nor written: `xdg-open` exited `3` with
+`no method available for opening`, the handler never ran, no terminal was reached, and `flea --open`
+still exited `0` over it. `gio open` on the same fixture ran the handler inside the stub
+`xdg-terminal-exec` and exited `0`. `src/terminal.rs` execs `xdg-terminal-exec` by name, which is
+why it is a `depends` entry and not an `optdepends` one; `/usr/lib/libgio-2.0.so` on `glib2
+2.88.3-1` carries that name too, but alongside other terminal names it can fall back to, so glib
+alone would not have required it.
+
+**The entry here used to decline the issue, and its stated remedy was false.** It said the remedy
+belonged to the operator and was `omarchy default editor`, which rewrites the association.
+`/usr/bin/omarchy-default-editor` is 36 lines, contains zero occurrences of `xdg-mime` and zero of
+`mimeapps`, and its one path reference is line 7,
+`editor_file="$HOME/.local/state/omarchy/defaults/editor"`, which lines 33 and 34 are the only
+writer of. It chooses what `omarchy-launch-editor` runs and changes no MIME association at all, so
+it could not have fixed this and never could have.
+
+Flea still decides nothing about which programs are terminal programs. That judgement is the desktop
+database's, `gio open` is how it is asked, and there is no desktop-entry parsing anywhere in
+`src/open.rs`.
+
+**`flea --terminal <dir>` is the same shape for a terminal**, and the topbar's terminal button and
+`Ctrl+T` are its only callers. `src/terminal.rs` canonicalizes the directory the same way, refuses
+anything that is not one, and hands the result to `xdg-terminal-exec` as a single `--dir=` argument,
+with the same three guards the opener carries: `/dev/null` on all three descriptors,
+`process_group(0)`, and `thp::enable()` before the spawn. Unlike `--open` it does not wait, because
+the terminal it starts lives as long as the user keeps it open: it returned with the stub's log
+still empty, against a stub that slept half a second before its first write. `xdg-terminal-exec` is
+the OEM route rather than a terminal name of Flea's own, and `omarchy default terminal` is what
+configures it: that command writes `~/.config/xdg-terminals.list`, one of the config files
+`xdg-terminal-exec` reads, so whatever the operator set is what opens.
+`tests/modes.sh` pins the argument, both refusals, the descriptors, the process group and the huge
+page restore against a stub on `PATH`, and `tests/ui.sh openterminal` drives the button and the
+chord from both views against a logging `FLEA_BIN`.
 
 ### No type-ahead, and trash is a pair
 
@@ -3268,9 +3442,11 @@ and open a stick somebody only meant to ask about.
 
 ### m raises the listing's menu too, under the cursor row
 
-`m` is one action, `menu`, and `ui/js/Focus.js` routes it by focus view. In the rail `raiseMenu`
-asks `Mounts.railMenu` and says `<label> has nothing to eject or unmount.` over a row with no
-release. In the listing `act`'s `menu` case calls `ui/Pane.qml` `openCursorMenu`, which scrolls
+`m` is one action, `menu`, and `ui/js/Focus.js` routes it by focus view. In the rail
+`ui/js/RailKeys.js` `act` calls `raiseMenu`, which asks `Mounts.railMenu` and says
+`<label> has nothing to eject or unmount.` over a row with no
+release. In the listing `act`'s `menu` case calls `ui/Pane.qml` `openCursorMenu`, whose body is
+`ui/js/Menu.js` `openAtCursor`: it scrolls
 the cursor row into view (a wheel scroll in the grid can leave it off screen), opens the one
 `ContextMenu` at that delegate's bottom-left through `openAt`, and answers whether a delegate was
 there at all; an empty directory, a listing still loading and a filter that hid every row all

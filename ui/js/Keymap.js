@@ -24,6 +24,7 @@ function lookup(key, text, modifiers) {
         if (key === Qt.Key_E) return "eject"
         if (key === Qt.Key_K) return "addNetwork"
         if (key === Qt.Key_L) return "pathBar"
+        if (key === Qt.Key_T) return "openTerminal"
         if (key === Qt.Key_Delete) return "trash"
         if (key === Qt.Key_Up) return "parent"
         if (key === Qt.Key_Down) return "open"
@@ -41,6 +42,10 @@ function lookup(key, text, modifiers) {
     switch (key) {
     case Qt.Key_Down: return "cursorDown"
     case Qt.Key_Up: return "cursorUp"
+    case Qt.Key_Home: return "cursorFirst"
+    case Qt.Key_End: return "cursorLast"
+    case Qt.Key_PageUp: return "pageUp"
+    case Qt.Key_PageDown: return "pageDown"
     case Qt.Key_Return: return "open"
     case Qt.Key_Enter: return "open"
     case Qt.Key_Backspace: return "parent"
@@ -116,6 +121,7 @@ var SHEET = [
     { keys: "a", action: "addNetwork", label: "add network place" },
     { keys: "m", action: "menu", label: "context menu" },
     { keys: "^e", action: "eject", label: "eject" },
+    { keys: "^t", action: "openTerminal", label: "open terminal" },
     { keys: "^+", action: "scaleUp", label: "scale up" },
     { keys: "^-", action: "scaleDown", label: "scale down" },
     { keys: "?", action: "keymapSheet", label: "this sheet" },
@@ -137,6 +143,9 @@ var POINTER = [
     { where: "neighbour", press: "left", row: "file", does: "nothing", label: "a file has no contents to reveal" },
     { where: "neighbour", press: "left x2", row: "file", does: "open", label: "open the file" },
     { where: "neighbour", press: "right", row: "any", does: "nothing", label: "a peeked row has no menu" },
+    { where: "chrome", press: "left", row: "crumb", does: "goToCrumb", label: "open the directory that segment of the path names" },
+    { where: "chrome", press: "left x2", row: "any", does: "pathBar", label: "type the path instead of clicking it" },
+    { where: "window", press: "back", row: "any", does: "backOrParent", label: "go back through the history, or up a directory when there is none" },
     { where: "rail", press: "left", row: "any", does: "open", label: "open the place" },
     { where: "rail", press: "right", row: "any", does: "menu", label: "eject and unmount" },
 ]

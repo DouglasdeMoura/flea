@@ -13,6 +13,17 @@ function run(check) {
     check("shift G goes last", Keymap.lookup(Qt.Key_G, "G", shift), "cursorLast")
     check("ctrl d is half a page down", Keymap.lookup(Qt.Key_D, "d", ctrl), "pageDown")
     check("ctrl u is half a page up", Keymap.lookup(Qt.Key_U, "u", ctrl), "pageUp")
+
+    // Issue 28: the full-size keyboard's own four, reusing the actions the vim keys already carry so
+    // no new name reaches tools/flea-acceptance's checklist and no second control does the same job.
+    check("home goes to the first row", Keymap.lookup(Qt.Key_Home, "", none), "cursorFirst")
+    check("end goes to the last row", Keymap.lookup(Qt.Key_End, "", none), "cursorLast")
+    check("page down is the page key, not only the chord", Keymap.lookup(Qt.Key_PageDown, "", none), "pageDown")
+    check("page up is the page key, not only the chord", Keymap.lookup(Qt.Key_PageUp, "", none), "pageUp")
+    // The chord pair keeps its own half-page meaning: the page keys joined it rather than replacing it.
+    check("ctrl d still pages, so the page key did not take the chord's action away",
+          Keymap.lookup(Qt.Key_D, "d", ctrl), "pageDown")
+    check("ctrl u still pages too", Keymap.lookup(Qt.Key_U, "u", ctrl), "pageUp")
     check("enter opens", Keymap.lookup(Qt.Key_Return, "", none), "open")
     check("keypad enter opens", Keymap.lookup(Qt.Key_Enter, "", none), "open")
     check("backspace goes up a directory", Keymap.lookup(Qt.Key_Backspace, "", none), "parent")
@@ -54,6 +65,7 @@ function run(check) {
     check("ctrl z undoes", Keymap.lookup(Qt.Key_Z, "\u001a", ctrl), "undo")
     check("ctrl f searches", Keymap.lookup(Qt.Key_F, "\u0006", ctrl), "search")
     check("ctrl e ejects", Keymap.lookup(Qt.Key_E, "\u0005", ctrl), "eject")
+    check("ctrl t opens a terminal here", Keymap.lookup(Qt.Key_T, "\u0014", ctrl), "openTerminal")
     check("ctrl k connects to a server", Keymap.lookup(Qt.Key_K, "\u000b", ctrl), "addNetwork")
     check("ctrl delete trashes", Keymap.lookup(Qt.Key_Delete, "", ctrl), "trash")
     check("ctrl up goes to the parent", Keymap.lookup(Qt.Key_Up, "", ctrl), "parent")
@@ -104,14 +116,14 @@ function run(check) {
           Keymap.SHEET.map(sheetAction).join("|"),
           Keymap.SHEET.map(function (row) { return row.action }).join("|"))
     check("the sheet is not empty, so the check above has a denominator",
-          Keymap.SHEET.length, 25)
+          Keymap.SHEET.length, 26)
     // A chord shares the row of the key it doubles, so every caret token must resolve to that row's
     // own action, or the sheet advertises a chord bound to something else.
     check("every chord the sheet draws is bound to the action of its own row",
           Keymap.SHEET.map(chordActions).join("|"),
           Keymap.SHEET.map(function (row) { return chordTokens(row).map(function () { return row.action }).join("+") }).join("|"))
     check("and the sheet draws chords at all, so that check has a denominator",
-          Keymap.SHEET.filter(function (row) { return chordTokens(row).length > 0 }).length, 10)
+          Keymap.SHEET.filter(function (row) { return chordTokens(row).length > 0 }).length, 11)
     check("slash filters, and the sheet now draws the row for it",
           Keymap.SHEET.filter(function (r) { return r.keys === "/" }).length, 1)
     check("and the sheet draws m, so eject and unmount are not mouse-only affordances",

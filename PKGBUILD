@@ -8,7 +8,10 @@ arch=('x86_64' 'aarch64')
 license=('MIT')
 # omarchy owns /usr/share/omarchy/shell, which ui/Commons and ui/Ui link into; quickshell owns qs.
 # util-linux ships prlimit, which the thumbnail and archive sandboxes require alongside bubblewrap.
-depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'quickshell' 'shared-mime-info' 'util-linux' 'xdg-utils')
+# xdg-terminal-exec is what --terminal execs, so the topbar's terminal button needs it installed.
+# wl-clipboard ships wl-copy, which ui/Opener.qml pipes into for the menu's Copy Path row; nothing
+# else in this closure requires it, so on a clean Omarchy box that row failed silently without it.
+depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
 makedepends=('cargo')
 optdepends=('libarchive: archive listing and extraction'
             '7zip: 7z archive support'
