@@ -2362,6 +2362,8 @@ case_network() {
         || fail "network: the dialog closed on an append it could not read a body for"
     key -k Escape >/dev/null
     settle
+    [[ "$(ipc dialogOpen)" == "false" ]] \
+        || fail "network: escape did not close the dialog after the unreadable-file arm"
     printf 'NETWORK unreadable-file-writes-nothing=ok\n'
 
     # Plain WebDAV is port 80, so the tick that picks the scheme has to pick the number with it, or
@@ -2667,7 +2669,7 @@ EOS
     settle
     [[ "$(ipc railCursor)" == "1" ]] || fail "hangshare: expected the rail cursor on hang, got $(ipc railCursor)"
     key l >/dev/null
-    wait_marker "$dir/bin/info-started" "hangshare: the hang share's gio info never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" | sort -u | tr '\n' ';')"
+    wait_marker "$dir/bin/info-started" "hangshare: the hang share's gio info never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" 2>/dev/null | sort -u | tr '\n' ';')"
 
     # The guard is closed now, proven by the marker above rather than by a sleep, and a second share
     # must say so rather than swallow the keypress.
@@ -2721,7 +2723,7 @@ EOS
     settle
     [[ "$(ipc railCursor)" == "3" ]] || fail "hangshare: expected the rail cursor on StubRoot, got $(ipc railCursor)"
     key l >/dev/null
-    wait_marker "$dir/bin/list-started" "hangshare: the bare root's gio list never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" | sort -u | tr '\n' ';')"
+    wait_marker "$dir/bin/list-started" "hangshare: the bare root's gio list never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" 2>/dev/null | sort -u | tr '\n' ';')"
     wait_message "That network location did not respond; check the address and try again."
     [[ "$(ipc shareBrowserOpen)" == "false" ]] \
         || fail "hangshare: the overlay opened on a listing that never answered"

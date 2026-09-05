@@ -139,8 +139,10 @@ function run(check) {
     // dedup drops it from the line; the bookmark and the live mount are one row on both spellings.
     check("so plain WebDAV's bookmark and gio's own report of it are one rail row",
           Mounts.normalize(formUri(false)) === Mounts.normalize("dav://nas.local/dav/"), true)
-    check("and a hand-written line still spelling 80 is that same one row",
-          Mounts.normalize("dav://nas.local:80/dav") === Mounts.normalize("dav://nas.local/dav/"), true)
+    // And the cost of the change, stated rather than left implicit: a line an older build wrote with
+    // the protocol-keyed prefill still carries 443, which gio keeps on plain dav, so it is its own row.
+    check("a plain-dav line still spelling 443 is a row of its own, because gio keeps that port",
+          Mounts.normalize("dav://nas.local:443/dav") === Mounts.normalize("dav://nas.local/dav/"), false)
     check("and so are TLS WebDAV's, which was already the case",
           Mounts.normalize(formUri(true)) === Mounts.normalize("davs://nas.local/dav/"), true)
     check("and never drops another scheme's default", Protocols.stripDefaultPort("sftp://h:445/x"), "sftp://h:445/x")
