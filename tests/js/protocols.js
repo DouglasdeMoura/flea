@@ -37,8 +37,8 @@ function run(check) {
           Protocols.uri({ protocol: "WebDAV", host: "h", port: "80", path: "", tls: false })
           + "|" + Protocols.uri({ protocol: "WebDAV", host: "h", port: "443", path: "", tls: false }),
           "dav://h/|dav://h:443/")
-    check("TLS-off WebDAV reparses an omitted port as 80 while the canvas still starts at 443",
-          Protocols.defaultPort("WebDAV", false) + "|" + Protocols.defaultPort("WebDAV"),
+    check("TLS-off WebDAV prefills 80 where the ticked canvas prefills 443",
+          Protocols.defaultPort("WebDAV", false) + "|" + Protocols.defaultPort("WebDAV", true),
           "80|443")
     // Its own FTPS dialog, which has no path at all.
     check("and the FTPS one, which names no path",

@@ -4,9 +4,9 @@ import Quickshell.Io
 import "js/Errors.js" as Errors
 import "js/Mounts.js" as Mounts
 
-// OEM-shaped Network service: only this file touches gio; Sidebar renders its entries. Two of its
-// jobs have their own files: the live listing is ui/MountListing.qml's, the saved places file
-// ui/NetworkPlaces.qml's.
+// OEM-shaped Network service: nothing but this file and its two children touches gio or the saved
+// places file, and Sidebar only renders its entries. The five second listing is ui/MountListing.qml's
+// and the places file is ui/NetworkPlaces.qml's.
 Item {
     id: root
 
@@ -26,7 +26,7 @@ Item {
 
     // Hyprland has no auth portal here, so "gio mount" on a share that wants a credential prompt
     // hangs forever with no stdin to answer it, and "gio info" on a location gvfs cannot reach does
-    // the same. Each leg of an open gets this bound.
+    // the same. Every gio leg of an open gets this bound; the helper leg has its own below.
     readonly property int mountTimeoutMs: 15000
     // The frozen helper has its own 30 s deadline; this outer bound also contains a broken test override.
     readonly property int authTimeoutSeconds: 35
@@ -173,7 +173,7 @@ Item {
         // An open is single flight over four children, the share listing included, so a new one must
         // not start over the running leg and hand that leg's deadline to itself; see "listShares".
         if (mountProcess.running || authProcess.running || infoProcess.running || listSharesProcess.running) {
-            // A guard that returns in silence names nothing at all, and the bound above is 15 s.
+            // A guard that returns in silence names nothing at all, and a leg can hold it 15 s.
             root.message("Another network location is still opening; give it a moment.", false)
             return
         }
@@ -347,9 +347,10 @@ Item {
                 root.opened(path)
                 return
             }
-            // A server root has no FUSE path of its own, so its shares are listed instead; a
-            // location gio could not describe at all never had one to begin with.
-            if (exitCode === 0 && root.isBareRoot(root._pendingUri)) {
+            // A server root has no FUSE path of its own, so its shares are listed instead, and the
+            // exit code is not read for that: gio describes a reachable root on some servers and
+            // refuses on others, and the listing that follows is what answers either way.
+            if (root.isBareRoot(root._pendingUri)) {
                 root.result = "mounted"
                 root.listShares(root._pendingUri)
                 return

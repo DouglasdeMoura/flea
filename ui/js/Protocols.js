@@ -36,10 +36,8 @@ function fieldsFor(protocol) {
 
 // The port the form prefills. It belongs to the scheme, never to the protocol: WebDAV builds two
 // schemes and SCHEME_PORTS below is the one table both this and the rail's dedup read it out of.
-// An unstated box is the canvas's own opening state, which is ticked: ui/NetworkForm.qml restores a
-// saved form's port before it has read the box back.
 function defaultPort(protocol, tls) {
-    return defaultPortFor(scheme(protocol, tls === undefined ? true : tls))
+    return defaultPortFor(scheme(protocol, tls))
 }
 
 // The exact URI gio mount will be handed. Empty when there is not enough to build one, so the

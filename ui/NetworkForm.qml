@@ -118,14 +118,16 @@ Column {
     function load(values) {
         root.reset()
         root.pick(values.protocol || "SMB")
+        // The box before the port: onTlsChanged above prefills the scheme's own default, and after
+        // the port it would overwrite the one this saved location actually carries.
+        root.tls = values.tls !== false
         labelField.text = values.label || ""
         hostField.text = values.host || ""
-        portField.text = values.port || String(Protocols.defaultPort(root.protocol))
+        portField.text = values.port || String(Protocols.defaultPort(root.protocol, root.tls))
         pathField.text = values.path || ""
         domainField.text = values.domain || ""
         userField.text = values.user || ""
         passwordField.text = values.password || ""
-        root.tls = values.tls !== false
     }
 
     function takePassword() {

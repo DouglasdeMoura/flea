@@ -2594,11 +2594,15 @@ EOS
     settle
     [[ "$(ipc networkPort)" == "443" ]] || fail "network: WebDAV opened on port $(ipc networkPort), not 443"
     key "wd.example" >/dev/null
-    # Host, port, Path, Username, the TLS row: Domain is hidden under WebDAV and the walk skips it.
-    key -k Tab >/dev/null
-    key -k Tab >/dev/null
-    key -k Tab >/dev/null
-    key -k Tab >/dev/null
+    # Domain is hidden under WebDAV and the walk skips it, Password is shown and the walk crosses it,
+    # so the walk reads where it is rather than counting: the traversal arm above pins the order.
+    for _attempt in $(seq 1 8); do
+        [[ "$(ipc networkFocus)" == "TLS" ]] && break
+        key -k Tab >/dev/null
+        settle
+    done
+    [[ "$(ipc networkFocus)" == "TLS" ]] \
+        || fail "network: the walk never reached the TLS row, it is on $(ipc networkFocus)"
     key -k Space >/dev/null
     settle
     [[ "$(ipc networkPort)" == "80" ]] \
@@ -2632,12 +2636,13 @@ EOS
     before_rename=$(cat "$bookmarks")
     [[ -n "$before_rename" ]] || fail "network: the rename arm needs saved places to lose, and the file is empty"
     chmod 200 "$bookmarks"
-    local saved_path="$PATH"
+    # Its own name: "local saved_path" again would reassign the one this case restores PATH from.
+    local rename_arm_path="$PATH"
     export PATH="$gio_stub/bin:$PATH"
     export HOME="$fixture_home"
     launch "$dir"
     export HOME="$real_home"
-    export PATH="$saved_path"
+    export PATH="$rename_arm_path"
     wait_listing 3
     # Only the live mount: the two saved places are invisible because the read that would have drawn
     # them failed, which is the state the rename then has to refuse to derive a body from.
@@ -2683,7 +2688,15 @@ EOS
         || fail "network: a rename with no bookmarks file at all did not write the first place, it reads: $(cat "$bookmarks" 2>&1)"
     printf 'NETWORK unreadable-file-renames-nothing=ok absent-file-renames-write-the-first=ok\n'
 
-    # The arms above left focus wherever their last dialog did, and "a" is bound on the rail alone.
+    # The arm above runs against a listing-only gio, so the cache arms below need this case's own
+    # stub back and a window started under it. Its saved places go with it: they are the arm above's
+    # subject, not this one's, and the rail rows they draw are nothing below reads.
+    kill_flea
+    rm -f "$bookmarks"
+    export HOME="$fixture_home"
+    launch "$dir"
+    export HOME="$real_home"
+    wait_listing 3
     rail_focus
     key a >/dev/null
     settle
@@ -2872,8 +2885,8 @@ EOS
     [[ ! -s "$helper_log" ]] || fail "networkauth: already-mounted descendant launched helper"
     click_rail_row "$network_index" right
     settle
-    [[ "$(ipc contextMenuEntries)" == "Unmount" ]] \
-        || fail "networkauth: projected mounted row offered no Unmount"
+    [[ "$(ipc contextMenuEntries)" == "Unmount|Rename|Remove" ]] \
+        || fail "networkauth: the projected mounted row offers $(ipc contextMenuEntries), not Unmount first"
     key -k Return >/dev/null
     wait_network_result unmounted 5
     [[ "$(cat "$state/unmount-uri")" == 'sftp://tester@slot.test/' ]] \
@@ -3331,8 +3344,8 @@ case_networklive() {
     wait_listing_wall 0 25
     click_rail_row "$network_index" right
     settle
-    [[ "$(ipc contextMenuEntries)" == "Unmount" ]] \
-        || fail "networklive: mounted share menu is not Unmount"
+    [[ "$(ipc contextMenuEntries)" == "Unmount|Rename|Remove" ]] \
+        || fail "networklive: mounted share menu is $(ipc contextMenuEntries), not Unmount first"
     key -k Return >/dev/null
     wait_message "Unmounted $label."
     wait_network_result unmounted 25
@@ -3405,7 +3418,7 @@ case_gvfs() {
 
     click_rail_row 1 right
     settle
-    [[ "$(ipc contextMenuEntries)" == "Unmount" ]] \
+    [[ "$(ipc contextMenuEntries)" == "Unmount|Rename|Remove" ]] \
         || fail "gvfs: mounted share menu is $(ipc contextMenuEntries)"
     key -k Return >/dev/null
     wait_message "Unmounted share.zip."
@@ -3468,15 +3481,17 @@ case "\$1" in
     if [ "\$2" = "-l" ] || [ "\$2" = "-u" ]; then
       exit 0
     fi
-    if [ "\$2" = "$share2_uri" ]; then
+    # The product passes --anonymous on smb, so the location is the last argument, not the second.
+    shift \$(( \$# - 1 ))
+    if [ "\$1" = "$share2_uri" ]; then
       # gvfsd composes this refusal, so no client locale makes it English: it stays Spanish.
-      echo "gio: \$2: La ubicacion ya esta montada" >&2
+      echo "gio: \$1: La ubicacion ya esta montada" >&2
       exit 2
     fi
-    if [ "\$2" = "$share3_uri" ]; then
+    if [ "\$1" = "$share3_uri" ]; then
       # A genuine failure, translated by the same daemon, and the control the already-mounted half
       # never had: same nonzero exit, opposite verdict, told apart only by the gio info below.
-      echo "gio: \$2: No se pudo conectar con el servidor" >&2
+      echo "gio: \$1: No se pudo conectar con el servidor" >&2
       exit 1
     fi
     exit 0
