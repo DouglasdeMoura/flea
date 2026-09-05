@@ -100,18 +100,13 @@ function runMaster(check) {
           Settings.masterState(Settings.toggleId([], "cut")) + " "
           + Settings.basicEnabled(Settings.toggleId([], "cut")), "some 5")
 
-    // menu.basic is the stored master, and ui/ViewState.qml folds it in before anything reads the
-    // set, so a hand-edited "basic": false switches the six off in the panel and in every menu.
-    check("a stored master that is on changes nothing about the set",
-          Settings.effectiveHidden(true, ["paste"]).join(","), "paste")
-    check("a stored master that is off hides all six, whatever menu.hidden holds",
-          Settings.basicEnabled(Settings.effectiveHidden(false, [])), 0)
-    check("and it keeps the ids beside them",
-          Settings.effectiveHidden(false, ["copypath"]).indexOf("copypath") >= 0, true)
-    check("folding an already-off group adds no duplicate",
-          Settings.effectiveHidden(false, Settings.BASIC).length, Settings.BASIC.length)
-    check("the fold does not mutate the array it was handed",
-          (function () { var held = ["paste"]; Settings.effectiveHidden(false, held); return held.length })(), 1)
+    // menu.hidden is the sole state, so the master is a reading of that set and never a value beside
+    // it: there is no fold to apply here, and nothing a hand edit could leave the two disagreeing on.
+    check("the model exports no stored master to read", typeof Settings.effectiveHidden, "undefined")
+    check("a set with no master in it still draws one",
+          Settings.rows("menus", { hidden: ["paste"] })[1].state, "some")
+    check("and the master survives a round trip through the set it derives from",
+          Settings.masterState(Settings.toggleMaster(Settings.toggleMaster([]))), "all")
 }
 
 function runRows(check) {
@@ -147,6 +142,10 @@ function runRows(check) {
     check("the Menus section leads with the master row under its own heading",
           kinds(menus).indexOf("group|master|check") === 0, true)
     check("the master's count is drawn beside it", menus[1].value, "5 of 6")
+    // The mirror of the same ruling: five ids in the set is one action left ON, never "5 of 6".
+    check("and five hidden ids read as one enabled, not five",
+          Settings.rows("menus", { hidden: ["cut", "copy", "paste", "duplicate", "rename"] })[1].value,
+          "1 of 6")
     check("a hidden action's row is drawn unchecked, not dropped",
           find(menus, "paste").on, false)
     check("and an enabled one is checked", find(menus, "copy").on, true)

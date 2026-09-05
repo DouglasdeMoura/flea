@@ -55,14 +55,15 @@ function run(check) {
 
     // The document the window holds, rebuilt rather than mutated: a var property notifies on
     // assignment and not on a reach-in, and a whole-group assignment would take one writer's half
-    // of display or menu as the whole of it.
+    // of display or places as the whole of it.
     var held = { columns: ["name"], display: { textSize: { mode: "system" } } }
     check("one key is replaced and the rest carried",
           JSON.stringify(UiState.withKey(held, "keys", "windows")),
           '{"columns":["name"],"display":{"textSize":{"mode":"system"}},"keys":"windows"}')
     check("a group merges into what is beside it rather than replacing the group",
-          JSON.stringify(UiState.withGroup({ menu: { basic: true, hidden: ["paste"] } }, "menu", { hidden: [] })),
-          '{"menu":{"basic":true,"hidden":[]}}')
+          JSON.stringify(UiState.withGroup({ places: { sidebarWidth: 240, showHome: true } },
+                                           "places", { showHome: false })),
+          '{"places":{"sidebarWidth":240,"showHome":false}}')
     check("a group that is not there yet is created",
           JSON.stringify(UiState.withGroup({}, "display", { textSize: { mode: 16 } })),
           '{"display":{"textSize":{"mode":16}}}')

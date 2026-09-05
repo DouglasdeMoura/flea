@@ -55,14 +55,12 @@ QtObject {
     // from and back to one anchor rather than each resolving their own.
     readonly property int omarchyBase: Style.font.baseSize
 
-    // The context-menu actions switched off in the settings panel's Menus section, by action id.
-    // ui/js/Menu.js applyHidden is the consumer and ui/ContextMenu.qml the one caller that passes it
-    // in. menu.basic is the master's own stored value, folded in here rather than read anywhere else,
-    // so a hand-edited "basic": false really does switch the whole basic group off.
+    // The context-menu actions switched off in the settings panel's Menus section, by action id, and
+    // the section's only state: ui/js/Menu.js applyHidden is the consumer and ui/ContextMenu.qml the
+    // one caller that passes it in, and the panel's master row is derived from this set, not stored.
     readonly property var menu: root.state.menu || ({})
-    readonly property var menuHidden: Settings.effectiveHidden(
-        root.menu.basic !== false,
-        Array.isArray(root.menu.hidden) ? root.menu.hidden : root.defaultMenuHidden)
+    readonly property var menuHidden: Array.isArray(root.menu.hidden) ? root.menu.hidden
+                                                                      : root.defaultMenuHidden
 
     // "mac" or "windows", the Keys section's two-value toggle over the one generated key table.
     readonly property string keysPreset: Settings.contains(Settings.PRESETS, root.state.keys)
@@ -92,11 +90,10 @@ QtObject {
                          ? TextSize.pin(root.textSize, root.omarchyBase) : TextSize.follow())
     }
 
-    // The Menus section's own two writers, both over the folded set, so a file whose master and ids
-    // disagree is written back agreeing with itself on the first change either of them makes.
+    // The Menus section's own two writers. Both write the hidden set alone, because the master row
+    // over the six basic actions is Settings.masterState of that set rather than a value of its own.
     function setMenuHidden(hidden) {
-        root.state = UiState.withGroup(root.state, "menu",
-                                       { basic: Settings.basicEnabled(hidden) > 0, hidden: hidden })
+        root.state = UiState.withGroup(root.state, "menu", { hidden: hidden })
         root.save()
     }
 
@@ -148,7 +145,7 @@ QtObject {
             columns: root.columns,
             keys: root.keysPreset,
             display: { textSize: root.textSize },
-            menu: { basic: Settings.basicEnabled(root.menuHidden) > 0, hidden: root.menuHidden }
+            menu: { hidden: root.menuHidden }
         })
     }
 

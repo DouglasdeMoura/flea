@@ -427,7 +427,9 @@ column. The header menu offers only the four optional keys onto an array that al
 `name`, so no click this window can produce is refused by the rule.
 
 **`menu.hidden` stores what is hidden**, and its rule is deliberately open, an action id rather than
-a closed list, because a closed list would make this Flea drop an id a newer one hid.
+a closed list, because a closed list would make this Flea drop an id a newer one hid. It is the
+Menus section's whole state: the panel's master row over the six basic actions is derived from the
+set every time it is drawn, so there is no second value for a hand edit to leave it disagreeing with.
 
 **`display.textSize.mode` is `"system"` or one Omarchy stop**, one of 9, 10, 11, 12, 14, 16 and 20.
 It is one key and not two, so there is nowhere for a free number to be stored.
@@ -635,8 +637,8 @@ huge pages" below for what it is worth and what it cost.
   scale is the compositor's: `ui/Theme.qml` reads it once from `hyprctl monitors -j` and the panel
   shows it read-only, because the board rules that Flea does not step or cycle it.
 - `ui/js/Settings.js` is the settings panel's whole model: the three sections, the context-menu
-  action inventory and its groups, the tri-state master over the six basic actions, `effectiveHidden`
-  which folds the stored `menu.basic` master into the hidden set, and the row list
+  action inventory and its groups, the tri-state master over the six basic actions, which
+  `masterState` derives from `menu.hidden` rather than storing beside it, and the row list
   each section draws. Pure, so `tests/js/settings.js` drives every control without a window.
   `ui/SettingsPanel.qml` paints what `rows()` returns and owns the panel's two-sided keyboard,
   `ui/SettingsRail.qml` the section rail and `ui/SettingsRow.qml` one row of the pane.

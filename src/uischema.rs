@@ -26,7 +26,7 @@ pub const DEFAULTS: &str = r#"{
   },
   "keys": "mac",
   "display": { "textSize": { "mode": "system" } },
-  "menu": { "basic": true, "hidden": ["delete", "openwith", "terminal",
+  "menu": { "hidden": ["delete", "openwith", "terminal",
             "moveto", "copyto", "properties", "permissions", "copypath"] }
 }"#;
 
@@ -86,9 +86,9 @@ pub const TEXT_SIZE: &[(&str, Rule)] = &[("mode", Rule::TextSize)];
 // rather than carrying a second writable copy of a setting Hyprland already owns.
 pub const DISPLAY: &[(&str, Rule)] = &[("textSize", Rule::Group(TEXT_SIZE))];
 
-// basic is the master row SettingsMenus draws over the six basic actions; ui/ViewState.qml folds it
-// into the hidden set the menus read, and writes the two together so they cannot disagree.
-pub const MENU: &[(&str, Rule)] = &[("basic", Rule::Bool), ("hidden", Rule::Ids)];
+// hidden is the whole of the Menus section's state: the master row SettingsMenus draws over the six
+// basic actions derives from it by masterState in ui/js/Settings.js, and cannot disagree with it.
+pub const MENU: &[(&str, Rule)] = &[("hidden", Rule::Ids)];
 
 pub const SCHEMA: &[(&str, Rule)] = &[
     ("view", Rule::Word(&["list", "columns", "grid", "dual"])),
@@ -184,7 +184,8 @@ mod tests {
         assert_eq!(d.get("display").and_then(|p| p.get("textSize")).and_then(|t| t.get("mode")).and_then(Json::as_str), Some("system"));
         let display: Vec<&str> = d.get("display").and_then(Json::as_object).expect("display").iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(display, ["textSize"], "the compositor owns opacity, icons and shadows");
-        assert_eq!(d.get("menu").and_then(|m| m.get("basic")).and_then(Json::as_bool), Some(true));
+        let menu: Vec<&str> = d.get("menu").and_then(Json::as_object).expect("menu").iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(menu, ["hidden"], "the master row is derived from menu.hidden, not stored beside it");
     }
 
     // menu.hidden stores what is hidden, so an action added later is visible without a migration.
@@ -221,6 +222,7 @@ mod tests {
                              (r#"{"display":{"textSize":{"mode":"override"}}}"#, "display.textSize.mode"),
                              (r#"{"display":{"opacity":1.0}}"#, "display.opacity"),
                              (r#"{"display":{"shadows":true}}"#, "display.shadows"),
+                             (r#"{"menu":{"basic":false}}"#, "menu.basic"),
                              (r#"{"keys":"vim"}"#, "keys"),
                              (r#"{"language":"en"}"#, "language"),
                              (r#"{"places":{"favourites":[""]}}"#, "places.favourites"),

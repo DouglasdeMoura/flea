@@ -4113,6 +4113,10 @@ case_settings() {
     settle
     [[ "$(ipc settingsRows)" == *"choice|Size|${pinned_base}px"* ]] \
         || fail "settings: a restart brought the panel back on a different stop"
+    # The master is derived from the stored set, so a restart that read only menu.hidden must still
+    # draw the five of six the panel left behind, and the six rows under it must agree with it.
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
+        || fail "settings: a restart did not derive the master back to five of six, got $(ipc settingsRows)"
     key -k Escape >/dev/null
     settle
     click_row 0 right
@@ -4163,7 +4167,9 @@ settings_assert_backend() {
     settings_backend_holds "$doc" ".display.textSize.mode == $pinned_base" "the ${pinned_base}px stop"
     settings_backend_holds "$doc" '.keys == "windows"' "the Windows preset"
     settings_backend_holds "$doc" '.menu.hidden | index("paste")' "the hidden Paste action"
-    settings_backend_holds "$doc" '.menu.basic == true' "a master agreeing with the five of six the panel drew"
+    # menu.hidden is the sole state: the five of six the panel drew is derived from it, so a second
+    # value beside it here would be a value that could disagree with the set the menus actually read.
+    settings_backend_holds "$doc" '.menu | has("basic") | not' "menu.hidden alone, with no stored master"
     # The preservation half, and the whole point of one store: four settings writes are four merges,
     # so the retained view state, the backend's own keys and a newer Flea's key are all still here.
     settings_backend_holds "$doc" '.columns == ["name","size"]' "the stored column set"

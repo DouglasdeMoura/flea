@@ -248,12 +248,13 @@ mod tests {
     // The TUI submits view, hidden and sort; scale, menus and places are the GUI's and it leaves them alone.
     #[test]
     fn a_tui_patch_and_a_gui_patch_do_not_clobber_each_others_keys() {
-        let gui = jsondoc::parse(r#"{"places":{"sidebarWidth":240},"menu":{"basic":false}}"#).expect("gui");
+        let gui = jsondoc::parse(r#"{"places":{"sidebarWidth":240},"menu":{"hidden":["paste"]}}"#).expect("gui");
         let tui = jsondoc::parse(r#"{"view":"columns","hidden":true,"sort":{"key":"size"}}"#).expect("tui");
         let after_gui = patched(&from_file("{}"), &gui).expect("gui patch");
         let after_both = patched(&after_gui, &tui).expect("tui patch");
         assert_eq!(after_both.get("places").and_then(|p| p.get("sidebarWidth")).and_then(Json::as_f64), Some(240.0));
-        assert_eq!(after_both.get("menu").and_then(|m| m.get("basic")).and_then(Json::as_bool), Some(false));
+        let hidden = after_both.get("menu").and_then(|m| m.get("hidden")).and_then(Json::as_array).expect("menu.hidden");
+        assert_eq!(hidden.iter().filter_map(Json::as_str).collect::<Vec<&str>>(), ["paste"]);
         assert_eq!(after_both.get("view").and_then(Json::as_str), Some("columns"));
         assert_eq!(after_both.get("hidden").and_then(Json::as_bool), Some(true));
         assert_eq!(after_both.get("sort").and_then(|s| s.get("key")).and_then(Json::as_str), Some("size"));
