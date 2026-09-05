@@ -73,8 +73,11 @@ Item {
         }
         var uri = Mounts.normalize(form.uri)
         var label = form.labelText()
+        // A refusal leaves the dialog open over its own sentence rather than reporting a save, and
+        // the password is taken only after it, so the retry over that sentence still has one.
+        if (!root.appendBookmark(uri, label))
+            return
         var password = form.takePassword()
-        root.appendBookmark(uri, label)
         root.mountRequested(uri, label, password)
         password = ""
         root.close()
@@ -82,6 +85,20 @@ Item {
 
     function appendBookmark(uri, label) {
         var canonical = Mounts.normalize(uri)
+        // This view is not watched, so what it last read is not what the file holds: after the rail
+        // removed a place this session it still carried that line, so re-read first, and blocking.
+        bookmarksWrite.readError = FileViewError.Success
+        bookmarksWrite.reload()
+        bookmarksWrite.waitForJob()
+        // A read that failed empties text(), so rewriting from it writes a file holding only this
+        // new line; an absent file is the one legitimately empty read. AGENTS.md "A failed FileView read".
+        if (bookmarksWrite.readError !== FileViewError.Success
+                && bookmarksWrite.readError !== FileViewError.FileNotFound) {
+            root.statusText = "Saved places could not be read, so nothing was written."
+            return false
+        }
+        // Rewritten rather than appended, so re-saving a place already in the file relabels its one
+        // line instead of leaving the rail to dedup two.
         var lines = String(bookmarksWrite.text() || "").split("\n")
         var out = []
         var found = false
@@ -103,6 +120,7 @@ Item {
         // Sidebar's reload() (fired by saved(), below) can race the write and read stale content.
         bookmarksWrite.waitForJob()
         root.saved()
+        return true
     }
 
     // Read back by shell.qml's IPC so a test asserts the protocol swap without OCR.
@@ -189,6 +207,10 @@ Item {
         id: bookmarksWrite
         path: Quickshell.env("HOME") + "/.config/gtk-3.0/bookmarks"
         printErrors: false
+        // The only report a failed read makes: "loaded" stays true through one and waitForJob()
+        // answers true for every job, both measured on quickshell 0.3.1.
+        property int readError: FileViewError.Success
+        onLoadFailed: function (error) { bookmarksWrite.readError = error }
     }
 
     Process {

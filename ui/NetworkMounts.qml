@@ -1,10 +1,12 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "js/Errors.js" as Errors
 import "js/Mounts.js" as Mounts
-import "js/Places.js" as Places
 
-// OEM-shaped Network service: only this file touches gio; Sidebar renders its entries.
+// OEM-shaped Network service: nothing but this file and its two children touches gio or the saved
+// places file, and Sidebar only renders its entries. The five second listing is ui/MountListing.qml's
+// and the places file is ui/NetworkPlaces.qml's.
 Item {
     id: root
 
@@ -18,32 +20,35 @@ Item {
     signal message(string text, bool isError)
     // Client-side only, see "listShares" below: ui/ShareBrowser.qml renders these as pane rows.
     signal sharesListed(string baseUri, string baseLabel, var names)
-    // Fired once the write below has actually landed, so a caller's reload reads it, not stale content.
+    // Fired once ui/NetworkPlaces.qml's write has actually landed, so a caller's reload reads it.
     signal renamed()
     signal retryRequested(string uri, string label, string password, string reason, bool failedConnect)
 
-    // GVFS mount directories emit no useful inotify event here, so the rail polls.
-    readonly property int mountPollMs: 5000
-    // A wedged gio mount listing once froze the rail until restart, so each listing is bounded.
-    readonly property int listTimeoutMs: 10000
-    // Hyprland has no auth portal here, so bound a gio mount that waits on an invisible prompt.
+    // Hyprland has no auth portal here, so "gio mount" on a share that wants a credential prompt
+    // hangs forever with no stdin to answer it, and "gio info" on a location gvfs cannot reach does
+    // the same. Every gio leg of an open gets this bound; the helper leg has its own below.
     readonly property int mountTimeoutMs: 15000
     // The frozen helper has its own 30 s deadline; this outer bound also contains a broken test override.
     readonly property int authTimeoutSeconds: 35
+    // Issue #36: every gio call this Service starts is pinned to C, so the wording of the ones it
+    // reads output from (info, list, and the listing in ui/MountListing.qml) cannot be translated.
+    // gvfsd composes a mount's own label and its refusals, and no client locale reaches those, which
+    // is why nothing below decides anything on one.
+    readonly property var gioEnvironment: ({ "LC_ALL": "C" })
     property string _mountListing: ""
     property string _pendingUri: ""
     // OEM collectors cache finished output because onExited can race their text property.
     property string _infoOutput: ""
-    property string _mountListOutput: ""
     property string _listSharesOutput: ""
-    property string _mountErrOutput: ""
-    // Prevent onExited from reporting the timeout a second time.
+    // Set right before mountTimeout terminates that leg's process, so its own onExited does not
+    // also report a second, redundant failure for the exact same open attempt.
     property bool _mountTimedOut: false
+    property bool _infoTimedOut: false
+    property bool _listSharesTimedOut: false
+    // Set from "gio mount"'s own exit code and consumed by the "gio info" that follows it, which is
+    // what actually decides whether the location is mounted; this only colours the failure message.
+    property bool _mountFailed: false
     property string _pendingUnmountLabel: ""
-    // Queue a re-read requested mid-listing so a new mount appears without another poll interval.
-    property bool _pollAgain: false
-    // Keep timeout state through stream completion so empty timeout output cannot erase good rows.
-    property bool _listTimedOut: false
     // The entry's own label at activation time, carried through to the sharesListed signal.
     property string _pendingLabel: ""
     property string _pendingPassword: ""
@@ -63,19 +68,22 @@ Item {
         onLoadFailed: root.rebuild()
     }
 
-    // Keep bookmark writes separate from Sidebar's read-only FileView.
-    FileView {
-        id: bookmarksWrite
-        path: Quickshell.env("HOME") + "/.config/gtk-3.0/bookmarks"
-        printErrors: false
+    // The five second "gio mount -l" poll is ui/MountListing.qml's: this Service reads its listing
+    // and asks for a re-read through pollMounts() below.
+    MountListing {
+        id: listing
+        environment: root.gioEnvironment
+        // Assign before the rebuild reads it, the order the poll always had.
+        onListed: { root._mountListing = listing.text; root.rebuild() }
     }
 
-    Timer {
-        interval: root.mountPollMs
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: root.pollMounts()
+    // The saved places file is ui/NetworkPlaces.qml's, the only writer of it in this Service.
+    NetworkPlaces {
+        id: places
+        entries: root.entries
+        bookmarksText: root.bookmarksText
+        onMessage: function (text, isError) { root.message(text, isError) }
+        onWrote: root.renamed()
     }
 
     // A root-only remote mount covers its saved addressable paths; SMB shares remain path-specific.
@@ -86,6 +94,8 @@ Item {
             && saved.length > live.length && saved.indexOf(live) === 0
     }
 
+    // Three sources, deduped on the normalized uri (see ui/js/Mounts.js "normalize"): a live gio mount wins over a bookmark for the same share even when the trailing slash differs.
+    // The bookmark's own label wins on that merged row, or a rename of a mounted share would be written to the file and never drawn again; see ui/js/Mounts.js "railLabel".
     function rebuild() {
         var home = Quickshell.env("HOME")
         var out = []
@@ -106,7 +116,7 @@ Item {
             var mkey = Mounts.normalize(mounts[i].uri)
             if (seen[mkey]) continue
             seen[mkey] = true
-            out.push({ path: "", label: mounts[i].label, group: "network", kind: "share", uri: mounts[i].uri, mounted: true, glyph: "server" })
+            out.push({ path: "", label: Mounts.railLabel(mounts[i], marks), group: "network", kind: "share", uri: mounts[i].uri, mounted: true, glyph: "server" })
         }
         for (var k = 0; k < marks.length; k++) {
             var bkey = Mounts.normalize(marks[k].uri)
@@ -160,10 +170,18 @@ Item {
     }
 
     function openShare(uri, alreadyMounted, label, authenticated) {
-        if (mountProcess.running || authProcess.running || infoProcess.running || listSharesProcess.running) return
+        // An open is single flight over four children, the share listing included, so a new one must
+        // not start over the running leg and hand that leg's deadline to itself; see "listShares".
+        if (mountProcess.running || authProcess.running || infoProcess.running || listSharesProcess.running) {
+            // A guard that returns in silence names nothing at all, and a leg can hold it 15 s.
+            root.message("Another network location is still opening; give it a moment.", false)
+            return
+        }
         if (root.result === "failed") root.message("", false)
+        // One canonical spelling from here: tests/network-open-share.sh pins the info leg to it.
         root._pendingUri = Mounts.normalize(uri)
         root._pendingLabel = label || ""
+        root._mountFailed = false
         if (alreadyMounted) {
             root.result = "resolving"
             root.runInfo(uri)
@@ -189,7 +207,6 @@ Item {
         root.result = "mounting"
         mountProcess.command = /^smb:\/\//i.test(uri)
             ? ["gio", "mount", "--anonymous", uri] : ["gio", "mount", uri]
-        root._mountErrOutput = ""
         mountProcess.running = true
         mountTimeout.restart()
     }
@@ -198,6 +215,7 @@ Item {
         infoProcess.command = ["gio", "info", uri]
         root._infoOutput = ""
         infoProcess.running = true
+        mountTimeout.restart()
     }
 
     function failMount(reason, password) {
@@ -207,30 +225,19 @@ Item {
         root.retryRequested(root._pendingUri, root._pendingLabel, password || "", reason, true)
     }
 
-    function authFailure(exitCode) {
-        if (exitCode === 124) return "Connect failed: host did not respond"
-        if (exitCode === 126 || exitCode === 127)
-            return "Connect failed: authentication helper is unavailable"
-        if (/^(ftp|ftps|dav|davs):/i.test(root._pendingUri))
-            return "Connect failed: host refused the TLS handshake"
-        return "Connect failed: authentication was refused"
-    }
-
     // A server root with no share segment mounts but has no FUSE path of its own.
     function isBareRoot(uri) {
         return /^[a-z][a-z0-9+.-]*:\/\/[^\/]+\/?$/i.test(uri)
     }
 
-    // Read gio's own result because already-mounted is not limited to bare roots.
-    function isAlreadyMountedQuirk(text) {
-        return /already mounted/i.test(String(text || ""))
-    }
-
-    // Client-side only, never writes bookmarks; see AGENTS.md "The share browser overlay".
+    // Client-side only, never writes bookmarks; see AGENTS.md "The share browser overlay". This is
+    // the third leg of an open and takes the same bound: "gio list" on a server gvfs cannot reach
+    // hangs exactly the way "gio info" does, with nothing else in the chain left to end it.
     function listShares(uri) {
         listSharesProcess.command = ["gio", "list", uri]
         root._listSharesOutput = ""
         listSharesProcess.running = true
+        mountTimeout.restart()
     }
 
     // One shared ContextMenu preserves keyboard focus; this service performs its Unmount action.
@@ -242,51 +249,42 @@ Item {
         unmountProcess.running = true
     }
 
-    // Block until the rename bookmark lands so the caller's reload cannot read stale bytes.
-    function rename(uri, name) {
-        var body = bookmarksWrite.text()
-        bookmarksWrite.setText(Places.relabel(body, uri, name))
-        bookmarksWrite.waitForJob()
-        root.renamed()
-    }
-
-    function pollMounts() {
-        if (mountListProcess.running) {
-            root._pollAgain = true
-            return
-        }
-        root._listTimedOut = false
-        mountListProcess.running = true
-        listTimeout.restart()
-    }
-
-    Timer {
-        id: listTimeout
-        interval: root.listTimeoutMs
-        repeat: false
-        onTriggered: {
-            if (!mountListProcess.running)
-                return
-            // Ending it is what lets the next poll run at all; a listing nobody can end froze the rail.
-            root._listTimedOut = true
-            mountListProcess.running = false
-        }
-    }
+    // What the rail and the Processes below still call by name; the work is in the two children above.
+    function rename(uri, name) { places.rename(uri, name) }
+    function forget(uri) { places.forget(uri) }
+    function pollMounts() { listing.poll() }
 
     Timer {
         id: mountTimeout
         interval: root.mountTimeoutMs
         repeat: false
         onTriggered: {
-            if (!mountProcess.running) return
-            root._mountTimedOut = true
-            mountProcess.running = false
-            root.failMount("Connect failed: host did not respond", "")
+            // Whichever leg of the open is still running is the one that missed the deadline.
+            if (mountProcess.running) {
+                root._mountTimedOut = true
+                mountProcess.running = false
+            } else if (infoProcess.running) {
+                root._infoTimedOut = true
+                infoProcess.running = false
+            } else if (listSharesProcess.running) {
+                root._listSharesTimedOut = true
+                listSharesProcess.running = false
+            } else {
+                return
+            }
+            // Not failMount: that offers a Retry over the rail, and the deadline's own arm in
+            // tests/ui.sh presses l on the rail the instant this fires. An address that never
+            // answered has no credential to correct anyway.
+            root.result = "failed"
+            root.message("Connect failed: host did not respond", true)
         }
     }
 
+    // The credentialed leg: "timeout" bounds it rather than mountTimeout, so a hung helper answers
+    // 124 and Errors.connectFailure names it, and the C locale above reaches the gio the helper runs.
     Process {
         id: authProcess
+        environment: root.gioEnvironment
         stdinEnabled: true
         stderr: StdioCollector { waitForEnd: true }
         onStarted: {
@@ -309,44 +307,56 @@ Item {
                 root.runInfo(root._pendingUri)
                 return
             }
-            root.failMount(root.authFailure(exitCode), root.passwordFor(root._pendingUri))
+            root.failMount(Errors.connectFailure(exitCode, root._pendingUri), root.passwordFor(root._pendingUri))
         }
     }
 
     Process {
         id: mountProcess
-        stderr: StdioCollector { id: mountErr; waitForEnd: true; onStreamFinished: root._mountErrOutput = text }
+        environment: root.gioEnvironment
         onExited: function (exitCode) {
             mountTimeout.stop()
             var timedOut = root._mountTimedOut
             root._mountTimedOut = false
             if (timedOut) return
-            var errText = String(mountErr.text || root._mountErrOutput || "")
-            // gio's own "already mounted" quirk is still worth listing; only a real failure is fatal.
-            if (exitCode !== 0 && !root.isAlreadyMountedQuirk(errText)) {
-                root.failMount("Connect failed: network location was refused", "")
-                return
-            }
+            // A refusal for a location that is already mounted and a refusal for one that does not
+            // exist differ only in a translated sentence, so neither is read: the info call below
+            // answers with a FUSE path when the location really is mounted, whatever this code was.
+            root._mountFailed = exitCode !== 0
             root.runInfo(root._pendingUri)
         }
     }
 
-    // "gio info" prints a "local path: " line only for a location GVFS exposes through its FUSE mount.
+    // The FUSE path is ui/js/Mounts.js "localPath"'s to find, one resolver for the product and for
+    // tests/js/network.js, and the C locale above is what keeps gio's own wording stable for it.
     Process {
         id: infoProcess
+        environment: root.gioEnvironment
         stdout: StdioCollector { id: infoOut; waitForEnd: true; onStreamFinished: root._infoOutput = text }
         onExited: function (exitCode) {
+            mountTimeout.stop()
             root.pollMounts()
-            var body = String(infoOut.text || root._infoOutput || "")
-            var line = body.split("\n").find(function (l) { return l.indexOf("local path: ") === 0 })
-            if (exitCode === 0 && line) {
+            var timedOut = root._infoTimedOut
+            root._infoTimedOut = false
+            var failed = root._mountFailed
+            root._mountFailed = false
+            if (timedOut) return
+            var path = Mounts.localPath(String(infoOut.text || root._infoOutput || ""))
+            if (exitCode === 0 && path.length > 0) {
                 root.result = "mounted"
-                root.opened(line.substring("local path: ".length).trim())
+                root.opened(path)
                 return
             }
+            // A server root has no FUSE path of its own, so its shares are listed instead, and the
+            // exit code is not read for that: gio describes a reachable root on some servers and
+            // refuses on others, and the listing that follows is what answers either way.
             if (root.isBareRoot(root._pendingUri)) {
                 root.result = "mounted"
                 root.listShares(root._pendingUri)
+                return
+            }
+            if (failed) {
+                root.failMount("Connect failed: network location was refused", "")
                 return
             }
             root.failMount("Connect failed: location has no browsable folder", root.passwordFor(root._pendingUri))
@@ -355,8 +365,13 @@ Item {
 
     Process {
         id: listSharesProcess
+        environment: root.gioEnvironment
         stdout: StdioCollector { id: listSharesOut; waitForEnd: true; onStreamFinished: root._listSharesOutput = text }
         onExited: function (exitCode) {
+            mountTimeout.stop()
+            var timedOut = root._listSharesTimedOut
+            root._listSharesTimedOut = false
+            if (timedOut) return
             var body = String(listSharesOut.text || root._listSharesOutput || "")
             var names = body.split("\n").map(function (s) { return s.trim() }).filter(function (s) { return s.length > 0 })
             if (exitCode !== 0 || names.length === 0) {
@@ -370,6 +385,7 @@ Item {
 
     Process {
         id: unmountProcess
+        environment: root.gioEnvironment
         onExited: function (exitCode) {
             root.pollMounts()
             root.result = exitCode === 0 ? "unmounted" : "failed"
@@ -377,24 +393,6 @@ Item {
             root.message(exitCode === 0
                 ? "Unmounted " + root._pendingUnmountLabel + "."
                 : "That share could not be unmounted; it may still be in use.", exitCode !== 0)
-        }
-    }
-
-    Process {
-        id: mountListProcess
-        command: ["gio", "mount", "-l"]
-        stdout: StdioCollector { id: mountListOut; waitForEnd: true; onStreamFinished: if (!root._listTimedOut) root._mountListOutput = text }
-        onExited: function () {
-            listTimeout.stop()
-            // Timeout output is not an empty mount list; retain the last good rail.
-            if (!root._listTimedOut) {
-                root._mountListing = mountListOut.text || root._mountListOutput || ""
-                root.rebuild()
-            }
-            if (root._pollAgain) {
-                root._pollAgain = false
-                root.pollMounts()
-            }
         }
     }
 }

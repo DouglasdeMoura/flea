@@ -115,8 +115,12 @@ Item {
 
     // ui/NetworkDialog.qml writes this same file; a watch set up before its parent directory
     // existed never fires, so its own saved() signal drives this explicit reload instead.
+    // It blocks, because ui/NetworkPlaces.qml "forget" derives its body from the text this reads:
+    // measured on this box, two rail edits in one turn over an asynchronous reload put the line the
+    // first one removed back, and the second read the pre-write text the first had already replaced.
     function reloadBookmarks() {
         bookmarksFile.reload()
+        bookmarksFile.waitForJob()
     }
 
     function saveNetwork(uri, label, password) {
@@ -134,7 +138,7 @@ Item {
 
     // Right click raises the menu over the row, which is the whole affordance: an eject that can
     // only be reached by right-clicking twice is one nobody can see. Which rows offer what lives in
-    // ui/js/Mounts.js "railMenu", because a row with nothing to release must open no menu at all.
+    // ui/js/Mounts.js "rowMenu", because a row with nothing to offer must open no menu at all.
     function openRailMenu(index, scenePosition) {
         root.cancelRename()
         var entry = root.entries[index]
@@ -142,7 +146,7 @@ Item {
             return
         }
         root.cursorIndex = index
-        root.menu.openForRail(Mounts.railKey(entry), Mounts.railMenu(entry), scenePosition)
+        root.menu.openForRail(Mounts.railKey(entry), Mounts.rowMenu(entry), scenePosition)
     }
 
     // The keyboard's own entrance to the same menu, opened under the row the rail cursor is on.
@@ -156,9 +160,9 @@ Item {
     }
 
     // A chosen menu row, arriving with the row's key rather than its position; which row that
-    // names is Mounts.release', so tests/js/mounts.js drives the resolution with no rail.
+    // names is Mounts.release', so tests/js/network.js drives the resolution with no rail.
     function releaseChosen(action, key) {
-        Mounts.release(action, key, devices, mounts, root.deviceEntries, root.networkEntries)
+        Mounts.release(action, key, devices, mounts, root)
     }
 
     Connections {

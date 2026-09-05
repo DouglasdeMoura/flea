@@ -7,9 +7,6 @@
 // The five the canvas draws, in the order it draws them.
 var PROTOCOLS = ["SMB", "SFTP", "FTPS", "WebDAV", "NFS"]
 
-// Default ports, from the canvas: SMB 445, SFTP 22, FTPS 21, WebDAV 443, NFS 2049.
-var PORTS = { "SMB": 445, "SFTP": 22, "FTPS": 21, "WebDAV": 443, "NFS": 2049 }
-
 // Which fields each protocol asks for. "path" is the label the canvas gives that row, which differs
 // per protocol because the thing it names differs: a share, a remote path, an export.
 var FIELDS = {
@@ -37,11 +34,10 @@ function fieldsFor(protocol) {
     return FIELDS[protocol] || FIELDS["SMB"]
 }
 
+// The port the form prefills. It belongs to the scheme, never to the protocol: WebDAV builds two
+// schemes and SCHEME_PORTS below is the one table both this and the rail's dedup read it out of.
 function defaultPort(protocol, tls) {
-    if (protocol === "WebDAV" && tls === false) {
-        return 80
-    }
-    return PORTS[protocol] || 0
+    return defaultPortFor(scheme(protocol, tls))
 }
 
 // The exact URI gio mount will be handed. Empty when there is not enough to build one, so the
@@ -121,4 +117,86 @@ function complete(form) {
     var host = String(form.host || "").trim()
     var port = String(form.port || "").trim()
     return validHost(host) && validPort(port)
+}
+
+// The port each scheme drops, which is a property of the scheme and not of the protocol the form
+// picked: WebDAV builds two schemes whose ports differ, and one number for both stripped a real
+// ":443" off "dav://" and left its real ":80" on, the duplicate rail row this exists to remove.
+// Measured on this box against gvfs 1.60.2 and glib2 2.88.3 by round-tripping each spelling through
+// Gio.File, the uri mapper "gio mount -l" prints through: gio drops smb 445, sftp 22, ftp 21,
+// ftps 21 (not IANA's 990), dav 80 and davs 443, and keeps every other port it is given, ftps 990
+// and dav 443 included. It drops no nfs port at all, so 2049 is here for the other half of the job:
+// the port an nfs client uses when the line omits one, so two spellings of one export make one row.
+var SCHEME_PORTS = {
+    "smb": 445, "sftp": 22, "ftp": 21, "ftps": 21, "dav": 80, "davs": 443, "nfs": 2049
+}
+
+// A bookmarks line is arbitrary text, so an inherited Object member must never answer as a port.
+function defaultPortFor(uriScheme) {
+    var want = String(uriScheme || "").toLowerCase()
+    return SCHEME_PORTS.hasOwnProperty(want) ? SCHEME_PORTS[want] : 0
+}
+
+// "gio mount -l" never reports a scheme's default port and the add form spells out the one it
+// prefilled, so the same share arrives spelled two ways and must resolve to one rail row. The port
+// is found in the authority alone: a ":" or an "@" further along belongs to the path.
+function stripDefaultPort(uri) {
+    var text = String(uri || "")
+    var auth = authority(text)
+    var tail = ":" + defaultPortFor(schemeOf(text))
+    // A bracketed IPv6 literal ends in "]", so its own trailing digits can never match this tail.
+    if (auth.length === 0 || tail === ":0" || auth.substring(auth.length - tail.length) !== tail)
+        return text
+    var mark = text.indexOf("://") + 3
+    return text.substring(0, mark) + auth.substring(0, auth.length - tail.length)
+        + text.substring(mark + auth.length)
+}
+
+// The scheme a built or bookmarked URI carries, lowercased; "" when the text is not a URI at all.
+function schemeOf(uri) {
+    var text = String(uri || "")
+    var mark = text.indexOf("://")
+    return mark < 0 ? "" : text.substring(0, mark).toLowerCase()
+}
+
+// Everything between "://" and the next "/", which is the only place a userinfo, a host or a port
+// can live: a scan over the whole URI would read a "@" or a ":" inside the path as one of those.
+function authority(uri) {
+    var text = String(uri || "")
+    var mark = text.indexOf("://")
+    if (mark < 0)
+        return ""
+    var rest = text.substring(mark + 3)
+    var slash = rest.indexOf("/")
+    return slash < 0 ? rest : rest.substring(0, slash)
+}
+
+// The host alone: userinfo dropped at the authority's own last "@", a bracketed IPv6 literal kept
+// whole because its colons are not a port separator, and any real port dropped.
+function hostOf(uri) {
+    var auth = authority(uri)
+    var at = auth.lastIndexOf("@")
+    var hostPort = at < 0 ? auth : auth.substring(at + 1)
+    if (hostPort.charAt(0) === "[") {
+        var close = hostPort.indexOf("]")
+        return close < 0 ? hostPort : hostPort.substring(0, close + 1)
+    }
+    var colon = hostPort.indexOf(":")
+    return colon < 0 ? hostPort : hostPort.substring(0, colon)
+}
+
+// gvfsd renders a network mount as "<share> <word> <host>" and translates that word, so issue #36's
+// rule reads the URI instead: the tail that gets cut is this URI's own host, in any language, and a
+// label that does not end in it is left exactly as gio gave it.
+function shareName(rawLabel, uri) {
+    var text = String(rawLabel || "")
+    var host = hostOf(uri)
+    var head = text.substring(0, text.length - host.length)
+    if (host.length === 0 || head.length === 0 || text.substring(head.length) !== host)
+        return text
+    // The one assumption left after the host check: gvfsd's connector is a single whitespace-delimited
+    // word in whatever language it renders. A translation using two would leave one of them on the
+    // name, a wrong label and never a wrong destination; a head this does not shorten is left whole.
+    var name = head.replace(/\s+\S+\s+$/, "")
+    return name.length > 0 && name !== head ? name : text
 }

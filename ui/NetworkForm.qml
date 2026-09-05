@@ -35,10 +35,14 @@ Column {
 
     function pick(name) {
         root.protocol = name
-        // The port follows the protocol, because it is that protocol's own default and not a memory.
-        portField.text = String(Protocols.defaultPort(name))
+        // The port follows the scheme, because it is that scheme's own default and not a memory.
+        portField.text = String(Protocols.defaultPort(name, root.tls))
         root.rehome()
     }
+
+    // The box picks half of the scheme, so it picks half of the port: dav is 80 where davs is 443,
+    // and a number left behind by the tick offers a port the scheme the form built does not use.
+    onTlsChanged: portField.text = String(Protocols.defaultPort(root.protocol, root.tls))
 
     // Qt keeps active focus on an item that has just gone invisible, so a chip click that hides the
     // focused field would leave the caret where nobody can see it and Enter still submits from.
@@ -114,14 +118,16 @@ Column {
     function load(values) {
         root.reset()
         root.pick(values.protocol || "SMB")
+        // The box before the port: onTlsChanged above prefills the scheme's own default, and after
+        // the port it would overwrite the one this saved location actually carries.
+        root.tls = values.tls !== false
         labelField.text = values.label || ""
         hostField.text = values.host || ""
-        portField.text = values.port || String(Protocols.defaultPort(root.protocol))
+        portField.text = values.port || String(Protocols.defaultPort(root.protocol, root.tls))
         pathField.text = values.path || ""
         domainField.text = values.domain || ""
         userField.text = values.user || ""
         passwordField.text = values.password || ""
-        root.tls = values.tls !== false
     }
 
     function takePassword() {

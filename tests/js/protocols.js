@@ -4,11 +4,17 @@
 function run(check) {
     check("the five protocols are the canvas's own, in its order",
           Protocols.PROTOCOLS.join("|"), "SMB|SFTP|FTPS|WebDAV|NFS")
+    // The canvas draws the TLS box ticked, so these are the ports the form opens each dialog with.
     check("and each prefills the port the canvas names",
           [445, 22, 21, 443, 2049].map(function (p, i) {
-              return Protocols.defaultPort(Protocols.PROTOCOLS[i]) === p
+              return Protocols.defaultPort(Protocols.PROTOCOLS[i], true) === p
           }).join(","),
           "true,true,true,true,true")
+    // The box picks the scheme, and the port belongs to the scheme: plain dav is 80, plain ftp is
+    // still 21. A prefill read off the protocol alone offers 443 on a scheme that does not use it.
+    check("and unticking TLS prefills the plaintext scheme's own port",
+          Protocols.defaultPort("WebDAV", false) + "|" + Protocols.defaultPort("FTPS", false),
+          "80|21")
 
     // The TLS box flips two schemes and touches no others.
     check("the TLS box flips dav and ftp, and nothing else",
@@ -31,8 +37,8 @@ function run(check) {
           Protocols.uri({ protocol: "WebDAV", host: "h", port: "80", path: "", tls: false })
           + "|" + Protocols.uri({ protocol: "WebDAV", host: "h", port: "443", path: "", tls: false }),
           "dav://h/|dav://h:443/")
-    check("TLS-off WebDAV reparses an omitted port as 80 while the canvas still starts at 443",
-          Protocols.defaultPort("WebDAV", false) + "|" + Protocols.defaultPort("WebDAV"),
+    check("TLS-off WebDAV prefills 80 where the ticked canvas prefills 443",
+          Protocols.defaultPort("WebDAV", false) + "|" + Protocols.defaultPort("WebDAV", true),
           "80|443")
     // Its own FTPS dialog, which has no path at all.
     check("and the FTPS one, which names no path",

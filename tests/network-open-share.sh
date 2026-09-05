@@ -11,6 +11,9 @@ trap cleanup EXIT
 
 mkdir -p "$test_root/bin" "$test_root/home/.config" "$test_root/config"
 ln -s "$PWD/ui/NetworkMounts.qml" "$test_root/config/NetworkMounts.qml"
+# The Service instantiates both of these, so a config directory without them resolves neither.
+ln -s "$PWD/ui/MountListing.qml" "$test_root/config/MountListing.qml"
+ln -s "$PWD/ui/NetworkPlaces.qml" "$test_root/config/NetworkPlaces.qml"
 ln -s "$PWD/ui/js" "$test_root/config/js"
 ln -s "$PWD/tests/network-open-share.qml" "$test_root/config/shell.qml"
 list_started="$test_root/list-started"

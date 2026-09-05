@@ -143,4 +143,17 @@ function run(check) {
           "That directory could not be read; check the path and try again.")
     check("nothing to say stays nothing, so the surface hides rather than draws a bare mark",
           Errors.paneLine("locked", null, 0), "")
+
+    // The credentialed mount's own sentences, lifted out of ui/NetworkMounts.qml in the 0.1.4
+    // composition: the two codes "timeout" and the shell own, then the two the server owns.
+    check("the helper's own deadline names the host, not the credential",
+          Errors.connectFailure(124, "smb://host/share"), "Connect failed: host did not respond")
+    check("a helper that could not be run at all says so",
+          Errors.connectFailure(127, "smb://host/share"), "Connect failed: authentication helper is unavailable")
+    check("a scheme that negotiates a handshake reads the refusal as one",
+          Errors.connectFailure(1, "davs://host/dav"), "Connect failed: host refused the TLS handshake")
+    check("and every other scheme reads it as the credential",
+          Errors.connectFailure(1, "smb://host/share"), "Connect failed: authentication was refused")
+    check("no uri at all answers rather than throwing",
+          Errors.connectFailure(1, ""), "Connect failed: authentication was refused")
 }
