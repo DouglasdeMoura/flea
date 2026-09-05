@@ -1,4 +1,5 @@
 import QtQuick
+import qs.Commons
 import "." as Flea
 import "js/Filter.js" as Filter
 import "js/Picker.js" as Picker
@@ -39,15 +40,29 @@ ListView {
         width: root.width
         height: Theme.rowHeight
 
+        // The board's marked row: the accent wash and the accent bar, under the row's own text. The
+        // window's selected fill is a foreground grey, and SendPicker.html marks in the accent, so
+        // ui/Row.qml is left unselected here and the picker paints its own mark behind it.
+        Rectangle {
+            visible: cell.isMarked
+            anchors.fill: parent
+            color: Style.selectedAccentFill
+        }
+
+        Rectangle {
+            visible: cell.isMarked
+            width: Theme.spacing.hairline * 2
+            height: parent.height
+            color: Theme.color.accent
+        }
+
         Flea.Row {
             anchors.fill: parent
             leadingSlot: root.checkSize + Theme.spacing.gap
             row: cell.row
             cursor: cell.listingIndex === root.picker.cursorIndex
             hovered: hover.hovered
-            selected: cell.isMarked
             kindNames: root.picker.kindNames
-            alternate: cell.index % 2 === 1
         }
 
         Rectangle {

@@ -12,6 +12,9 @@ Item {
 
     property string home: ""
     property string current: ""
+    // The ink the picker draws every rule in, handed down by ui/picker.qml, which says why; the
+    // window's own rule colour stands in so an unwired rail still draws a seam and never a black one.
+    property color edge: Theme.color.surface
 
     signal chosen(string path)
 
@@ -30,7 +33,7 @@ Item {
         anchors.right: parent.right
         width: Theme.spacing.hairline
         height: parent.height
-        color: Theme.color.surface
+        color: root.edge
     }
 
     ListView {

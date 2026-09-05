@@ -8,6 +8,7 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import qs.Commons
 import "." as Flea
 import "js/Picker.js" as Picker
 
@@ -50,6 +51,11 @@ ShellRoot {
         property var history: []
         // The save mode's own name, which starts as the caller's suggestion.
         property string saveName: win.req.name
+
+        // SendPicker.html draws every rule and control frame in one ink, a lift over whatever plane
+        // it sits on. Theme.color.surface is a drop on these palettes and vanishes against the chrome
+        // strips, so the picker takes the OEM's own resting border alpha, which lifts on both.
+        readonly property color edge: Style.hoverBorderColor
 
         readonly property bool saving: win.req.mode === "save"
         readonly property bool folderMode: win.req.directory || win.req.mode === "savefiles"
@@ -239,6 +245,7 @@ ShellRoot {
                 anchors.bottom: save.top
                 home: win.home
                 current: win.path
+                edge: win.edge
                 onChosen: function (path) { win.open(path); list.forceActiveFocus() }
             }
 
@@ -281,11 +288,17 @@ ShellRoot {
                 anchors.bottom: parent.bottom
                 height: Theme.chromeHeight
 
+                // The footer takes the chrome plane, the same strip the ask above it stands on.
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.color.surface
+                }
+
                 Rectangle {
                     anchors.top: parent.top
                     width: parent.width
                     height: Theme.spacing.hairline
-                    color: Theme.color.surface
+                    color: win.edge
                 }
 
                 Text {
@@ -293,7 +306,7 @@ ShellRoot {
                     anchors.leftMargin: Theme.spacing.rowPaddingX
                     anchors.verticalCenter: parent.verticalCenter
                     text: win.message.length > 0 ? win.message : Picker.statusLine(win.marks.length, Picker.totalBytes(win.marks))
-                    color: win.message.length > 0 ? Theme.color.accent : Theme.color.muted
+                    color: win.message.length > 0 ? Theme.color.accent : Theme.color.foreground
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.caption
                     textFormat: Text.PlainText
@@ -304,7 +317,7 @@ ShellRoot {
                     anchors.rightMargin: Theme.spacing.rowPaddingX
                     anchors.verticalCenter: parent.verticalCenter
                     text: Picker.hints(win.req)
-                    color: Theme.color.muted
+                    color: Theme.color.foreground
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.caption
                     textFormat: Text.PlainText

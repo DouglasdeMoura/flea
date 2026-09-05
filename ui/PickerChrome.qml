@@ -1,4 +1,5 @@
 import QtQuick
+import qs.Commons
 import "." as Flea
 import "js/Format.js" as Format
 import "js/Picker.js" as Picker
@@ -19,7 +20,75 @@ Item {
     readonly property var req: root.picker.req
     readonly property var chips: Picker.chips(root.req)
 
+    readonly property color edge: root.picker.edge
+
     implicitHeight: ask.height + where.height
+
+    // The board's framed chrome control: a hairline square around a mark, or a hairline box around
+    // a word. Only the accent frame, the recessed ground and which of the two it holds ever differ.
+    component Framed: Item {
+        id: control
+
+        property string glyph: ""
+        property string label: ""
+        property string name: control.label
+        property bool primary: false
+        property bool recessed: false
+        property bool available: true
+
+        signal pressed()
+
+        readonly property color ink: !control.available ? Theme.color.muted
+            : control.primary ? Theme.color.accent : Theme.color.foreground
+
+        implicitWidth: control.glyph.length > 0 ? Theme.hitMin : caption.implicitWidth + 2 * Theme.spacing.gap
+        implicitHeight: Theme.hitMin
+        scale: press.pressed && control.available && !Theme.reducedMotion ? 0.96 : 1
+
+        Accessible.role: Accessible.Button
+        Accessible.name: control.name
+        Accessible.onPressAction: if (control.available) control.pressed()
+
+        Behavior on scale {
+            enabled: !Theme.reducedMotion
+            NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: control.recessed ? Theme.color.surface : "transparent"
+            border.width: Theme.spacing.hairline
+            border.color: control.primary ? Theme.color.accent : root.edge
+        }
+
+        Flea.Glyph {
+            anchors.centerIn: parent
+            visible: control.glyph.length > 0
+            width: Theme.chromeMarkSize
+            height: Theme.chromeMarkSize
+            name: control.glyph
+            color: control.ink
+        }
+
+        Text {
+            id: caption
+            anchors.centerIn: parent
+            visible: control.glyph.length === 0
+            text: control.label
+            color: control.ink
+            font.family: Theme.font.family
+            font.pixelSize: Theme.font.caption
+            textFormat: Text.PlainText
+        }
+
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
+
+        TapHandler {
+            id: press
+            acceptedButtons: Qt.LeftButton
+            onTapped: if (control.available) control.pressed()
+        }
+    }
 
     Item {
         id: ask
@@ -57,7 +126,7 @@ Item {
                 width: parent.width
                 visible: text.length > 0
                 text: Picker.subtitle(root.req)
-                color: Theme.color.muted
+                color: Theme.color.foreground
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.caption
                 elide: Text.ElideRight
@@ -72,16 +141,26 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Theme.spacing.gap
 
-            Flea.DialogButton {
+            // The board's chrome button is its hit box plus the hairline frame around it, 26 at base-size 14.
+            Framed {
+                height: Theme.hitMin + 2 * Theme.spacing.hairline
                 label: "Cancel"
-                onActivated: root.cancelRequested()
+                onPressed: root.cancelRequested()
             }
 
-            Flea.DialogButton {
+            Framed {
+                height: Theme.hitMin + 2 * Theme.spacing.hairline
                 label: Picker.acceptLabel(root.req, root.picker.marks.length)
                 primary: true
-                onActivated: root.acceptRequested()
+                onPressed: root.acceptRequested()
             }
+        }
+
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: Theme.spacing.hairline
+            color: root.edge
         }
     }
 
@@ -90,13 +169,15 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: ask.bottom
-        height: Theme.chromeHeight
+        // The strip carries 24 px hit boxes, so it takes a list row's height less the two hairline
+        // rules that bracket it: 35 at base-size 14, which is the board's own nav strip.
+        height: Theme.rowHeight - 2 * Theme.spacing.hairline
 
         Rectangle {
             anchors.bottom: parent.bottom
             width: parent.width
             height: Theme.spacing.hairline
-            color: Theme.color.surface
+            color: root.edge
         }
 
         Row {
@@ -106,16 +187,18 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Theme.spacing.gap
 
-            Flea.ChromeButton {
+            Framed {
                 glyph: "arrow-left"
-                enabled: root.picker.history.length > 0
-                onActivated: root.backRequested()
+                name: "Back"
+                available: root.picker.history.length > 0
+                onPressed: root.backRequested()
             }
 
-            Flea.ChromeButton {
+            Framed {
                 glyph: "arrow-up"
-                enabled: Picker.parentOf(root.picker.path) !== root.picker.path
-                onActivated: root.upRequested()
+                name: "Parent folder"
+                available: Picker.parentOf(root.picker.path) !== root.picker.path
+                onPressed: root.upRequested()
             }
         }
 
@@ -144,11 +227,13 @@ Item {
             Repeater {
                 model: root.chips
 
-                Flea.DialogButton {
+                Framed {
                     required property var modelData
                     label: modelData.label
                     primary: modelData.index === root.picker.filterIndex
-                    onActivated: root.chipChosen(modelData.index)
+                    // The board sets the active chip on the recessed plane, so it reads as pressed in.
+                    recessed: modelData.index === root.picker.filterIndex
+                    onPressed: root.chipChosen(modelData.index)
                 }
             }
         }
