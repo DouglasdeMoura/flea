@@ -17,15 +17,16 @@ var BODY_SMALL_RATIO = 0.917
 var CAPTION_RATIO = 0.833
 
 var FOLLOW = "system"
-var OVERRIDE = "override"
 
 function follow() {
     return { mode: FOLLOW }
 }
 
-// Follow Omarchy is the default, and the board names its stored shape: {"mode":"system"}.
+// Follow Omarchy is the default, and the board names its stored shape: {"mode":"system"}. An
+// override is the same key holding a number instead, which is src/uischema.rs's own display.textSize
+// rule: "system", or one stop the OEM panel could have produced. There is no second stored shape.
 function following(stored) {
-    return !stored || stored.mode !== OVERRIDE
+    return !stored || !(Number(stored.mode) > 0)
 }
 
 // The nearest stop, so a base Omarchy invented that is not on the list still enters the override on
@@ -42,30 +43,30 @@ function nearest(px) {
 
 // The size Flea actually draws at: Omarchy's own while following, the stored stop while overriding.
 function effective(stored, omarchyBase) {
-    return following(stored) ? omarchyBase : nearest(stored.px)
+    return following(stored) ? omarchyBase : nearest(Number(stored.mode))
 }
 
 // Switching to Override starts on the stop beside the size already on screen, so the switch itself
 // changes nothing and only a step does.
 function pin(stored, omarchyBase) {
-    return { mode: OVERRIDE, px: nearest(effective(stored, omarchyBase)) }
+    return { mode: nearest(effective(stored, omarchyBase)) }
 }
 
 // One stop along the list, clamped at both ends. Stepping while following becomes an override,
 // which is what the first press of Ctrl+Shift+Plus should do.
 function stepped(stored, omarchyBase, direction) {
-    var at = STOPS.indexOf(pin(stored, omarchyBase).px)
+    var at = STOPS.indexOf(pin(stored, omarchyBase).mode)
     var to = Math.max(0, Math.min(STOPS.length - 1, at + direction))
-    return { mode: OVERRIDE, px: STOPS[to] }
+    return { mode: STOPS[to] }
 }
 
-// A stored value another hand wrote. Anything that is not an override on a real stop reads as
-// following, which is both the default and the state deleting the file restores.
+// A stored value another hand wrote, and 0.1.3's own {"mode":"override","px":N}: anything this
+// cannot read as a size follows Omarchy, which is both the default and the state deleting ui.json
+// restores, and a number that is not a stop lands on the nearest one rather than pinning a size the
+// OEM panel could not produce. src/uistate.rs refuses the same shapes on the way in.
 function parse(stored) {
-    if (following(stored))
-        return follow()
-    var px = Number(stored.px)
-    return px > 0 ? { mode: OVERRIDE, px: nearest(px) } : follow()
+    var px = stored ? Number(stored.mode) : NaN
+    return px > 0 ? { mode: nearest(px) } : follow()
 }
 
 function bodySmall(base) {

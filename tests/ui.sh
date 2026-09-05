@@ -2077,7 +2077,7 @@ case_preview() {
     # seconds, not one: an omarchy-drive ipc round trip costs 190 to 565 ms measured on this box
     # (see the KB's ipc-timing-loops entry), so a one-second clip leaves the poll below one or two
     # samples to land the Playing state in, and this case caught that exact miss before the fix.
-    # Task 22's own Right/Left checks need headroom on both sides of a 5 s seek (Focus.js's
+    # Task 22's own Right/Left checks need headroom on both sides of a 5 s seek (PreviewKeys.js's
     # SEEK_MS) starting from whatever position the round trips above already spent: at three
     # seconds the clip had finished before the checks ran at all, and at eight, Right alone
     # landed within 5 s of the end, clamped to it, and stopped the player before Left ran.
@@ -2162,7 +2162,7 @@ PYEOF
     wait_preview_state playing
     shot preview-audio
 
-    # Left/Right seek 5 s (Focus.js's SEEK_MS), read before the pause/resume dance below spends
+    # Left/Right seek 5 s (PreviewKeys.js's SEEK_MS), read before the pause/resume dance below spends
     # its own several IPC round trips (190 to 565 ms each, see the clip_seconds comment above): an
     # eight-second clip still has room left once this runs, so both directions are unclamped.
     local pos_before pos_after
@@ -4050,18 +4050,29 @@ case_renamelife() {
 }
 
 # The settings panel: its doors, its three control groups, and the one thing a settings window
-# has to do that a menu does not, which is outlive the process that wrote it. XDG_CONFIG_HOME points
-# inside the fixture root for the whole case, so nothing here can write the operator's own
-# ~/.config/flea/view.json; hard rule 9 covers writes and not only deletes.
+# has to do that a menu does not, which is outlive the process that wrote it. XDG_STATE_HOME and
+# XDG_CONFIG_HOME both point inside the fixture root for the whole case, so nothing here can write
+# the operator's own ~/.local/state/flea/ui.json; hard rule 9 covers writes and not only deletes.
 case_settings() {
     local dir="$fixture_root/settings"
     local config="$fixture_root/settings-config"
+    local state="$fixture_root/settings-state"
     sandbox_scratch "$dir"
     sandbox_scratch "$config"
+    sandbox_scratch "$state"
     : > "$dir/a.txt"
     : > "$dir/b.txt"
     local real_config="${XDG_CONFIG_HOME-}"
+    local real_state="${XDG_STATE_HOME-}"
     export XDG_CONFIG_HOME="$config"
+    export XDG_STATE_HOME="$state"
+    local stored="$state/flea/ui.json"
+
+    # Seeded through the same CLI the window writes through: a column set the header menu owns, two
+    # keys the backend owns and no control in this panel writes, and one key only a newer Flea knows.
+    # What keeps them below is src/uistate.rs's merge, not a copy the window happened to be holding.
+    settings_seed "$state" "$config" "$stored"
+
     launch "$dir"
     wait_listing 2
 
@@ -4077,15 +4088,22 @@ case_settings() {
     pinned_base=$(token_of baseSize)
 
     # Restart survival, which is what separates a setting from a session's mood. Every value is
-    # asserted in the file the panel wrote and again in the behaviour of a process that only read it.
-    local state="$config/flea/view.json"
-    [[ -f "$state" ]] || fail "settings: the panel wrote no state file at $state"
-    grep -q '"paste"' "$state" || fail "settings: the hidden action never reached the state file"
-    grep -q '"keysPreset": "windows"' "$state" || fail "settings: the preset never reached the state file"
-    grep -q '"mode": "override"' "$state" || fail "settings: the text-size override never reached the state file"
-    grep -q "\"px\": $pinned_base" "$state" || fail "settings: the state file holds no ${pinned_base}px stop"
-    # The board's own words: an override stores a stop, never a free number or a multiplier.
-    ! grep -q 'uiScale' "$state" || fail "settings: the state file still carries an interface-scale multiplier"
+    # asserted in the file the panel wrote, again through the backend that owns it, and again in the
+    # behaviour of a process that only read it.
+    [[ -f "$stored" ]] || fail "settings: the panel wrote no state file at $stored"
+    grep -q '"paste"' "$stored" || fail "settings: the hidden action never reached the state file"
+    grep -q '"keys": "windows"' "$stored" || fail "settings: the preset never reached the state file"
+    grep -q "\"mode\": $pinned_base" "$stored" \
+        || fail "settings: the state file holds no ${pinned_base}px stop"
+    # The board's own words: an override stores a stop, never a free number or a multiplier, and one
+    # stored vocabulary rather than two that would have to be kept in step.
+    ! grep -q 'uiScale' "$stored" || fail "settings: the state file still carries an interface-scale multiplier"
+    ! grep -q '"px"' "$stored" || fail "settings: the state file still carries 0.1.3's override shape"
+    [[ ! -e "$config/flea/view.json" ]] \
+        || fail "settings: a second settings file was written at $config/flea/view.json"
+
+    settings_assert_backend "$state" "$config" "$pinned_base"
+
     kill_flea
     launch "$dir"
     wait_listing 2
@@ -4096,9 +4114,6 @@ case_settings() {
     [[ "$(ipc settingsRows)" == *"choice|Size|${pinned_base}px"* ]] \
         || fail "settings: a restart brought the panel back on a different stop"
     key -k Escape >/dev/null
-    settle
-    # Back to following, so nothing after this case runs at a size it did not ask for.
-    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
     settle
     click_row 0 right
     settle
@@ -4113,9 +4128,104 @@ case_settings() {
     key -M ctrl -k h -m ctrl >/dev/null
     settle
 
-    printf 'SETTINGS doors=ok display=ok menus=ok keys=ok restart=ok\n'
+    settings_write_refused "$state" "$pinned_base"
+
+    # Back to following, so nothing after this case runs at a size it did not ask for.
+    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    settle
+
+    settings_read_refused "$stored" "$dir"
+
+    printf 'SETTINGS doors=ok display=ok menus=ok keys=ok restart=ok backend=ok refused=ok unread=ok\n'
     if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
+    if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
     kill_flea
+}
+
+# The state this case starts from, laid down through flea --ui-state so the schema sees it too. The
+# unknown key goes in by hand afterwards, because the CLI refuses a key this build does not know.
+settings_seed() {
+    local state="$1" config="$2" stored="$3"
+    env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$config" "$flea_bin" --ui-state \
+        '{"columns":["name","size"],"places":{"sidebarWidth":240},"sort":{"key":"size"}}' >/dev/null \
+        || fail "settings: the seeding write through flea --ui-state failed"
+    jq '. + {fromANewerFlea: {aKeyThisBuildHasNeverHeardOf: true}}' "$stored" > "$stored.seed" \
+        || fail "settings: the newer-Flea key could not be added to the seed"
+    mv "$stored.seed" "$stored"
+}
+
+# flea --ui-state with no patch is the read half of the one shared path, so this reads the panel's
+# own three settings back out of the backend, and every key beside them that nobody here writes.
+settings_assert_backend() {
+    local state="$1" config="$2" pinned_base="$3" doc
+    doc=$(env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$config" "$flea_bin" --ui-state) \
+        || fail "settings: flea --ui-state could not read the state file back"
+    settings_backend_holds "$doc" ".display.textSize.mode == $pinned_base" "the ${pinned_base}px stop"
+    settings_backend_holds "$doc" '.keys == "windows"' "the Windows preset"
+    settings_backend_holds "$doc" '.menu.hidden | index("paste")' "the hidden Paste action"
+    settings_backend_holds "$doc" '.menu.basic == true' "a master agreeing with the five of six the panel drew"
+    # The preservation half, and the whole point of one store: four settings writes are four merges,
+    # so the retained view state, the backend's own keys and a newer Flea's key are all still here.
+    settings_backend_holds "$doc" '.columns == ["name","size"]' "the stored column set"
+    settings_backend_holds "$doc" '.places.sidebarWidth == 240' "places.sidebarWidth"
+    settings_backend_holds "$doc" '.sort.key == "size"' "sort.key"
+    settings_backend_holds "$doc" '.fromANewerFlea.aKeyThisBuildHasNeverHeardOf == true' \
+        "the key only a newer Flea knows"
+}
+
+settings_backend_holds() {
+    local doc="$1" filter="$2" what="$3"
+    printf '%s' "$doc" | jq -e "$filter" >/dev/null \
+        || fail "settings: the backend does not read $what back, it reads $(printf '%s' "$doc" | jq -c 'del(.places.favourites)')"
+}
+
+# The other half of the same honesty: a state file this window could not READ is a window about to
+# draw the shipped defaults over the operator's own settings, which is the unchecked-read defect
+# ui/NetworkDialog.qml carried once. It has to say so rather than look like a first launch.
+settings_read_refused() {
+    local stored="$1" dir="$2"
+    chmod 000 "$stored" || fail "settings: the state file could not be made unreadable"
+    launch "$dir"
+    wait_listing 2
+    [[ "$(ipc lastMessage)" == "Your saved settings could not be read, so these are the defaults." ]] \
+        || fail "settings: an unreadable state file was not reported, the status bar says $(ipc lastMessage)"
+    kill_flea
+    chmod 600 "$stored" || fail "settings: the state file could not be made readable again"
+}
+
+# A failed write is reported, never swallowed. The state directory is made unwritable, so the temp
+# file src/uistore.rs renames into place cannot be created at all, and the panel's next change is a
+# change the file does not have. The user is told that in the one place Flea says things.
+settings_write_refused() {
+    local state="$1" pinned_base="$2" before refused_base retried_base
+    before=$(cat "$state/flea/ui.json")
+    chmod 500 "$state/flea" || fail "settings: the state directory could not be made read-only"
+    key , >/dev/null
+    settle
+    key j >/dev/null
+    settle
+    key h >/dev/null
+    settle
+    refused_base=$(token_of baseSize)
+    (( refused_base < pinned_base )) \
+        || fail "settings: the refused step did not move the size on screen, still $refused_base"
+    [[ "$(ipc lastMessage)" == "That setting could not be saved." ]] \
+        || fail "settings: a refused write was not reported, the status bar says $(ipc lastMessage)"
+    chmod 700 "$state/flea" || fail "settings: the state directory could not be made writable again"
+    [[ "$(cat "$state/flea/ui.json")" == "$before" ]] \
+        || fail "settings: a refused write changed the state file anyway"
+    grep -q "\"mode\": $pinned_base" "$state/flea/ui.json" \
+        || fail "settings: the state file did not keep the stop the refusal could not replace"
+    # The book must not have believed the refusal: the next step still writes, and lands.
+    key h >/dev/null
+    settle
+    retried_base=$(token_of baseSize)
+    (( retried_base < refused_base )) \
+        || fail "settings: the step after a refusal did not move the size, still $retried_base"
+    grep -q "\"mode\": $retried_base" "$state/flea/ui.json" \
+        || fail "settings: the step after a refusal never reached the state file"
+    key -k Escape >/dev/null
+    settle
 }
 
 # Two of the three doors the Settings board draws: the comma key from either view and the toolbar's

@@ -99,6 +99,19 @@ function runMaster(check) {
     check("the master recomputes off the individual toggle at once",
           Settings.masterState(Settings.toggleId([], "cut")) + " "
           + Settings.basicEnabled(Settings.toggleId([], "cut")), "some 5")
+
+    // menu.basic is the stored master, and ui/ViewState.qml folds it in before anything reads the
+    // set, so a hand-edited "basic": false switches the six off in the panel and in every menu.
+    check("a stored master that is on changes nothing about the set",
+          Settings.effectiveHidden(true, ["paste"]).join(","), "paste")
+    check("a stored master that is off hides all six, whatever menu.hidden holds",
+          Settings.basicEnabled(Settings.effectiveHidden(false, [])), 0)
+    check("and it keeps the ids beside them",
+          Settings.effectiveHidden(false, ["copypath"]).indexOf("copypath") >= 0, true)
+    check("folding an already-off group adds no duplicate",
+          Settings.effectiveHidden(false, Settings.BASIC).length, Settings.BASIC.length)
+    check("the fold does not mutate the array it was handed",
+          (function () { var held = ["paste"]; Settings.effectiveHidden(false, held); return held.length })(), 1)
 }
 
 function runRows(check) {
@@ -122,7 +135,7 @@ function runRows(check) {
     check("the rounding Flea mirrors is drawn beside it", display[8].value, "rounding 8")
 
     // Switching to Override adds the stop row, and nothing else about the section moves.
-    var pinned = Settings.rows("display", displayState({ mode: "override", px: 16 }, 16))
+    var pinned = Settings.rows("display", displayState({ mode: 16 }, 16))
     check("an override adds one row and one only", pinned.length, display.length + 1)
     check("the mode row says which mode it is in", find(pinned, "textMode").value, "Override")
     check("the stop row carries the pinned size", find(pinned, "textStop").value, "16px")
@@ -172,7 +185,7 @@ function runCursor(check) {
           Settings.firstRow(display), 1)
     check("and no read-only fact below it takes the cursor",
           Settings.stepRow(display, 1, 1), 1)
-    var pinned = Settings.rows("display", displayState({ mode: "override", px: 16 }, 16))
+    var pinned = Settings.rows("display", displayState({ mode: 16 }, 16))
     check("an override gives the cursor a second stop to walk to",
           Settings.stepRow(pinned, 1, 1), 2)
     check("and the compositor's rows still take none",

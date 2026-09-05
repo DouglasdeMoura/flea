@@ -5,10 +5,15 @@ mod gui;
 mod heap;
 mod hyprkeys;
 mod json;
+mod jsondoc;
+mod jsonstring;
 mod launcher;
 mod open;
 mod paths;
 mod thp;
+mod uischema;
+mod uistate;
+mod uistore;
 mod userfile;
 
 use crate::backend::proto::error_line;
@@ -20,6 +25,7 @@ fn usage(message: &str) -> ! {
     eprintln!("flea: {}", message);
     eprintln!("usage: flea [--tui|--gui] [--select <uri|path>] [path]");
     eprintln!("       flea --default [off]");
+    eprintln!("       flea --ui-state [<json patch>]");
     eprintln!("       flea --version");
     exit(2)
 }
@@ -33,6 +39,38 @@ fn select_target(raw: &str) -> Option<(PathBuf, PathBuf)> {
     };
     let parent = path.parent()?.to_path_buf();
     Some((parent, path))
+}
+
+// flea --ui-state, the one path both front ends reach the state file through: no argument reads it,
+// one JSON object merges that patch through the lock. Either way the resulting document is printed.
+fn ui_state(args: &[String]) -> i32 {
+    let store = match uistore::Store::user() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("flea: {}", e);
+            return 2;
+        }
+    };
+    if args.len() > 3 {
+        usage("--ui-state takes nothing, or one JSON object");
+    }
+    let state = match args.get(2) {
+        None => store.read(),
+        Some(patch) => {
+            let merged = jsondoc::parse(patch)
+                .map_err(|e| format!("the ui.json patch is not JSON ({})", e))
+                .and_then(|p| store.update(&p));
+            match merged {
+                Ok(next) => next,
+                Err(e) => {
+                    eprintln!("flea: {}", e);
+                    return 2;
+                }
+            }
+        }
+    };
+    print!("{}", jsondoc::render(&state));
+    0
 }
 
 fn main() {
@@ -75,6 +113,11 @@ fn main() {
     }
     if args.get(1).map(String::as_str) == Some("--default") {
         usage("--default takes nothing, or off");
+    }
+
+    // flea --ui-state [<json patch>]: the shared ui.json read and update path, see AGENTS.md "The state file".
+    if args.get(1).map(String::as_str) == Some("--ui-state") {
+        exit(ui_state(&args));
     }
 
     let mut want_tui = false;
@@ -137,7 +180,15 @@ fn main() {
         exit(2);
     }
     match paths::ui_dir() {
-        Some(ui) => exit(gui::exec_qs(&ui, open_path.as_deref(), select_path.as_deref())),
+        Some(ui) => {
+            // Before the window, so the first paint reads what the settle left, see AGENTS.md "The
+            // state file"; it can fail or decline, and the window then opens on a file it did not touch.
+            match uistore::Store::user().and_then(|store| store.settle()) {
+                Ok(()) => {}
+                Err(e) => eprintln!("flea: the view state was not settled ({})", e),
+            }
+            exit(gui::exec_qs(&ui, open_path.as_deref(), select_path.as_deref()))
+        }
         None => {
             eprintln!("flea: the shell config is missing, set FLEA_UI or install /usr/share/flea/ui");
             exit(2);

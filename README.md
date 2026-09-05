@@ -357,10 +357,14 @@ row:
   is shared and answers under both; the preset carries only the chords where they differ, and it
   rebinds in the window at once. Press `?` for the whole map.
 
-The choices live in `~/.config/flea/view.json` beside the hidden columns, with the text size stored
-as `{"mode":"system"}` while it follows Omarchy and `{"mode":"override","px":16}` once it does not.
-A value this build does not recognise falls back on its own without disturbing the rest of the
-file, and deleting the file puts every section back on its default.
+The choices live in `~/.local/state/flea/ui.json`, the one file Flea keeps for itself, beside the
+column set and everything else that outlives a window. The text size is stored as `{"mode":"system"}`
+while it follows Omarchy and `{"mode":16}` once it does not, which is a stop and never a free number.
+Every change goes through `flea --ui-state`, which takes a lock, checks the value and merges it, so a
+setting written here never overwrites one written somewhere else, and a change it could not save is
+reported in the status bar rather than lost quietly. A value this build does not recognise falls back
+on its own without disturbing the rest of the file, and deleting the file puts every section back on
+its default.
 
 ## The Omarchy cut
 
@@ -568,6 +572,9 @@ cargo test                    # unit tests
 ./tests/archive.sh            # archive listing, extract and compress
 ./tests/thumbs.sh             # the release binary against the media fixture
 ./tests/sandbox.sh            # the thumbnail jail and its refusals
+./tests/uistate.sh            # ui.json: the lock, the settle, the migration and a SIGKILL sweep
+./tests/uiwriter.sh           # ViewState's writer under a headless Quickshell
+./tests/charts.sh             # the README's own tables against the bench CSV
 ./tests/ui.sh                 # drives the real window
 ./tests/drag.sh               # the internal drag, through a real pointer on uinput
 ./tests/bench.sh              # the field bench harness itself
@@ -581,11 +588,12 @@ FLEA_PACKAGE_FILE=/path/to/flea.pkg.tar.zst ./tests/package.sh # real makepkg ar
 ./tools/flea-bench-report     # a field run's CSV as the tables in this README
 ```
 
-`./tests/run-all.sh` is the main headless command. It builds both cargo profiles, because
-`protocol.sh` drives the debug binary and `thumbs.sh` the release one, runs thirteen suites, and
-reads each suite's own exit code rather than a pipeline's. It then names `ui.sh`, `drag.sh`,
-`bench.sh` and `package.sh` and says what each needs: a display, a real pointer, an idle box, or a
-real makepkg archive. There is no CI, and `PKGBUILD`'s `check()` runs `cargo test` alone.
+`./tests/run-all.sh` is the main headless command. It builds both cargo profiles every run,
+because `protocol.sh` drives the debug binary and `thumbs.sh` the release one and a guard on the
+binary's existence would leave a stale one in place; it runs sixteen suites, and reads each suite's
+own exit code rather than a pipeline's. It then names `ui.sh`, `drag.sh`, `bench.sh` and
+`package.sh` and says what each needs: a display, a real pointer, an idle box, or a real makepkg
+archive. There is no CI, and `PKGBUILD`'s `check()` runs `cargo test` alone.
 
 `tools/flea-acceptance` derives its checklist at run time from the protocol document, the
 key table, the context menu, the design canvas and the sidebar, so it cannot be smaller

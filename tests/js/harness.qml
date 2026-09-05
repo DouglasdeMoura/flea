@@ -32,6 +32,7 @@ import "trash.js" as TrashSuite
 import "tap.js" as TapSuite
 import "tabs.js" as TabsSuite
 import "thumbs.js" as ThumbsSuite
+import "uistate.js" as UiStateSuite
 
 Item {
     Component.onCompleted: {
@@ -60,7 +61,7 @@ Item {
             ["selection", SelectionSuite], ["settings", SettingsSuite],
             ["sort", SortSuite], ["taildrop", TaildropSuite], ["textsize", TextSizeSuite],
             ["trash", TrashSuite], ["tap", TapSuite], ["tabs", TabsSuite],
-            ["thumbs", ThumbsSuite]
+            ["thumbs", ThumbsSuite], ["uistate", UiStateSuite]
         ]
         var argv = Qt.application.arguments
         var only = ""

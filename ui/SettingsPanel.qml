@@ -100,8 +100,7 @@ Item {
         }
         var at = Settings.PRESETS.indexOf(ViewState.keysPreset)
         var next = (at + direction + Settings.PRESETS.length) % Settings.PRESETS.length
-        ViewState.keysPreset = Settings.PRESETS[next]
-        ViewState.save()
+        ViewState.setKeysPreset(Settings.PRESETS[next])
     }
 
     function moveCursor(delta) {

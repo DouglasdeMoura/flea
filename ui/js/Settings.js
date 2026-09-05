@@ -69,8 +69,8 @@ function basicEnabled(hidden) {
     return on
 }
 
-// The master has no stored value of its own: all, some and none are derived from the six ids alone,
-// which is why removing the old menu.basic boolean took no control away with it.
+// All, some and none are read off the six ids, which is the tri-state the SettingsMenus board draws.
+// menu.basic is the same answer as a boolean, and ui/ViewState.qml keeps the two in step on write.
 function masterState(hidden) {
     var on = basicEnabled(hidden)
     if (on === BASIC.length)
@@ -94,6 +94,22 @@ function toggleMaster(hidden) {
         }
     }
     return next
+}
+
+// menu.basic folded into the hidden set. False means the whole basic group is off whatever
+// menu.hidden holds, so a hand-edited master switches the six rows off in the panel and in every
+// menu at once; ui/js/Menu.js applyHidden reads this and never the master itself.
+function effectiveHidden(basic, hidden) {
+    var out = []
+    for (var i = 0; hidden && i < hidden.length; i++)
+        out.push(hidden[i])
+    if (basic)
+        return out
+    for (var b = 0; b < BASIC.length; b++) {
+        if (!contains(out, BASIC[b]))
+            out.push(BASIC[b])
+    }
+    return out
 }
 
 function toggleId(hidden, id) {

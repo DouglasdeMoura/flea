@@ -61,7 +61,7 @@ function runModes(check) {
     check("and it stores the shape the board names",
           JSON.stringify(TextSize.follow()), '{"mode":"system"}')
     check("an override is not following",
-          TextSize.following({ mode: "override", px: 16 }), false)
+          TextSize.following({ mode: 16 }), false)
     check("nothing stored at all reads as following", TextSize.following(undefined), true)
 
     check("following draws at Omarchy's own size",
@@ -69,55 +69,59 @@ function runModes(check) {
     check("and a later omarchy display text size moves it with no write of Flea's own",
           TextSize.effective(TextSize.follow(), 16), 16)
     check("an override draws at its stop and ignores Omarchy's",
-          TextSize.effective({ mode: "override", px: 20 }, 14), 20)
+          TextSize.effective({ mode: 20 }, 14), 20)
 }
 
 function runSteps(check) {
     // Switching to Override changes nothing on screen: only a step does, which is what makes the
     // switch safe to press to see what is there.
     check("pinning starts on the stop already on screen",
-          TextSize.pin(TextSize.follow(), 14).px, 14)
+          TextSize.pin(TextSize.follow(), 14).mode, 14)
     check("and on the nearest one when Omarchy is between two",
-          TextSize.pin(TextSize.follow(), 13).px, 12)
+          TextSize.pin(TextSize.follow(), 13).mode, 12)
     check("pinning an override leaves it where it is",
-          TextSize.pin({ mode: "override", px: 10 }, 14).px, 10)
+          TextSize.pin({ mode: 10 }, 14).mode, 10)
 
     check("a step up from following becomes an override one stop above Omarchy's size",
-          JSON.stringify(TextSize.stepped(TextSize.follow(), 14, 1)),
-          '{"mode":"override","px":16}')
+          JSON.stringify(TextSize.stepped(TextSize.follow(), 14, 1)), '{"mode":16}')
     check("a step down from following goes the other way",
-          TextSize.stepped(TextSize.follow(), 14, -1).px, 12)
+          TextSize.stepped(TextSize.follow(), 14, -1).mode, 12)
     check("a step is one stop and not one pixel",
-          TextSize.stepped({ mode: "override", px: 12 }, 14, 1).px, 14)
+          TextSize.stepped({ mode: 12 }, 14, 1).mode, 14)
     check("it clamps at the ceiling rather than growing forever",
-          TextSize.stepped({ mode: "override", px: 20 }, 14, 1).px, 20)
-    check("and at the floor", TextSize.stepped({ mode: "override", px: 9 }, 14, -1).px, 9)
+          TextSize.stepped({ mode: 20 }, 14, 1).mode, 20)
+    check("and at the floor", TextSize.stepped({ mode: 9 }, 14, -1).mode, 9)
 
     // Up and back down has to land on the same stop, or the chord walks the list off centre. The
     // walk stays inside the list: a clamp is not reversible, which the two checks above pin.
     var walked = TextSize.follow()
     for (var i = 0; i < 2; i++) walked = TextSize.stepped(walked, 14, 1)
-    check("two steps up from this box's own size reaches the ceiling", walked.px, 20)
+    check("two steps up from this box's own size reaches the ceiling", walked.mode, 20)
     for (var j = 0; j < 2; j++) walked = TextSize.stepped(walked, 14, -1)
-    check("and two back returns to the size it started on", walked.px, 14)
+    check("and two back returns to the size it started on", walked.mode, 14)
 }
 
 function runStored(check) {
     check("a stored override on a real stop is kept",
-          JSON.stringify(TextSize.parse({ mode: "override", px: 16 })),
-          '{"mode":"override","px":16}')
-    // A hand-edited view.json is not a trust boundary but it is an input, so it is snapped on read.
+          JSON.stringify(TextSize.parse({ mode: 16 })), '{"mode":16}')
+    // A hand-edited ui.json is not a trust boundary but it is an input, so it is snapped on read.
     check("a stored size off the list snaps to a stop rather than being honoured",
-          TextSize.parse({ mode: "override", px: 13 }).px, 12)
+          TextSize.parse({ mode: 13 }).mode, 12)
     check("a stored zero reads as following rather than collapsing every token",
-          TextSize.following(TextSize.parse({ mode: "override", px: 0 })), true)
+          TextSize.following(TextSize.parse({ mode: 0 })), true)
     check("so does a stored size that is not a number",
-          TextSize.following(TextSize.parse({ mode: "override", px: "big" })), true)
-    check("a mode this build does not have reads as following",
-          TextSize.following(TextSize.parse({ mode: "percentage", px: 16 })), true)
+          TextSize.following(TextSize.parse({ mode: "big" })), true)
+    // src/uischema.rs takes "system" or a stop and nothing else, so this is the one stored shape.
+    check("0.1.3's own override shape reads as following rather than as a second vocabulary",
+          TextSize.following(TextSize.parse({ mode: "override", px: 16 })), true)
     // The old build stored an interface-scale multiplier under uiScale and no textSize at all.
     check("and so does a file written before this control existed",
           TextSize.following(TextSize.parse(undefined)), true)
+    // The window writes what src/uischema.rs validates, so the two vocabularies are one.
+    check("the stored override is the shape the schema's stop rule takes",
+          JSON.stringify(TextSize.stepped(TextSize.follow(), 14, 1)), '{"mode":16}')
+    check("and following is the shape its system rule takes",
+          JSON.stringify(TextSize.parse(TextSize.follow())), '{"mode":"system"}')
 }
 
 // The board's table is the contract, so it is asserted stop by stop rather than summarised.
@@ -152,7 +156,7 @@ function runBoardTable(check) {
 
 function runAnnounce(check) {
     check("the sentence names the size and the way back",
-          TextSize.announce({ mode: "override", px: 16 }, 14),
+          TextSize.announce({ mode: 16 }, 14),
           "Text size 16px. Ctrl+Shift+0 follows Omarchy again.")
     check("and following reports whose size it is",
           TextSize.announce(TextSize.follow(), 14), "Text size follows Omarchy, 14px.")
