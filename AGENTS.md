@@ -862,7 +862,11 @@ its own decisive axis (the toolchain) made the rest of that measurement moot. `u
 `tools/flea-file-budget` scans `src`, `ui` and `tests` for `.rs`, `.qml` and `.js`
 files. Rust and QML get a 250-line soft budget and a 400-line hard cap; JS gets 200
 soft and 300 hard. Going over the hard cap fails the tool; going over the soft budget
-only warns. The budget is a smell detector, not a target. Every count below is
+only warns. The budget is a smell detector, not a target, and **it is not a reason to refactor a
+stable file**. Three files cross the hard cap purely as arithmetic of a clean merge for 0.1.4, with
+no conflict and no new code: `ui/NetworkMounts.qml`, `ui/ChromeBar.qml` and `ui/Sidebar.qml`. They
+are listed in `tools/flea-file-budget` as known exceptions so the tool still fails on anything
+else, and each prints its own line rather than being hidden. Every count below is
 `wc -l` on the file, and every test-module count runs from its `#[cfg(test)]` line to
 the end of the file; run the tool rather than trusting these if the two disagree. **Three of them
 had gone stale by a whole plan and were re-derived from `wc -l` in Plan 5 Task 5a**, so when you
@@ -1171,9 +1175,12 @@ waits for its consumer.
 
 ## Testing
 
-- **The warning gate is all four cargo invocations**, not two: `cargo build`,
-  `cargo build --release`, `cargo test` and `cargo test --release`, each after a `cargo clean`,
-  each expected to print zero warnings. `cargo build` cannot see anything inside `#[cfg(test)]`,
+- **The warning gate covers `#[cfg(test)]`, which is the point of it.** `cargo build` cannot see
+  anything inside a test module, so a build-only gate hides every unused import and dead helper
+  there; two lived here for three review rounds for exactly that reason. Keep debug and release
+  coverage and keep zero warnings, but **build incrementally**: the `cargo clean` before each of the
+  four invocations was ceremony, not coverage, and cargo decides for itself what needs rebuilding.
+  Do not separately rerun what `./tests/run-all.sh` already covers. `cargo build` cannot see anything inside `#[cfg(test)]`,
   so a two-invocation gate hides every unused import and every dead helper in a test module. Two
   of them lived here for three review rounds, one of them predating the whole thumbnail plan,
   because the gate said "build" and nobody ran the other half.
