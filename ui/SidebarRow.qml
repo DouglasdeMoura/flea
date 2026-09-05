@@ -65,11 +65,13 @@ Item {
         sourceComponent: root.modelData.kind === "dropbox" ? dropboxMark : glyphMark
     }
 
+    // ThemeRoles.html gives every rail label and glyph the foreground role, selected rows included:
+    // the cursor reads through the fill and the accent edge above, never by dimming the rows it is not on.
     Component {
         id: glyphMark
         Glyph {
             name: root.modelData.glyph
-            color: root.cursor ? Theme.color.foreground : Theme.color.muted
+            color: Theme.color.foreground
         }
     }
 
@@ -78,7 +80,7 @@ Item {
         id: dropboxMark
         DropboxMark {
             iconSize: Theme.railIconSize
-            color: root.cursor ? Theme.color.foreground : Theme.color.muted
+            color: Theme.color.foreground
         }
     }
 
@@ -90,7 +92,7 @@ Item {
         anchors.rightMargin: Style.spacing.rowGap
         anchors.verticalCenter: parent.verticalCenter
         text: root.modelData.label
-        color: root.cursor ? Theme.color.foreground : Theme.color.muted
+        color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.bodySmall
         elide: Text.ElideRight
