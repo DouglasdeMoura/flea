@@ -655,6 +655,8 @@ case_open() {
     ln -s "$dir/target.txt" "$dir/linkfile"
     ln -s "$dir/subdir" "$dir/linkdir"
     ln -s "$dir/nowhere" "$dir/broken"
+    # A real archive, because the archive arm below reads the backend's own index of it and not a name.
+    bsdtar -a -c -f "$dir/sample.zip" -C "$dir" target.txt
     local opened="$dir/opened.log"
     : > "$opened"
     # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
@@ -671,8 +673,8 @@ case_open() {
     export PATH="$dir/bin:$PATH"
     launch "$dir"
     export PATH="$saved_path"
-    # Measured row order: bin, subdir, broken, linkdir, linkfile, opened.log, target.txt.
-    wait_listing 7
+    # Measured row order: bin, subdir, broken, linkdir, linkfile, opened.log, sample.zip, target.txt.
+    wait_listing 8
 
     # Bare l enters a real directory and stays silent when its empty listing has no row.
     seek_row_named subdir
@@ -735,7 +737,21 @@ case_open() {
     [[ -n "$(ipc lastMessage)" ]] || fail "Enter on a broken symlink said nothing"
     [[ "$(ipc path)" == "$dir" ]] || fail "Enter on a broken symlink moved to $(ipc path)"
     [[ "$(grep -c OPENED "$opened")" == "1" ]] || fail "a broken symlink was handed to $open_handoff open"
-    [[ "$(ipc total)" == "7" ]] || fail "the listing did not survive Enter on a broken symlink"
+    [[ "$(ipc total)" == "8" ]] || fail "the listing did not survive Enter on a broken symlink"
+
+    # The operator's 0.1.4 ruling: Enter on an archive opens Flea's own view and hands nothing on,
+    # because every archive type this box can name defaults to org.gnome.Nautilus.desktop.
+    seek_row_named sample.zip
+    key -k Return >/dev/null
+    omarchy-drive wait ipc -p "$flea_ui" flea previewState archive --timeout 10 >/dev/null \
+        || fail "Enter on an archive left the preview at $(ipc previewState), kind $(ipc previewKind), and the log holds $(cat "$opened")"
+    printf 'OPEN archive kind=%q state=%q log=%q\n' "$(ipc previewKind)" "$(ipc previewState)" "$(cat "$opened")"
+    shot open-archive
+    [[ "$(grep -c OPENED "$opened")" == "1" ]] || fail "Enter on an archive handed $(cat "$opened") to $open_handoff open"
+    [[ "$(ipc path)" == "$dir" ]] || fail "Enter on an archive left the directory for $(ipc path)"
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc previewOpen)" == "false" ]] || fail "Escape left the archive preview open"
 }
 
 # PR 34's terminal route. Nothing else in this suite reaches it: before this case, openTerminal,
