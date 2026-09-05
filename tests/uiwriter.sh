@@ -353,6 +353,213 @@ check "and the waiting window's preset is too" "1" "$(echo "$two_flat" | grep -c
 check "the waiting window sent its own setting" "1" "$(echo "$two_sent" | grep -c '"keys":"windows"')"
 check "and never named the one it only read" "0" "$(echo "$two_sent" | grep -c 'display')"
 
+# The temporal half of the lost update, which a narrower patch cannot close: the window records what
+# a writer stored only when the whole queue drains, so a setting that has ALREADY landed stays owed
+# and rides along inside every patch queued behind it. The wrapper below is what makes the ordering a
+# fact rather than a hope: it stands in for flea, records the argv of every writer, and holds the one
+# the suite names at the door until the suite has changed the file under it.
+cat > "$SANDBOX/wrapflea" <<'WRAP'
+#!/bin/sh
+set -u
+# Sample input: --ui-state {"keys":"windows"}
+n=$(cat "$PROBE_WRAP_DIR/count" 2>/dev/null || echo 0)
+n=$((n + 1))
+printf '%s\n' "$n" > "$PROBE_WRAP_DIR/count"
+printf '%s' "$2" > "$PROBE_WRAP_DIR/sent.$n"
+if [ "$n" = "${PROBE_WRAP_FAIL:-}" ]; then
+  printf 'flea: refused by the uiwriter wrapper\n' >&2
+  exit 2
+fi
+# Written after the argv, so the file the suite waits on proves the argv beside it is already there.
+if [ "$n" = "${PROBE_WRAP_HOLD:-}" ]; then
+  : > "$PROBE_WRAP_DIR/held"
+  while [ ! -e "$PROBE_WRAP_DIR/release" ]; do sleep 0.05; done
+fi
+exec "$PROBE_WRAP_REAL" "$@"
+WRAP
+chmod +x "$SANDBOX/wrapflea" || exit 1
+
+# Two changes in ONE turn, so the second is queued behind the first writer rather than racing it.
+# The probe quits on the book emptying and not on a timing, so a held writer cannot be cut off.
+cat > "$QMLDIR/queued.qml" <<'QML'
+import QtQuick
+import Quickshell
+
+ShellRoot {
+    id: root
+
+    property int failures: 0
+    property bool started: false
+
+    property var reporter: Connections {
+        target: ViewState
+        function onSaveFailed() { root.failures = root.failures + 1 }
+    }
+
+    Component.onCompleted: {
+        ViewState.setKeysPreset("windows")
+        ViewState.setTextSize({ mode: 16 })
+        console.log("PROBE queued=" + ViewState.writeBook.pending)
+        root.started = true
+    }
+
+    property var watcher: Timer {
+        interval: 100
+        repeat: true
+        running: true
+        onTriggered: {
+            if (root.started && ViewState.writeBook.inflight.length === 0) {
+                console.log("PROBE failures=" + root.failures)
+                Qt.quit()
+            }
+        }
+    }
+
+    // A backstop with its own line, so a run that never drained is read as that and not as a pass.
+    property var backstop: Timer {
+        interval: 30000
+        running: true
+        onTriggered: {
+            console.log("PROBE stalled failures=" + root.failures)
+            Qt.quit()
+        }
+    }
+}
+QML
+
+# The failure arm of the same shape: the first writer is refused, and the patch behind it has to keep
+# the refused setting AND carry the newer value the window took for it while that writer was running.
+cat > "$QMLDIR/refused.qml" <<'QML'
+import QtQuick
+import Quickshell
+
+ShellRoot {
+    id: root
+
+    property int failures: 0
+    property bool started: false
+
+    property var reporter: Connections {
+        target: ViewState
+        function onSaveFailed() { root.failures = root.failures + 1 }
+    }
+
+    Component.onCompleted: {
+        ViewState.toggleColumn("kind")
+        ViewState.setTextSize({ mode: 16 })
+        ViewState.toggleColumn("mode")
+        console.log("PROBE queued=" + ViewState.writeBook.pending)
+        root.started = true
+    }
+
+    property var watcher: Timer {
+        interval: 100
+        repeat: true
+        running: true
+        onTriggered: {
+            if (root.started && ViewState.writeBook.inflight.length === 0) {
+                console.log("PROBE failures=" + root.failures)
+                Qt.quit()
+            }
+        }
+    }
+
+    property var backstop: Timer {
+        interval: 30000
+        running: true
+        onTriggered: {
+            console.log("PROBE stalled failures=" + root.failures)
+            Qt.quit()
+        }
+    }
+}
+QML
+
+WRAPSEED='{"columns":["name","size","date"],"keys":"mac","display":{"textSize":{"mode":"system"}}}'
+
+# One wrap run: its own state home, its own wrapper bookkeeping, and the wrapper as FLEA_BIN. Started
+# in the background so the suite can act between two of its writers; the caller waits for wrap_pid.
+wrap_start() {
+  local probe="$1" hold="$2" refuse="$3"
+  sandbox_scratch "$SANDBOX/wrap" || exit 1
+  mkdir -p "$SANDBOX/wrap/state" "$SANDBOX/wrap/bin" || exit 1
+  env XDG_STATE_HOME="$SANDBOX/wrap/state" "$BIN" --ui-state "$WRAPSEED" >/dev/null 2>&1 \
+    || { echo "FAIL wrap: the seed write failed"; fail=1; return 1; }
+  env QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+      XDG_STATE_HOME="$SANDBOX/wrap/state" FLEA_BIN="$SANDBOX/wrapflea" \
+      PROBE_WRAP_DIR="$SANDBOX/wrap/bin" PROBE_WRAP_REAL="$BIN" \
+      PROBE_WRAP_HOLD="$hold" PROBE_WRAP_FAIL="$refuse" \
+      timeout 60 qs -p "$QMLDIR/$probe" > "$SANDBOX/wrap/probe.log" 2>&1 &
+  wrap_pid=$!
+  return 0
+}
+
+# The combined control. The window saves the keys preset and changes the text size in one turn; the
+# preset LANDS; the CLI then changes the preset, the way another window or a script would; and only
+# then is the queued writer let go. Its patch must name the text size alone, because the preset it
+# was holding is already in the file and is no longer this window's to write.
+wrap_ui=$SANDBOX/wrap/state/flea/ui.json
+if wrap_start queued.qml 2 ""; then
+  waited=0
+  until [ -e "$SANDBOX/wrap/bin/held" ]; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 600 ]; then
+      echo "FAIL queued acknowledgement: no writer ever reached the door"
+      fail=1
+      break
+    fi
+    sleep 0.05
+  done
+  if [ -e "$SANDBOX/wrap/bin/held" ]; then
+    # Read off the file and not assumed: the queued writer is at the door, so the writer before it
+    # has exited, and this is the proof its patch reached the file before the CLI write below.
+    check "the first writer's preset is in the file before anything else touches it" "1" \
+          "$(tr -d ' \n' < "$wrap_ui" 2>/dev/null | grep -c '"keys":"windows"')"
+    env XDG_STATE_HOME="$SANDBOX/wrap/state" "$BIN" --ui-state '{"keys":"mac"}' >/dev/null 2>&1 \
+      || { echo "FAIL queued acknowledgement: the CLI write failed"; fail=1; }
+    check "the CLI's preset is what the file holds when the queued writer is released" "1" \
+          "$(tr -d ' \n' < "$wrap_ui" 2>/dev/null | grep -c '"keys":"mac"')"
+    : > "$SANDBOX/wrap/bin/release" || exit 1
+  fi
+  wait "$wrap_pid"
+  queued_sent=$(cat "$SANDBOX/wrap/bin/sent.2" 2>/dev/null)
+  wrap_flat=$(tr -d ' \n' < "$wrap_ui" 2>/dev/null)
+  # Printed, so what is said about this control is read off the run and not off the check labels.
+  echo "     the first writer sent $(cat "$SANDBOX/wrap/bin/sent.1" 2>/dev/null)"
+  echo "     the queued writer sent $queued_sent"
+  echo "     and the file then held $wrap_flat"
+  check "the queued writer sent a patch at all" "1" "$([ -n "$queued_sent" ] && echo 1 || echo 0)"
+  check "the queued writer carries the setting it is queued for" \
+        '{"display":{"textSize":{"mode":16}}}' "$queued_sent"
+  check "and never the preset the writer before it already stored" "0" \
+        "$(printf '%s' "$queued_sent" | grep -c 'keys')"
+  check "so the CLI's preset survives the queued write" "1" "$(echo "$wrap_flat" | grep -c '"keys":"mac"')"
+  check "and the text size the queued writer was for landed" "1" \
+        "$(echo "$wrap_flat" | grep -c '"textSize":{"mode":16}')"
+  check "nothing was reported to the pane" "1" "$(grep -c 'PROBE failures=0' "$SANDBOX/wrap/probe.log")"
+fi
+
+# The failure arm. The first writer is REFUSED, so nothing is acknowledged and its setting stays
+# owed; and the window changed that same setting again while it ran, so what goes out behind it is
+# the newer value and never the refused one.
+if wrap_start refused.qml "" 1; then
+  wait "$wrap_pid"
+  refused_sent=$(cat "$SANDBOX/wrap/bin/sent.2" 2>/dev/null)
+  wrap_flat=$(tr -d ' \n' < "$wrap_ui" 2>/dev/null)
+  echo "     the refused writer sent $(cat "$SANDBOX/wrap/bin/sent.1" 2>/dev/null)"
+  echo "     the writer after it sent $refused_sent"
+  echo "     and the file then held $wrap_flat"
+  check "the refusal is reported to the pane" "1" "$(grep -c 'PROBE failures=1' "$SANDBOX/wrap/probe.log")"
+  check "the patch after the refusal keeps the refused setting and takes its newer value" \
+        '{"columns":["name","size","date","kind","mode"],"display":{"textSize":{"mode":16}}}' "$refused_sent"
+  check "and never sends the value the refused writer was carrying" "0" \
+        "$(printf '%s' "$refused_sent" | grep -c '"kind"\]')"
+  check "the newer column set is what reached the file" "1" \
+        "$(echo "$wrap_flat" | grep -c '"columns":\["name","size","date","kind","mode"\]')"
+  check "and the setting queued beside it landed too" "1" \
+        "$(echo "$wrap_flat" | grep -c '"textSize":{"mode":16}')"
+fi
+
 sandbox_remove "$SANDBOX" || exit 1
 
 [ "$fail" -eq 0 ] && echo "uiwriter: all checks passed"

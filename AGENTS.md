@@ -345,10 +345,16 @@ sub-key a newer Flea left in `display` or `menu` stays on screen, and owes the l
 this Flea has no rule for that sub-key and `check()` refuses a whole patch that names one. The owed
 document is a union rather than the newest change alone, so a change made while a writer runs
 coalesces with whatever is queued behind it; a refused write keeps it owed so the next patch carries
-it again, and a landed one with nothing queued behind it empties it, because what is kept after a
-write lands is exactly the stale read the snapshot used to send. A setter that lands the value
-already held owes nothing at all. `tests/uiwriter.sh` drives two windows over one state file both
-ways round, and `tests/js/uistate.js` pins the patch bytes.
+it again. **A write that LANDS takes its own settings back out, leaf by leaf, the moment it exits**,
+and never when the queue happens to drain: waiting for the drain left a setting that was already in
+the file still owed, so it rode along inside the patch queued behind it and overwrote whatever
+another window or the CLI had put there in the meantime, which is the same lost update one step
+later in time. The queued writer is therefore launched with what is owed when it starts rather than
+with the bytes that were waiting, and a setting whose value changed again while the writer that
+carried the old one ran is NOT taken out, because the file does not have the new one. A setter that
+lands the value already held owes nothing at all. `tests/uiwriter.sh` drives two windows over one
+state file both ways round and holds a queued writer at the door while the CLI writes under it, and
+`tests/js/uistate.js` pins the patch bytes.
 
 **The window's read is the settled file, and not a raw one.** `main()` calls `Store::settle` before
 it hands off to `qs`: an empty patch through the same lock and the same per-key validation, so

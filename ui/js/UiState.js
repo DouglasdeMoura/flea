@@ -64,14 +64,70 @@ function asked(b, patch) {
 }
 
 // The writer exited. The answer is the next book plus `start`, and `failed` for the pane to report.
-function exited(b, code) {
-    // Only a zero status proves the patch reached the file: src/main.rs exits 2 on a refused patch
-    // and on a state directory it could not write, and the change is on screen either way.
+// `owed` is what the window still owes NOW and is what a queued writer launches with, because the
+// bytes waiting in `pending` were built before this writer landed: they still name the settings it
+// just stored, and re-sending one writes this window's own copy of it over whatever another window
+// or the CLI put there in between. A refusal changes nothing, so there `owed` is those same bytes.
+function exited(b, code, owed) {
+    // Nothing waiting, or nothing left owed once this writer's own settings came out of it, which a
+    // value changed and changed back under one writer produces: an empty patch is a process and a
+    // rename spent on a document that would come out byte for byte the same.
+    var next = (b.pending.length > 0 && owed !== "{}") ? owed : ""
     return {
+        // Only a zero status proves the patch reached the file: src/main.rs exits 2 on a refused
+        // patch and on a state directory it could not write, and the change is on screen either way.
         saved: code === 0 ? b.inflight : b.saved,
-        inflight: b.pending,
+        inflight: next,
         pending: "",
-        start: b.pending,
+        start: next,
         failed: code !== 0
     }
+}
+
+// What is still owed once the patch a writer landed is taken out of it. A setting is only cleared
+// when what the window owes for it now is what that writer carried: a change made while the writer
+// ran is a newer value for the same setting, and the file does not have that one yet.
+function acknowledged(unsaved, patch) {
+    var landed
+    try {
+        landed = JSON.parse(patch)
+    } catch (e) {
+        // Bytes this file built itself, so a parse failure clears nothing rather than clearing wrong.
+        return unsaved
+    }
+    if (!landed || typeof landed !== "object" || Array.isArray(landed))
+        return unsaved
+    var out = {}
+    for (var key in unsaved) {
+        var still = stillOwed(unsaved[key], landed[key])
+        if (still !== undefined)
+            out[key] = still
+    }
+    return out
+}
+
+// One key of the owed patch against the same key of the landed one: `undefined` when the writer took
+// all of it, and otherwise what is left. Two objects are a settings group and are walked leaf by
+// leaf, because changeLeaf owes the leaf alone and clearing the group would drop a leaf beside it
+// that no writer has taken yet.
+function stillOwed(owed, landed) {
+    if (landed === undefined)
+        return owed
+    if (isGroup(owed) && isGroup(landed)) {
+        var kept = {}
+        var any = false
+        for (var leaf in owed) {
+            if (JSON.stringify(owed[leaf]) === JSON.stringify(landed[leaf]))
+                continue
+            kept[leaf] = owed[leaf]
+            any = true
+        }
+        return any ? kept : undefined
+    }
+    return JSON.stringify(owed) === JSON.stringify(landed) ? undefined : owed
+}
+
+// A settings group, which is the only shape withGroup builds: an array is a whole key's value.
+function isGroup(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
 }

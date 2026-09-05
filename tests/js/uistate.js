@@ -27,7 +27,7 @@ function run(check) {
     check("the file is still known to hold what it held", asked.saved, OLD)
 
     // Scenario A: ~/.local/state is unwritable, so src/main.rs prints its sentence and exits 2.
-    var refused = UiState.exited(asked, 2)
+    var refused = UiState.exited(asked, 2, NEW)
     check("a refused write is not believed", refused.saved, OLD)
     check("a refused write is reported", refused.failed, true)
     check("and it leaves no writer in flight", refused.inflight, "")
@@ -35,7 +35,7 @@ function run(check) {
     // The whole cost of believing it: the identical toggle can never even be attempted again.
     check("an identical retry is attempted after a refusal", UiState.asked(refused, NEW).start, NEW)
 
-    var landed = UiState.exited(asked, 0)
+    var landed = UiState.exited(asked, 0, "")
     check("a write that exited zero is believed", landed.saved, NEW)
     check("and it is not reported", landed.failed, false)
     check("a patch the landed write already stored starts nothing", UiState.asked(landed, NEW).start, "")
@@ -105,9 +105,80 @@ function run(check) {
           '{"display":{"textSize":{"mode":16},"aKeyThisBuildHasNeverHeardOf":true}}')
     check("and the patch beside it never carries one", JSON.stringify(owed).indexOf("NeverHeardOf"), -1)
 
-    var drained = UiState.exited(queued, 0)
+    var drained = UiState.exited(queued, 0, THIRD)
     check("the queued patch starts when the writer exits", drained.start, THIRD)
     check("and the exited writer's own patch is what the file now holds", drained.saved, NEW)
-    check("a refusal underneath a queue still runs the queue", UiState.exited(queued, 2).start, THIRD)
-    check("and still reports the refusal", UiState.exited(queued, 2).failed, true)
+    check("a refusal underneath a queue still runs the queue", UiState.exited(queued, 2, THIRD).start, THIRD)
+    check("and still reports the refusal", UiState.exited(queued, 2, THIRD).failed, true)
+    check("a writer that exits with nothing behind it starts nothing", UiState.exited(asked, 0, "{}").start, "")
+    // A size stepped up and back down under one writer: what was queued differs from what is in
+    // flight, so it queued, and the landed patch then takes the whole of it back out again.
+    check("a queued writer with nothing left owed under it is not launched",
+          UiState.exited(queued, 0, "{}").start, "")
+    check("and nothing is left in flight for the pane to wait on",
+          UiState.exited(queued, 0, "{}").inflight, "")
+
+    // What a landed writer stored comes out of what the window owes, and only that. Waiting for the
+    // whole queue to drain instead left a stored setting owed, so it rode along inside every later
+    // patch and overwrote whatever another window or the CLI had put there in the meantime.
+    check("a landed setting is no longer owed",
+          JSON.stringify(UiState.acknowledged({ keys: "windows" }, '{"keys":"windows"}')), "{}")
+    check("a setting the writer never carried stays owed",
+          JSON.stringify(UiState.acknowledged({ keys: "windows", columns: ["name"] }, '{"keys":"windows"}')),
+          '{"columns":["name"]}')
+    check("an array setting is compared whole",
+          JSON.stringify(UiState.acknowledged({ columns: ["name", "size"] }, '{"columns":["name","size"]}')), "{}")
+    check("and a different array is not cleared by it",
+          JSON.stringify(UiState.acknowledged({ columns: ["name"] }, '{"columns":["name","size"]}')),
+          '{"columns":["name"]}')
+
+    // Leaf-accurate, because changeLeaf owes the leaf alone: clearing the group would drop a leaf
+    // beside it that no writer has taken yet, and keeping the group would re-send the one that landed.
+    var twoLeaves = { display: { textSize: { mode: 16 }, hidden: ["paste"] } }
+    check("a landed leaf is cleared out of the group it sits in",
+          JSON.stringify(UiState.acknowledged(twoLeaves, '{"display":{"textSize":{"mode":16}}}')),
+          '{"display":{"hidden":["paste"]}}')
+    check("and the group goes when its last owed leaf does",
+          JSON.stringify(UiState.acknowledged({ display: { textSize: { mode: 16 } } },
+                                              '{"display":{"textSize":{"mode":16}}}')), "{}")
+    check("and nothing is mutated in place",
+          JSON.stringify(twoLeaves), '{"display":{"textSize":{"mode":16},"hidden":["paste"]}}')
+    check("bytes that are not a patch clear nothing",
+          JSON.stringify(UiState.acknowledged({ keys: "windows" }, "not json")), '{"keys":"windows"}')
+
+    // A change made WHILE the writer ran is a newer value for a setting that writer carried, and the
+    // file does not have that one: the older value landing must not clear it.
+    check("a newer value for a landed setting is still owed",
+          JSON.stringify(UiState.acknowledged({ keys: "mac" }, '{"keys":"windows"}')), '{"keys":"mac"}')
+    check("and a newer value for a landed leaf is too",
+          JSON.stringify(UiState.acknowledged({ display: { textSize: { mode: 20 } } },
+                                              '{"display":{"textSize":{"mode":16}}}')),
+          '{"display":{"textSize":{"mode":20}}}')
+
+    // The interleave all of the above exists for, driven through the book. A window saves the keys
+    // preset; while that writer runs it changes the text size, so the queued patch carries both. The
+    // preset lands, and what the queued writer STARTS with has to be rebuilt from what is still owed:
+    // the bytes waiting in `pending` were built before the preset landed and still name it.
+    var ownKeys = UiState.withKey({}, "keys", "windows")
+    var alsoSize = UiState.withGroup(ownKeys, "display", { textSize: { mode: 16 } })
+    var first = UiState.asked(UiState.book(), JSON.stringify(ownKeys))
+    check("the preset starts a writer", first.start, '{"keys":"windows"}')
+    var behind = UiState.asked(first, JSON.stringify(alsoSize))
+    check("the text size queues behind it carrying both",
+          behind.pending, '{"keys":"windows","display":{"textSize":{"mode":16}}}')
+    var stillOwes = UiState.acknowledged(alsoSize, behind.inflight)
+    check("the landed preset drops out of what is owed",
+          JSON.stringify(stillOwes), '{"display":{"textSize":{"mode":16}}}')
+    var drainedAfter = UiState.exited(behind, 0, JSON.stringify(stillOwes))
+    check("so the queued writer starts with the text size alone",
+          drainedAfter.start, '{"display":{"textSize":{"mode":16}}}')
+    check("and cannot name the preset another window may have changed since",
+          drainedAfter.start.indexOf("keys"), -1)
+
+    // The failure arm of the same interleave: nothing landed, so nothing is acknowledged and the
+    // queued writer still carries the refused setting as well as the newer one.
+    var refusedUnder = UiState.exited(behind, 2, JSON.stringify(alsoSize))
+    check("a refused writer leaves its own setting in the patch behind it",
+          refusedUnder.start, '{"keys":"windows","display":{"textSize":{"mode":16}}}')
+    check("and the refusal is still reported", refusedUnder.failed, true)
 }

@@ -154,8 +154,8 @@ QtObject {
     property bool unreadable: false
 
     // What this window has changed and no write has landed for yet, in the shape of a ui.json patch.
-    // Emptied when a write carrying it lands with nothing queued behind it, so a refusal keeps it and
-    // the next patch carries it again.
+    // A write that lands takes its own settings out of it leaf by leaf, so a refused one keeps its
+    // settings for the next patch to carry and a stored one is never carried again.
     property var unsaved: ({})
 
     // ui/js/UiState.js's book: the newest patch a writer landed, what the running writer carries,
@@ -164,9 +164,9 @@ QtObject {
 
     // Only what this window has changed, because src/uistate.rs merges a patch key by key: a key
     // left out is one the file keeps, so saving a text size here cannot write this window's own read
-    // of `keys` over a change another window or the CLI made after that read. It is the union of
-    // every change since the last write landed rather than the newest one alone, so a patch built
-    // while a writer runs still carries whatever the book is holding behind it.
+    // of `keys` over a change another window or the CLI made after that read. It is every change no
+    // writer has stored yet rather than the newest one alone, so a refused patch's settings ride out
+    // again on the next one; a stored patch's are gone from it before the next one is built.
     function patch() {
         return JSON.stringify(root.unsaved)
     }
@@ -213,11 +213,12 @@ QtObject {
     // The writer answered, with its own status or with 2 for one that never started: the same refusal
     // to the pane and the same retry to the book, because neither reached the file.
     function wrote(exitCode) {
-        var next = UiState.exited(root.writeBook, exitCode)
+        // Taken out before the patch below is built, so a writer queued behind this one launches with
+        // what is still owed and not with the settings this one has just stored.
+        if (exitCode === 0)
+            root.unsaved = UiState.acknowledged(root.unsaved, root.writeBook.inflight)
+        var next = UiState.exited(root.writeBook, exitCode, root.patch())
         root.writeBook = next
-        // What changed stays owed until a write carrying it lands with nothing queued behind it.
-        if (exitCode === 0 && next.inflight.length === 0)
-            root.unsaved = ({})
         if (next.failed)
             root.saveFailed()
         if (next.start.length > 0)
