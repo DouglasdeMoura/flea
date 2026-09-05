@@ -52,7 +52,8 @@ Item {
 
     // Sized in characters, because a monospace makes that exact where a pixel constant would be an accident.
     readonly property int widthChars: 18
-    implicitWidth: metrics.advanceWidth * root.widthChars + 2 * Style.spacing.rowPaddingX
+    // The mark and its gap count too, because ui/SidebarRow.qml draws them before the label: without them an 18-character entry elided at 15.
+    implicitWidth: metrics.advanceWidth * root.widthChars + 2 * Style.spacing.rowPaddingX + Theme.railIconSize + Style.spacing.rowGap
 
     TextMetrics {
         id: metrics
@@ -262,10 +263,10 @@ Item {
             anchors.right: parent.right
 
             Text {
-                id: favHeading
+                id: placesHeading
                 x: Style.spacing.rowPaddingX
                 bottomPadding: Style.spacing.rowGap
-                text: "FAVORITES"
+                text: "PLACES"
                 color: Theme.color.muted
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.caption

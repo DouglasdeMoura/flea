@@ -130,7 +130,8 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: Style.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
-        width: Theme.font.caption
+        // A row with no badge gives the slot back to its label, which is how the canvas fits "minipc . nvme0n1".
+        width: root.showsDot ? Theme.font.caption : 0
         height: Theme.font.caption
 
         // Green once gio mount -l lists it, muted at half strength while it is only a bookmark waiting
