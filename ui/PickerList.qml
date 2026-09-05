@@ -59,6 +59,7 @@ ListView {
         Flea.Row {
             anchors.fill: parent
             leadingSlot: root.checkSize + Theme.spacing.gap
+            compactDate: true
             row: cell.row
             cursor: cell.listingIndex === root.picker.cursorIndex
             hovered: hover.hovered

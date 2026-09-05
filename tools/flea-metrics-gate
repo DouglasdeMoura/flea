@@ -91,6 +91,7 @@ chromeMarkSize|16|Style.font.icon, round(14 x 1.167), the canvas's chrome mark
 columnMode|70|9 ch x 7.8, JetBrainsMono's advance at 13 px
 columnSize|70|9 ch x 7.8
 columnDate|125|16 ch x 7.8
+columnPickerDate|78|10 ch x 7.8, the send picker's own column, SendPicker.html's 80px slot
 columnKind|130|120 x 13 / 12
 menuWidth|257|space(220)
 cornerRadius|$rounding|hyprctl getoption decoration:rounding, read live above

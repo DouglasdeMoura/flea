@@ -27,6 +27,9 @@ Item {
     // The picker draws a check in front of every row, so its rows start one slot further in; the
     // window's own rows leave this at zero and are laid out exactly as before.
     property real leadingSlot: 0
+    // The picker's second difference: SendPicker.html's narrow date column and its compact form.
+    property bool compactDate: false
+    readonly property int dateWidth: root.compactDate ? Theme.column.pickerDate : Theme.column.date
     // Non-empty while a search or filter is narrowing the listing: the run to paint, and the switch to the search column set.
     property string searchQuery: ""
     // Which of the two is narrowing. A filter keeps the ordinary columns, because its rows are this directory's own and their names are plain names, not paths.
@@ -46,7 +49,7 @@ Item {
     // The columns this row's width affords, and which of them this row is drawing. A column that
     // is not drawn takes neither its width nor its gap, so the chain collapses onto the one to its
     // right and the name takes back the whole of it.
-    readonly property var cols: Theme.columns(root.width, ViewState.hiddenCols)
+    readonly property var cols: Theme.columns(root.width, ViewState.hiddenCols, root.dateWidth)
     readonly property bool modeShown: !root.searching && root.cols.mode
     // The search column set keeps Size and drops the other three, so only this one ignores searching.
     readonly property bool sizeShown: root.cols.size
@@ -68,6 +71,8 @@ Item {
 
     Accessible.role: Accessible.ListItem
     Accessible.name: root.displayName
+    // The compact form drops the clock, so the picker's rows carry the whole stamp here instead; this tree has no tooltip.
+    Accessible.description: root.compactDate && root.row && root.row.m !== null ? Format.date(root.row.m, Date.now()) : ""
 
     Rectangle {
         anchors.fill: parent
@@ -243,9 +248,8 @@ Item {
         anchors.rightMargin: root.kindShown ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         visible: root.dateShown && !root.dropTarget
-        width: root.dateShown ? Theme.column.date : 0
-        // null marks a row with no real mtime yet (ui/ShareBrowser.qml's share rows).
-        text: root.row ? (root.row.m === null ? "--" : Format.date(root.row.m, Date.now())) : ""
+        width: root.dateShown ? root.dateWidth : 0
+        text: root.dateText()
         color: root.cellColor()
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
@@ -325,6 +329,18 @@ Item {
         return (root.dirSize.partial ? ">" : "") + Format.size(root.dirSize.bytes)
     }
 
+    // The window's own four forms, or the picker's compact three; both are cell text and nothing more.
+    function dateText() {
+        if (!root.row) {
+            return ""
+        }
+        // null marks a row with no real mtime yet (ui/ShareBrowser.qml's share rows).
+        if (root.row.m === null) {
+            return "--"
+        }
+        return root.compactDate ? Format.compactDate(root.row.m, Date.now()) : Format.date(root.row.m, Date.now())
+    }
+
     // row.k indexes root.kindNames; an index past its bounds (a row held over from an older listing) reads as empty, never a crash.
     function kindText() {
         if (!root.row || root.row.k === undefined) {
@@ -356,7 +372,7 @@ Item {
     }
 
     // What this row is drawing right now, for the seam that reads it beside the header's.
-    function columnSet() { return Theme.columnNames(root.width, ViewState.hiddenCols) }
+    function columnSet() { return Theme.columnNames(root.width, ViewState.hiddenCols, root.dateWidth) }
 
     // The same by-key idiom Header.cell uses, so the overflow reader can reach a specific cell.
     function cell(key) {

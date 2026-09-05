@@ -28,14 +28,18 @@ var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oc
 var SECONDS_PER_DAY = 86400
 var MILLISECONDS_PER_MINUTE = 60000
 
+// Each instant supplies its own offset so DST transitions keep the local day boundary.
+function localDay(d) {
+    return Math.floor((d.getTime() - d.getTimezoneOffset() * MILLISECONDS_PER_MINUTE) / (SECONDS_PER_DAY * 1000))
+}
+
 // Never all-numeric; the stamp and Today/Yesterday boundary follow the machine's local wall clock.
 function date(mtime, nowMs) {
     var d = new Date(mtime * 1000)
     var now = new Date(nowMs)
     var clock = pad(d.getHours()) + ":" + pad(d.getMinutes())
-    // Each instant supplies its own offset so DST transitions keep the local day boundary.
-    var day = Math.floor((d.getTime() - d.getTimezoneOffset() * MILLISECONDS_PER_MINUTE) / (SECONDS_PER_DAY * 1000))
-    var today = Math.floor((now.getTime() - now.getTimezoneOffset() * MILLISECONDS_PER_MINUTE) / (SECONDS_PER_DAY * 1000))
+    var day = localDay(d)
+    var today = localDay(now)
     if (day === today) {
         return "Today, " + clock
     }
@@ -47,6 +51,19 @@ function date(mtime, nowMs) {
     return d.getFullYear() === now.getFullYear()
         ? stamp + ", " + clock
         : stamp + " " + d.getFullYear()
+}
+
+// The send picker's column is SendPicker.html's 80 and not the window's 125, so its date drops the
+// prose: today is the clock alone and any earlier day is the bare stamp, as that board draws them.
+function compactDate(mtime, nowMs) {
+    var d = new Date(mtime * 1000)
+    var now = new Date(nowMs)
+    if (localDay(d) === localDay(now)) {
+        return pad(d.getHours()) + ":" + pad(d.getMinutes())
+    }
+    var stamp = d.getDate() + " " + MONTHS[d.getMonth()]
+    // A bare "21 Aug" reads the same in every year, so an earlier one carries a two-digit year.
+    return d.getFullYear() === now.getFullYear() ? stamp : stamp + " '" + pad(d.getFullYear() % 100)
 }
 
 // The low nine bits of st_mode, read three at a time.
