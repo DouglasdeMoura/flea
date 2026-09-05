@@ -3581,14 +3581,24 @@ ink, the target and the real `dot`, in one coordinate system, and `tests/ui.sh c
 their centres agree at Omarchy's seven text sizes, 9, 10, 11, 12, 14, 16 and 20 px, driven through a
 fixture `[font] base-size`, plus both ends of the interface zoom.
 
-**A printed edge is a rounded edge.** `boxOf` reports `Math.round`, and at text size 9 the target's
-real box was `[71.344, 95.344)`. Qt Quick's `contains` is `x >= 0 && x < width`, so a click at the
-printed left edge, 71, lands 0.344 px outside and does nothing, while 72 and 95, the first and last
-whole pixels inside the real box, both open the dialog.
+**A printed edge is a rounded edge, and a printed centre is not.** `boxOf` rounds `x` and `width`,
+and at text size 9 the target's real box was `[71.344, 95.344)`. Qt Quick's `contains` is
+`x >= 0 && x < width`, so a click at the printed left edge, 71, lands 0.344 px outside and does
+nothing, while 72 and 95, the first and last whole pixels inside the real box, both open the dialog.
 An earlier run read exactly that miss as evidence the box was somewhere else and inferred
 `[136, 160)` from the ink centre; the runtime rectangle was in fact exactly what the source implied.
 `probe_network_mark_target` therefore stays a whole pixel clear of each printed edge in both
 directions, which is true for any fractional part.
+
+The **centre** is the one field that must not round, because the misalignment above is half a pixel
+and 8 and 8.5 are the same integer. The first version of this check rounded all three fields and
+compared the centres with `-eq`, so it passed the very anchor form the fix replaced: re-applying
+`anchors.centerIn: addGlyph` to `addMark` puts the ink centre at `x + 3.5` and the target centre at
+`x + 4`, which `Math.round` maps onto one number. `boxOf` therefore reports the centre as
+`toFixed(3)` and `assert_network_mark_alignment` compares the two with `==` rather than `-eq`, the
+only comparison in the suite that has to see a fraction. Every layout term here is an integer or a
+half, so three decimals is four orders of magnitude of headroom, not a tolerance to tune. The click
+probes read `x` and `width` and are unaffected.
 
 ### The preview strip's play/pause marks
 

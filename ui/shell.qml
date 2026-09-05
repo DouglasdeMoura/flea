@@ -32,12 +32,12 @@ ShellRoot {
             var rect = fleaWindow.itemRect(item)
             return Math.round(rect.x + rect.width / 2) + " " + Math.round(rect.y + rect.height / 2)
         }
-        // centreOf's sibling for a test that has to compare boxes and not only middles: "x width centre".
+        // centreOf's sibling, "x width centre": the edges round because a click needs a whole pixel, the centre keeps three decimals because the misalignment it reads is half of one.
         function boxOf(item) {
             if (!item)
                 return ""
             var rect = fleaWindow.itemRect(item)
-            return Math.round(rect.x) + " " + Math.round(rect.width) + " " + Math.round(rect.x + rect.width / 2)
+            return Math.round(rect.x) + " " + Math.round(rect.width) + " " + (rect.x + rect.width / 2).toFixed(3)
         }
 
         Rectangle {

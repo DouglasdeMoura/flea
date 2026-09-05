@@ -549,6 +549,8 @@ click_rail_row() {
 # GM's contract, measured and not recomputed: the NETWORK "+" ink, its hit target and the rail's own
 # indicator dot share one x centre. The three boxes come from ui/shell.qml's boxOf, in window
 # coordinates, so nothing here restates the anchoring the way an arithmetic slot did.
+# The centres compare as strings and not with -eq, because -eq is integer-only and the defect this
+# case exists for is half a pixel: 8 and 8.5 round to the same whole number and pass a numeric test.
 assert_network_mark_alignment() {
     local label="$1" take_shot="${2:-false}" geometry glyph target dot
     local gx gw gc tx tw tc dx dw dc caption
@@ -565,9 +567,9 @@ assert_network_mark_alignment() {
     printf 'NETWORK mark %s caption=%s ink=[%s,%s)c%s target=[%s,%s)c%s dot=[%s,%s)c%s\n' \
         "$label" "$caption" "$gx" "$((gx + gw))" "$gc" \
         "$tx" "$((tx + tw))" "$tc" "$dx" "$((dx + dw))" "$dc"
-    [[ "$gc" -eq "$dc" ]] \
+    [[ "$gc" == "$dc" ]] \
         || fail "network: the + ink centre $gc differs from the rail indicator centre $dc at $label"
-    [[ "$tc" -eq "$dc" ]] \
+    [[ "$tc" == "$dc" ]] \
         || fail "network: the + hit target centre $tc differs from the rail indicator centre $dc at $label"
     [[ "$tw" -ge "$hit_target_min" ]] \
         || fail "network: the + hit target is $tw wide, under the $hit_target_min px contract at $label"
@@ -2589,23 +2591,31 @@ case_netmark() {
     [[ "$largest" -gt "$smallest" ]] \
         || fail "netmark: caption stayed at $smallest across every text size, so no stop took effect"
 
-    # The interface zoom is a live feature of its own, and its top stop is the only place the caption
-    # grows past Theme.hitMin, where the hit target and the caption slot become the same box.
-    local step
+    # The interface multiplier is a second live lever on this base, keys.toml scaleUp/scaleDown, and
+    # its top stop is the only place the caption grows past Theme.hitMin, where the hit target and the
+    # caption slot become the same box. Its stops are read back the same way the text sizes are.
+    local step zoom_small zoom_large
     for step in 1 2; do
         key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
     done
     settle
     assert_network_mark_alignment "text size 20 at the smallest zoom"
+    read -r _body zoom_small _pad _rowheight <<< "$(ipc metrics)"
     for step in $(seq 1 12); do
         key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
     done
     settle
     assert_network_mark_alignment "text size 20 at the largest zoom"
+    read -r _body zoom_large _pad _rowheight <<< "$(ipc metrics)"
     key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
     settle
+    # The chords are keystrokes into a live window, so the zoom ends are proven the same way: a pair
+    # that never moved the caption would assert the invariant twice against one layout.
+    [[ "$zoom_large" -gt "$zoom_small" ]] \
+        || fail "netmark: caption stayed at $zoom_small across both zoom ends, so the chords did nothing"
 
-    printf 'NETMARK stops=7 caption=%s..%s probes=4 zoom=both-ends\n' "$smallest" "$largest"
+    printf 'NETMARK stops=7 caption=%s..%s probes=4 zoom=%s..%s\n' \
+        "$smallest" "$largest" "$zoom_small" "$zoom_large"
     export PATH="$saved_path"
     kill_flea
     sandbox_remove "$fixture_home"
