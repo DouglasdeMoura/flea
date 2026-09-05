@@ -2044,7 +2044,7 @@ once at startup and prints one line on stderr, so the cause is stated rather tha
 fatal, because listing directories does not need the sandbox. `tests/thumbs.sh` runs the real binary
 with `PATH` pointed at an empty directory and asserts the empty `file`, no cache entry and no marker.
 
-The shape is `prlimit --cpu=30 --as=1073741824 bwrap <flags> <inner>`. **`prlimit` is the
+The shape is `prlimit --cpu=30 --as=2147483648 bwrap <flags> <inner>`. **`prlimit` is the
 outermost program because `bwrap` has no rlimit option**, verified against `bwrap --help`
 on bubblewrap 0.11.2 here. Setting the limits from Rust would need raw `setrlimit`, which
 `std` does not expose and which the zero-dependency rule forbids reaching for through
@@ -2055,16 +2055,42 @@ fork and exec, so the reverse nesting was measured to kill the same spin and to 
 the same `/proc/self/limits`.
 
 The two numbers: `--cpu=30` seconds, because a 1080p decode is well under a second of CPU
-here and 30 s is a runaway rather than a slow file; `--as=1073741824`, one GiB, because
-`ffmpegthumbnailer` peaks in the tens of megabytes on the media fixture and a gigabyte of
-address space is a decompression bomb rather than a big video.
+here and 30 s is a runaway rather than a slow file; `--as=2147483648`, two GiB, because
+`--as` bounds address space and not resident memory, and issue #17's own trace is a
+thumbnailer that could not `mmap` a thread stack. The original one GiB was set from
+`ffmpegthumbnailer`'s tens of megabytes on the media fixture, which measured the wrong
+thing: issue #17 reported `glycin-thumbnailer` exhausting one GiB on a large ICC-tagged
+JPEG and aborting. What inside `glycin` reserves that much is not measured here and is not
+claimed, but it is not the profile: the same 6000x3375 pixels generated with `-strip` abort at
+exactly the same cap as the profiled ones, so PR #39's "the same image without ICC stays below
+it" does not hold on this box. The amount is measured. Driven through the production argv on
+`tests/thumbs.sh`'s own 6000x3375 ICC fixture, `glycin` 2.1.5-2 on this box aborts with
+status 134 at `--as=536870912` and writes a 601-byte PNG at `--as=671088640`, so it wants
+between 512 and 640 MiB for 81 MB of RGBA pixels. **This box therefore does not reproduce
+the reporter's one-GiB abort**: the same fixture and the same argv pass at
+`--as=1073741824` here (status 0, a 601-byte PNG), so their `glycin` wanted more address
+space than ours does, and the headroom is bought on their number and not on this one. **Two
+is the smallest value the ticket records as working**, and it is chosen on that rather than
+on a judgement: issue #17 says increasing `--as` to 2 GiB or omitting it succeeds without
+error, so 2 GiB is the reporter's own known-good number and three times what this box's
+`glycin` was measured to want. The same fixture and argv pass at `--as=2147483648` here
+too, status 0 and the same 601-byte PNG. The reporter proposes 4 to 8 GiB, so two leaves no
+margin over their range and a larger image on their box could reopen the issue; that is
+accepted, because the rung here is the smallest thing that works and the number moves again
+when somebody brings a measurement. It is still finite and still refuses a decompression
+bomb.
 
 The flags, and why each is there:
 
 - `--unshare-all` drops every namespace, which is what removes the network.
 - `--die-with-parent` means a wedged decoder cannot outlive the backend.
 - `--new-session` detaches the controlling terminal so the child cannot inject input with
-  `TIOCSTI`.
+  `TIOCSTI`, and it puts bwrap's sandboxed side in a session, and so a process group, of its
+  own. That is what bounds `src/backend/mediaprobe.rs`'s watchdog: measured on the box, the
+  launcher's group holds exactly one process, the `prlimit` that exec'd `bwrap`, while the
+  inner `bwrap` and the decoder share a group of their own, so `kill(-pid)` reaches only the
+  launcher and what ends the decoder is `--die-with-parent` plus the PID namespace dying with
+  it. Both were gone two seconds after the group kill.
 - `--clearenv` empties the environment, so no `LD_PRELOAD`, no `XDG_*`, no session bus.
 - `--ro-bind /usr /usr` and `--ro-bind /etc /etc` give the decoder its libraries and its
   loader configuration, read-only.
@@ -2105,7 +2131,7 @@ rejected on that number.
 full argv; the canary file outside the output directory survives and a write to it fails
 with `No such file or directory`; `/home` is not visible at all and the root holds only
 `bin dev etc lib lib64 proc sbin tmp usr`; `getent hosts example.com` exits 2 with no
-resolution; `ulimit -v` inside reads 1048576 KiB, so the address-space limit is applied;
+resolution; `ulimit -v` inside reads 2097152 KiB, so the address-space limit is applied;
 and a spin under `--cpu=2` is killed rather than returning 0. **The `sh -c` in those probes
 is a test OF the sandbox, not production code.** Production execs the argv directly, and
 `grep -rn 'sh -c' src/` finds nothing.
@@ -2236,10 +2262,20 @@ and a plain one that does not: **exit 137 for both**, never 152. That is a decom
 file verdict that must record, and it is indistinguishable from the OOM kill at the only layer
 where either is visible. A discriminator keyed on 152 does not exist to be built.
 
-**The premise is close to unreachable here anyway.** The sandbox caps address space at 1 GiB, so a
-memory bomb surfaces as the decoder's own non-zero exit long before the box is short: the probe's
-`as_rlimit_bomb` row is exit 1, a Python `MemoryError` and not a kill. The box carries 19 GiB of
-RAM and 38 GiB of swap.
+**The premise is close to unreachable here anyway, for one decoder.** The sandbox caps address
+space at 2 GiB, so a memory bomb surfaces as the decoder's own non-zero exit long before the box is
+short: re-measured at the 2 GiB cap, the probe's `as_rlimit_bomb` row is still exit 1, a Python
+`MemoryError` and not a kill. The box carries 19 GiB of RAM and 38 GiB of swap. **The cap bounds
+address space and not resident memory, so it does not net against those 19 GiB**: `sandbox.rs`'s
+own test has the kernel admit the same `PROT_NONE` reservation at 1536 MiB and refuse it at
+3072 MiB while `VmRSS` stays under the test's 256 MiB ceiling, so the cap decided on the mapping
+and not on a resident page. What the cap change moves is the composed case, and it moves it in
+permitted address space: `src/backend/run.rs`'s `THUMB_WORKERS` is 4, so four decoders multiply the
+permitted total to 8 GiB, where at one GiB it was 4 and at four GiB it would have been 16. The case
+that matters is the bomb that faults its pages in instead of reserving them sparsely, because that
+is the only one that turns permitted address space into memory the box has to find. Not run,
+deliberately: four decoders each faulting in a 2 GiB bomb at once is the state this paragraph warns
+about, not a test to schedule on the box.
 
 Only a SIGKILL of the sandbox launcher itself arrives as `signal=9`, and that process decodes
 nothing, allocates nothing and burns no CPU, so it can reach neither rlimit; with

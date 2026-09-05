@@ -13,6 +13,8 @@ license=('MIT')
 # else in this closure requires it, so on a clean Omarchy box that row failed silently without it.
 depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
 makedepends=('cargo')
+# check() runs the real sandboxed child, which shells to /usr/bin/python3 to reserve address space.
+checkdepends=('python')
 optdepends=('libarchive: archive listing and extraction'
             '7zip: 7z archive support'
             'imagemagick: image conversion'
