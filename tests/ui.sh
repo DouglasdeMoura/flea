@@ -78,6 +78,10 @@ transient_clear_s=5
 rail_poll_wait_s=7
 # The window coalescer is 16 ms and a refill is a round trip, so injected input needs a moment.
 settle_s=0.4
+# Two pixels inside each edge of the strip: the rows a font-tall crumb box left dead, measured at y=2 and y=24 of 27.
+chrome_band_inset=2
+# Wide enough to hold the elided head's opaque fill and the hairline either side of it; that gap measured at x 80 to 86.
+chrome_edge_sample_width=200
 # The Hyprland corner arc shows wallpaper through the window's own top-left pixels, so start past it.
 header_sample_x=16
 header_sample_width=600
@@ -862,6 +866,37 @@ case_click() {
     shot click-elision
     [[ "$(ipc path)" == "$deep" ]] || fail "click: a tap on the elision marker navigated to $(ipc path)"
     [[ "$(ipc pathBarOpen)" == "false" ]] || fail "click: a tap on the elision marker opened the path bar"
+
+    # keys.toml's chrome/left x2/any row is the whole strip, and the chrome is the window's own top item, so its band is y 0 to chromeHeight - 1.
+    local chrome_h band_crumb band_x band
+    chrome_h=$(ipc chromeHeight)
+    band_crumb=$(( $(ipc crumbCount) - 2 ))
+    read -r band_x _band_y <<< "$(ipc crumbCentre "$band_crumb")"
+    [[ -n "$band_x" ]] || fail "click: crumb $band_crumb has no on-screen centre, so no band of the strip can be pressed over one"
+    for band in "$chrome_band_inset" "$(( chrome_h - 1 - chrome_band_inset ))"; do
+        omarchy-drive click "$((band_x + wx))" "$((band + wy))" --double >/dev/null \
+            || fail "click: omarchy-drive refused the double click at y $band of the strip"
+        settle
+        settle
+        printf 'CLICK chrome-band y=%s of %s barOpen=%s path=%q\n' "$band" "$chrome_h" "$(ipc pathBarOpen)" "$(ipc path)"
+        shot "click-chrome-band-$band"
+        [[ "$(ipc pathBarOpen)" == "true" ]] \
+            || fail "click: a double click at y $band of the ${chrome_h}px strip did not open the path bar"
+        [[ "$(ipc path)" == "$deep" ]] || fail "click: the double click at y $band navigated to $(ipc path)"
+        key -k Escape >/dev/null
+        settle
+        [[ "$(ipc pathBarOpen)" == "false" ]] || fail "click: Escape did not close the path bar opened at y $band"
+    done
+
+    # The strip's own bottom edge is one flat rule, so that row holds one colour until something opaque draws over it.
+    local edge_y edge_colours
+    edge_y=$(( chrome_h - 1 ))
+    shot click-chrome-edge
+    edge_colours=$(magick "$evidence_dir/click-chrome-edge.png" \
+        -crop "${chrome_edge_sample_width}x1+0+${edge_y}" +repage -unique-colors -format "%[fx:w]" info:)
+    printf 'CLICK chrome-edge y=%s width=%s colours=%s\n' "$edge_y" "$chrome_edge_sample_width" "$edge_colours"
+    [[ "$edge_colours" == "1" ]] \
+        || fail "click: the strip's bottom edge holds $edge_colours colours across ${chrome_edge_sample_width}px, so something drew over it"
 
     # Issue 45's own control, and the positive half the elision check needs: with only the negative
     # above, a click that missed the window entirely passed it. Nothing drove a crumb at all, so a
