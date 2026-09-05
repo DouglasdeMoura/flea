@@ -506,7 +506,7 @@ where a move was meant is an annoyance and moving where a copy was meant loses t
 
 ### rows
 
-`{"t":"rows","start":<uint>,"rows":[{"n":<string>,"d":<bool>,"s":<uint>,"m":<int>,"p":<uint>,"i":<string>,"t":<bool>,"k":<uint>[,"v":<uint>]},...],"kinds":[<string>,...],"ms":<float>}`
+`{"t":"rows","start":<uint>,"rows":[{"n":<string>,"d":<bool>,"s":<uint>,"m":<int>,"p":<uint>,"i":<string>,"t":<bool>,"k":<uint>[,"l":<string>][,"v":<uint>]},...],"kinds":[<string>,...],"ms":<float>}`
 
 Example:
 `{"t":"rows","start":0,"rows":[{"n":"say \"hi\".txt","d":false,"s":12,"m":1787790423,"p":33188,"i":"text-x-generic","t":false,"k":0},{"n":"photos","d":true,"s":4096,"m":1787790424,"p":16877,"i":"folder","t":false,"k":1,"v":56}],"kinds":["Plain text document","Folder"],"ms":1.250}`
@@ -523,6 +523,16 @@ directory reports `d:false` and carries `S_IFLNK` in `p`), a size in bytes (`s`)
 mtime as a unix timestamp (`m`), a raw `st_mode` (`p`), a freedesktop icon name
 (`i`), a thumbnailable flag (`t`), and a Kind index (`k`, into the envelope's own
 `kinds` array).
+
+**`l` is where a symlink points, and only a symlink row carries it.** It is the link's own bytes,
+verbatim and unresolved, so a relative target stays relative and a broken link still names where it
+points; a `readlink` that fails leaves the field off entirely, the same as any other row. The row it
+sits on is the one that already pays a second stat for its icon, so the extra call lands on the rows
+that were already the exception and on no others, and the scale fixture holds no links at all. A row
+never carries both `l` and `v`: `d` is the link's own type, so a symlink's `d` is `false` and it is
+never the directory row `v` is for. The client draws the target beside the name and the word `link`
+in the size column, because a link's own `st_size` is the length of that target path and not a size
+anyone means.
 
 **`v` is the row's filesystem id, and only a directory row carries it.** A drop destination is
 always a directory, so a file row's device would never be read, and the scale fixture is 100,000

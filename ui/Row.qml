@@ -29,6 +29,8 @@ Item {
     property real leadingSlot: 0
     // The picker's second difference: SendPicker.html's narrow date column and its compact form.
     property bool compactDate: false
+    // The window's own third: only FleaWindow.html and Search.html end a directory name with a slash.
+    property bool dirSuffix: false
     readonly property int dateWidth: root.compactDate ? Theme.column.pickerDate : Theme.column.date
     // Non-empty while a search or filter is narrowing the listing: the run to paint, and the switch to the search column set.
     property string searchQuery: ""
@@ -37,6 +39,11 @@ Item {
     // A search row's name is its path relative to the search root, so the name and location split here; see docs/protocol.md "search".
     readonly property bool searching: !root.filtering && root.searchQuery.length > 0 && root.row !== null && root.row.n.length > 0
     readonly property string displayName: root.row ? (root.searching ? Match.base(root.row.n) : root.row.n) : ""
+    // The name, then this surface's directory slash, then a link's target; never both, a link's d is false.
+    readonly property string dirMark: root.dirSuffix && root.row && root.row.d ? "/" : ""
+    // FleaWindow.html and ThemeRoles.html both spell it "shell -> /usr/share/omarchy".
+    readonly property string linkMark: root.row && root.row.l ? " -> " + root.row.l : ""
+    readonly property string decoratedName: root.displayName + root.dirMark + root.linkMark
     readonly property string locationText: root.searching ? Match.location(root.row.n) : ""
     readonly property var nameRun: Match.run(root.displayName, root.searchQuery)
     // A long name would otherwise hide the location entirely, and the location is what tells two matches apart.
@@ -129,7 +136,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: Theme.iconSize
         height: Theme.iconSize
-        name: root.row ? Icons.glyphFor(root.row.i) : Icons.FALLBACK
+        name: root.row ? Icons.glyphForRow(root.row.i, root.row.p) : Icons.FALLBACK
         color: root.lifted ? Theme.color.foreground : root.dim
     }
 
@@ -174,7 +181,7 @@ Item {
         anchors.right: mode.left
         anchors.rightMargin: root.modeShown ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
-        text: root.displayName
+        text: root.decoratedName
         matchStart: root.nameRun.start
         matchLength: root.nameRun.length
         color: root.nameColor()
@@ -189,7 +196,7 @@ Item {
         anchors.leftMargin: Theme.spacing.gap
         anchors.verticalCenter: parent.verticalCenter
         width: Math.min(implicitWidth, root.searchSlot * root.nameShare)
-        text: root.displayName
+        text: root.decoratedName
         matchStart: root.nameRun.start
         matchLength: root.nameRun.length
         color: root.nameColor()
@@ -322,6 +329,9 @@ Item {
 
     // A directory's own row.s is its dirent size, not the walk's, so this reads root.dirSize instead, see docs/protocol.md "dirsized".
     function sizeText() {
+        // A link's own st_size is the length of its target path, which is not a size anyone means.
+        if (Format.isSymlink(root.row.p))
+            return "link"
         if (!root.row.d) {
             return Format.size(root.row.s)
         }

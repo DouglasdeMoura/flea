@@ -21,7 +21,6 @@ Item {
     signal backRequested()
     signal upRequested()
     signal searchRequested()
-    signal terminalRequested()
     signal viewChosen(string mode)
     // The path bar's four. ui/shell.qml navigates, hands the keyboard back, runs the peek behind Tab
     // and carries what the bar says to the status line, because this file draws the chrome and knows
@@ -369,11 +368,6 @@ Item {
         Flea.ChromeButton {
             glyph: "search"
             onActivated: root.searchRequested()
-        }
-
-        Flea.ChromeButton {
-            glyph: "terminal"
-            onActivated: root.terminalRequested()
         }
 
         Repeater {

@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Format.js" as Format
+
 // The backend sends a freedesktop icon name per row; this is the only place Flea maps one to a mark.
 // Counts re-derived 2026-08-31 from /usr/share/mime/generic-icons on this box, see AGENTS.md "Icons in the row":
 // x-office-document 106, package-x-generic 89, application-x-executable 57, text-x-generic 46,
@@ -31,6 +33,15 @@ var FALLBACK = "file"
 function glyphFor(iconName) {
     var g = GLYPHS[String(iconName)]
     return g ? g : FALLBACK
+}
+
+// A row's mark. The backend resolves a symlink's icon to its target's, so a link to a directory
+// arrives as "folder"; every board draws such a row with the link mark instead, so the mode decides
+// here and the icon name only answers for what the row really is.
+function glyphForRow(iconName, mode) {
+    if (Format.isSymlink(mode))
+        return "symlink"
+    return glyphFor(iconName)
 }
 
 // The sidebar's own set, keyed on the favourite's label (Places.js leaf() or bookmark label),

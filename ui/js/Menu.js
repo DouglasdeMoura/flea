@@ -69,6 +69,9 @@ function listingEntries(p) {
     }
     // The last group is the rows that need no row under the cursor, which is also the whole menu
     // on a listing's empty space.
+    // SettingsMenus.html carries it in all three menus, and it opens the directory being shown
+    // rather than the row under the cursor, which is why it sits with New folder and not above.
+    out.push({ label: "Open in terminal", action: "openTerminal", glyph: "terminal" })
     out.push({ label: "New folder", action: "newFolder", glyph: "folder-plus" })
     out.push(hiddenRow(p.showHidden))
     return applyHidden(out, p.hiddenActions)

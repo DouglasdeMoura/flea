@@ -113,6 +113,16 @@ ln -s "$SD/nowhere" "$SD/brokenlink"
 out=$(printf '{"c":"list","path":"%s","first":5}\n{"c":"quit"}\n' "$SD" | $BIN --backend)
 check "a broken symlink is listed, not dropped" "1" "$(echo "$out" | sed -n 2p | grep -c '"n":"brokenlink"')"
 check "a symlink to a directory reports d false" "1" "$(echo "$out" | sed -n 2p | grep -c '"n":"linkdir","d":false')"
+# The target the row list draws beside the name, verbatim: absolute stays absolute, relative stays
+# relative, and a broken link still names where it points. See docs/protocol.md "rows".
+ln -s ../elsewhere "$SD/relativelink"
+printf 'abc' > "$SD/plain.txt"
+out=$(printf '{"c":"list","path":"%s","first":9}\n{"c":"quit"}\n' "$SD" | $BIN --backend)
+check "a symlink carries its target" "1" "$(echo "$out" | sed -n 2p | grep -c "\"n\":\"linkdir\",\"d\":false,[^}]*\"l\":\"$SD/realdir\"")"
+check "a broken symlink still names where it points" "1" "$(echo "$out" | sed -n 2p | grep -c "\"n\":\"brokenlink\",[^}]*\"l\":\"$SD/nowhere\"")"
+check "a relative target stays relative" "1" "$(echo "$out" | sed -n 2p | grep -c '"n":"relativelink",[^}]*"l":"../elsewhere"')"
+check "a plain file carries no target at all" "0" "$(echo "$out" | sed -n 2p | grep -c '"n":"plain.txt",[^}]*"l":')"
+check "and exactly the three links carry one" "3" "$(echo "$out" | sed -n 2p | grep -o '"l":"' | wc -l | tr -d ' ')"
 sandbox_remove "$SD_SB"
 
 # Directories first is not optional, so the fixture that proves it has to be one the two orders can

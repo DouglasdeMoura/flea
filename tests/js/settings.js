@@ -42,9 +42,10 @@ function runInventory(check) {
           switched.filter(function (id) { return built[id] === undefined }).join(","), "")
     check("and each switch carries that row's own wording, so the two cannot drift",
           switched.filter(function (id) { return Settings.label(id) !== built[id] }).join(","), "")
-    // New folder is a row the board gives no switch and the two locked ones are drawn locked;
-    // anything else without a switch would be a row the panel cannot reach.
-    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
+    // New folder and Open in terminal are rows this release's panel gives no switch, and the two
+    // locked ones are drawn locked; anything else without a switch would be a row it cannot reach.
+    // SettingsMenus.html does draw a switch for Open in terminal, so that switch is still owed.
+    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder", "openTerminal"])
     check("and no row the menu builds is left without one",
           Object.keys(built).filter(function (id) { return reachable.indexOf(id) < 0 }).join(","), "")
 }

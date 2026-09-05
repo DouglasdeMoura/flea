@@ -135,6 +135,58 @@ function lookup(key, text, modifiers) {
     return ""
 }
 
+// The key ui/MenuRow.qml prints beside a menu row, keyed on the row's own action. Only bare
+// keys are here: an action reachable by a chord alone leaves its row's hint slot empty, which
+// is how Menus.html draws New Folder. Derived from keys.toml, so a hint cannot advertise a key
+// nothing is bound to.
+var HINTS = {
+    "addNetwork": "a",
+    "copy": "y",
+    "cursorDown": "j",
+    "cursorFirst": "g",
+    "cursorLast": "G",
+    "cursorUp": "k",
+    "cut": "x",
+    "escape": "escape",
+    "expand": "e",
+    "extendDown": "J",
+    "extendUp": "K",
+    "filter": "/",
+    "focusNext": "tab",
+    "keymapSheet": "?",
+    "menu": "m",
+    "open": "enter",
+    "pageDown": "pagedown",
+    "pageForward": "l",
+    "pageUp": "pageup",
+    "parent": "h",
+    "paste": "p",
+    "pathBar": ":",
+    "preview": "space",
+    "rename": "r",
+    "reveal": "o",
+    "search": "f",
+    "seekBack": "left",
+    "seekForward": "right",
+    "settings": ",",
+    "sortNext": "s",
+    "sortReverse": "S",
+    "tabClose": "w",
+    "tabNew": "t",
+    "toggleHidden": ".",
+    "toggleSelect": "v",
+    "trash": "d",
+    "trashArm": "d",
+    "undo": "z",
+    "zoomIn": "+",
+    "zoomOut": "-",
+}
+
+function hintFor(action) {
+    var k = HINTS[String(action)]
+    return k ? k : ""
+}
+
 // The keymap sheet ui/KeymapSheet.qml draws, from the [[sheet]] table in keys.toml.
 var SHEET = [
     { keys: "j k", action: "cursorDown", label: "move" },

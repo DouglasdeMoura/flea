@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives the real Quickshell window with omarchy-drive and asserts through the read-only IPC seam.
-# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal|renderer|settings ...]; networklive is opt-in.
+# Usage: ./tests/ui.sh [cursor|terminal|open|rows|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal|renderer|settings ...]; networklive is opt-in.
 set -u
 set -o pipefail
 # Hard rule 9's guard, which owns FIXTURE_ROOT and every create and delete this suite makes.
@@ -898,6 +898,104 @@ case_terminal() {
     assert_window
 }
 
+# The row and menu presentation the 0.1.4 boards specify: FleaWindow.html's symlink row, its own
+# trailing slash on a directory, and Menus.html's right-aligned key beside every bound row.
+# Catches deleting decoratedName, sizeText's link branch or Icons.glyphForRow from ui/Row.qml, and
+# the hint slot from ui/MenuRow.qml.
+case_rows() {
+    local dir="$fixture_root/rows"
+    sandbox_scratch "$dir"
+    mkdir -p "$dir/subdir"
+    printf 'abc' > "$dir/target.txt"
+    ln -s "$dir/subdir" "$dir/linkdir"
+    ln -s ../elsewhere "$dir/relative"
+    launch "$dir"
+    # subdir, linkdir, relative, target.txt.
+    wait_listing 4
+    settle
+    shot rows-presentation
+
+    # Found by name, never by a predicted sort position, the same rule seek_row_named carries.
+    local i dir_row=-1 link_row=-1 rel_row=-1 file_row=-1
+    for ((i = 0; i < 4; i++)); do
+        case "$(ipc rowAt "$i")" in
+            subdir\|*) dir_row=$i ;;
+            linkdir\|*) link_row=$i ;;
+            relative\|*) rel_row=$i ;;
+            target.txt\|*) file_row=$i ;;
+        esac
+    done
+    [[ "$dir_row" -ge 0 && "$link_row" -ge 0 && "$rel_row" -ge 0 && "$file_row" -ge 0 ]] \
+        || fail "rows: the fixture did not list all four rows"
+
+    printf 'ROWS dir=%q link=%q relative=%q file=%q\n' \
+        "$(ipc rowNameText "$dir_row")" "$(ipc rowNameText "$link_row")" \
+        "$(ipc rowNameText "$rel_row")" "$(ipc rowNameText "$file_row")"
+    printf 'ROWS sizes dir=%q link=%q file=%q glyphs dir=%q link=%q\n' \
+        "$(ipc rowSizeText "$dir_row")" "$(ipc rowSizeText "$link_row")" \
+        "$(ipc rowSizeText "$file_row")" \
+        "$(ipc rowGlyph "$dir_row")" "$(ipc rowGlyph "$link_row")"
+
+    [[ "$(ipc rowNameText "$dir_row")" == "subdir/" ]] \
+        || fail "rows: the directory reads $(ipc rowNameText "$dir_row"), not subdir/"
+    [[ "$(ipc rowNameText "$file_row")" == "target.txt" ]] \
+        || fail "rows: a plain file grew a suffix, it reads $(ipc rowNameText "$file_row")"
+    [[ "$(ipc rowNameText "$link_row")" == "linkdir -> $dir/subdir" ]] \
+        || fail "rows: the symlink reads $(ipc rowNameText "$link_row")"
+    [[ "$(ipc rowNameText "$rel_row")" == "relative -> ../elsewhere" ]] \
+        || fail "rows: a relative target was resolved, it reads $(ipc rowNameText "$rel_row")"
+    # A link's own st_size is the length of its target path, so the column says what the row is.
+    [[ "$(ipc rowSizeText "$link_row")" == "link" ]] \
+        || fail "rows: the symlink's size reads $(ipc rowSizeText "$link_row"), not link"
+    [[ "$(ipc rowSizeText "$file_row")" == "3 B" ]] \
+        || fail "rows: a plain file's size reads $(ipc rowSizeText "$file_row")"
+    # The backend resolves a link-to-directory's icon to folder, so only the mode can tell them apart.
+    [[ "$(ipc rowGlyph "$link_row")" == "symlink" ]] \
+        || fail "rows: the symlink draws $(ipc rowGlyph "$link_row"), not the link mark"
+    [[ "$(ipc rowGlyph "$dir_row")" == "folder" ]] \
+        || fail "rows: the real directory draws $(ipc rowGlyph "$dir_row"), not a folder"
+
+    # Menus.html's hint slot: a key on every bound row, nothing on Duplicate, which nothing binds.
+    seek_row_named target.txt
+    key m >/dev/null
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "rows: m opened no menu"
+    shot rows-menu-hints
+    local labels hints
+    labels=$(ipc contextMenuEntries)
+    hints=$(ipc contextMenuHints)
+    printf 'ROWS menu labels=%q\n hints=%q\n' "$labels" "$hints"
+    hint_of() {
+        local want="$1" i=0 label
+        local IFS='|'
+        for label in $labels; do
+            if [[ "$label" == "$want" ]]; then
+                unset IFS
+                printf '%s' "$(printf '%s' "$hints" | cut -d'|' -f$((i + 1)))"
+                return 0
+            fi
+            i=$((i + 1))
+        done
+        unset IFS
+        fail "rows: no menu row labelled $want in $labels"
+    }
+    [[ "$(hint_of Open)" == "enter" ]] || fail "rows: Open prints $(hint_of Open), not enter"
+    [[ "$(hint_of Cut)" == "x" ]] || fail "rows: Cut prints $(hint_of Cut), not x"
+    [[ "$(hint_of Copy)" == "y" ]] || fail "rows: Copy prints $(hint_of Copy), not y"
+    [[ "$(hint_of Paste)" == "p" ]] || fail "rows: Paste prints $(hint_of Paste), not p"
+    [[ "$(hint_of Rename)" == "r" ]] || fail "rows: Rename prints $(hint_of Rename), not r"
+    [[ "$(hint_of 'Move to Trash')" == "d" ]] \
+        || fail "rows: Move to Trash prints $(hint_of 'Move to Trash'), not d"
+    [[ "$(hint_of 'Show hidden files')" == "." ]] \
+        || fail "rows: the hidden toggle prints $(hint_of 'Show hidden files'), not ."
+    # The unbound row, and the whole point of the slot being derived rather than written by hand.
+    [[ -z "$(hint_of Duplicate)" ]] || fail "rows: Duplicate printed $(hint_of Duplicate), and nothing binds it"
+    [[ -z "$(hint_of 'Open in terminal')" ]] \
+        || fail "rows: Open in terminal printed a bare key, and only a chord reaches it"
+    key -k Escape >/dev/null
+    settle
+}
+
 # Catches removing the exit-status branches from ui/Opener.qml or the dispatch from Pane.openCursor.
 case_open() {
     local dir="$fixture_root/open"
@@ -991,9 +1089,9 @@ case_open() {
 }
 
 # PR 34's terminal route. Nothing else in this suite reaches it: before this case, openTerminal,
-# terminalRequested, terminalFailed and --terminal appeared nowhere in this file, so the topbar
-# button, its wiring in ui/shell.qml and the chord's interception in ui/js/Focus.js were all
-# deletable with the display suite still green.
+# terminalFailed and --terminal appeared nowhere in this file, so the menu row, its dispatch through
+# ui/js/Focus.js act() and the chord's interception there were all deletable with the display suite
+# still green.
 case_openterminal() {
     local dir="$fixture_root/openterminal"
     sandbox_scratch "$dir"
@@ -1033,10 +1131,16 @@ case_openterminal() {
     # bin, opened.log, ran.log, target.txt.
     wait_listing 4
 
-    # The pointer half: the topbar button, by its glyph, which is the same action the chord raises.
-    click_chrome terminal
-    wait_terminal "$ran" "$dir" "the topbar button"
-    printf 'OPENTERMINAL button log=%q\n' "$(cat "$ran")"
+    # The pointer half: the context-menu row, which is the route SettingsMenus.html specifies and
+    # the only one left now that the chrome carries no terminal button.
+    click_row "$(ipc cursor)" right
+    settle
+    [[ "$(ipc contextMenuEntries)" == *"Open in terminal"* ]] \
+        || fail "openterminal: the menu offers no terminal row, got $(ipc contextMenuEntries)"
+    menu_seek "Open in terminal"
+    key -k Return >/dev/null
+    wait_terminal "$ran" "$dir" "the context menu"
+    printf 'OPENTERMINAL menu log=%q\n' "$(cat "$ran")"
 
     # The keyboard half, from the list.
     : > "$ran"
@@ -1101,7 +1205,7 @@ case_openterminal() {
     shot openterminal-failed
     [[ ! -s "$ran" ]] || fail "openterminal: the failing stub still logged $(cat "$ran")"
 
-    printf 'OPENTERMINAL button=ok list=ok rail=ok single-flight=ok crossed=ok failure=ok\n'
+    printf 'OPENTERMINAL menu=ok list=ok rail=ok single-flight=ok crossed=ok failure=ok\n'
     kill_flea
 }
 
@@ -2027,7 +2131,10 @@ case_icons() {
         [[ -n "$(ipc rowGlyph "$i")" ]] || fail "row $i has no glyph name at all"
     done
     [[ "$(glyph_of subdir)" == "folder" ]] || fail "the directory row is not the folder glyph: $(glyph_of subdir)"
-    [[ "$(glyph_of linkdir)" == "folder" ]] || fail "the symlink to a directory is not the folder glyph: $(glyph_of linkdir)"
+    # FleaWindow.html and GridView.html both draw a symlink with the link mark, whatever it points at,
+    # so the mark follows the mode here while the backend's i still follows the target; the backend
+    # side of that split is tests/protocol.sh "and draws as a folder".
+    [[ "$(glyph_of linkdir)" == "symlink" ]] || fail "the symlink to a directory is not the link glyph: $(glyph_of linkdir)"
     [[ "$(glyph_of photo.jpg)" == "image" ]] || fail "the jpeg row is not the image glyph: $(glyph_of photo.jpg)"
     [[ "$(glyph_of cert.pem)" != "terminal" ]] || fail "the pem row still draws as the terminal (executable) glyph"
     read -r _pitch_x0 y0 <<< "$(ipc rowCentre 0)"
@@ -5517,7 +5624,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
 
 : > "$run_log"
 : > "$flea_log"

@@ -131,6 +131,8 @@ function act(action, root) {
     case "viewColumns": root.viewMode = "columns"; return
     case "viewGrid": root.viewMode = "grid"; return
     case "newFolder": Ops.newFolder(root); return
+    // The directory being shown, not the row: the menu row and the chord both land here.
+    case "openTerminal": root.openTerminal(); return
     }
     // A submenu row fires "<action>:<id>", which is how one signal covers Taildrop and Compress both.
     if (action.indexOf("compress:") === 0) {
@@ -253,9 +255,9 @@ function handleKey(event, root, sidebar) {
         root.pathBarRequested()
         return true
     }
-    // The terminal button lives in the same chrome, so it answers from either view too.
+    // The chord answers from the rail as well as the list, so it is taken before the rail's own keys.
     if (action === "openTerminal") {
-        root.openTerminal()
+        root.act(action)
         return true
     }
     if (root.focusView === RAIL) {

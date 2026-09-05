@@ -66,6 +66,22 @@ function run(check) {
     check("ctrl f searches", Keymap.lookup(Qt.Key_F, "\u0006", ctrl), "search")
     check("ctrl e ejects", Keymap.lookup(Qt.Key_E, "\u0005", ctrl), "eject")
     check("ctrl t opens a terminal here", Keymap.lookup(Qt.Key_T, "\u0014", ctrl), "openTerminal")
+
+    // ui/MenuRow.qml's hint slot. Menus.html draws exactly these seven beside the listing menu's
+    // rows and leaves every other row blank, Duplicate included.
+    check("the listing menu's own hints",
+          ["open", "cut", "copy", "paste", "rename", "trash", "toggleHidden"]
+              .map(Keymap.hintFor).join(" "),
+          "enter x y p r d .")
+    check("an action with no key at all leaves the slot blank", Keymap.hintFor("duplicate"), "")
+    check("and so does one reachable only by a chord", Keymap.hintFor("newFolder"), "")
+    check("Move to Trash advertises the key that arms it, not the Delete beside it",
+          Keymap.hintFor("trash"), "d")
+    check("a printable character outranks the key code bound to the same action",
+          Keymap.hintFor("rename"), "r")
+    check("a row with no action at all is blank", Keymap.hintFor(undefined), "")
+    check("every hint names a key something is really bound to",
+          Object.keys(Keymap.HINTS).filter(function (a) { return Keymap.HINTS[a].length === 0 }).length, 0)
     check("ctrl k connects to a server", Keymap.lookup(Qt.Key_K, "\u000b", ctrl), "addNetwork")
     check("ctrl delete trashes", Keymap.lookup(Qt.Key_Delete, "", ctrl), "trash")
     check("ctrl up goes to the parent", Keymap.lookup(Qt.Key_Up, "", ctrl), "parent")

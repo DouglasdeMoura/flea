@@ -246,8 +246,8 @@ function run(check) {
     check("m with no row under the cursor says why instead of swallowing the key",
           bare.opened + "|" + bare.said, "1|No row under the cursor to open a menu on.")
 
-    // PR 34's chord. The topbar button and Ctrl+T raise the same terminal, and the rail owns its own
-    // keys, so the one route both views share is the interception in handleKey above the views.
+    // PR 34's chord. The context-menu row and Ctrl+T raise the same terminal, and the rail owns its
+    // own keys, so the one route both views share is the interception in handleKey above the views.
     var terminalKey = key(Qt.Key_T, "\u0014", ctrl)
     var fromList = chromePane("list")
     check("ctrl t is consumed in the list", Focus.handleKey(terminalKey, fromList, fromList.sidebar), true)
@@ -255,4 +255,9 @@ function run(check) {
     var fromRail = chromePane("rail")
     Focus.handleKey(terminalKey, fromRail, fromRail.sidebar)
     check("ctrl t opens one from the rail as well", fromRail.asked, 1)
+    // The menu row's own route: ui/ContextMenu.qml fires the action into ui/Pane.qml's act(), which
+    // never sees handleKey's interception, and this is the dispatch that was missing when it did not.
+    var fromMenu = chromePane("list")
+    Focus.act("openTerminal", fromMenu)
+    check("the menu row reaches the same terminal through act", fromMenu.asked + "|" + fromMenu.said, "1|")
 }
