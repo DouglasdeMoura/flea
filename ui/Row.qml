@@ -24,6 +24,9 @@ Item {
     property bool dropCopying: false
     // A directory's recursive size, resolved by index in List.qml the same way thumb already is; null until it arrives.
     property var dirSize: null
+    // The picker draws a check in front of every row, so its rows start one slot further in; the
+    // window's own rows leave this at zero and are laid out exactly as before.
+    property real leadingSlot: 0
     // Non-empty while a search or filter is narrowing the listing: the run to paint, and the switch to the search column set.
     property string searchQuery: ""
     // Which of the two is narrowing. A filter keeps the ordinary columns, because its rows are this directory's own and their names are plain names, not paths.
@@ -100,7 +103,7 @@ Item {
         id: thumbImage
         visible: root.thumbDrawn
         anchors.left: parent.left
-        anchors.leftMargin: Theme.spacing.rowPaddingX
+        anchors.leftMargin: Theme.spacing.rowPaddingX + root.leadingSlot
         anchors.verticalCenter: parent.verticalCenter
         width: Theme.iconSize
         height: Theme.iconSize
@@ -117,7 +120,7 @@ Item {
         id: icon
         visible: !root.thumbDrawn
         anchors.left: parent.left
-        anchors.leftMargin: Theme.spacing.rowPaddingX
+        anchors.leftMargin: Theme.spacing.rowPaddingX + root.leadingSlot
         anchors.verticalCenter: parent.verticalCenter
         width: Theme.iconSize
         height: Theme.iconSize

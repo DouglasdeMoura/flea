@@ -11,7 +11,9 @@ license=('MIT')
 # xdg-terminal-exec is what --terminal execs, so the topbar's terminal button needs it installed.
 # wl-clipboard ships wl-copy, which ui/Opener.qml pipes into for the menu's Copy Path row; nothing
 # else in this closure requires it, so on a clean Omarchy box that row failed silently without it.
-depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
+# python-gobject is what tools/flea-portal answers org.freedesktop.impl.portal.FileChooser with; it
+# is the same binding omarchy-file-select, the client that portal serves, is already written against.
+depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'python-gobject' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
 makedepends=('cargo')
 # check() runs the real sandboxed child, which shells to /usr/bin/python3 to reserve address space.
 checkdepends=('python')
@@ -46,6 +48,11 @@ package() {
   cd "$startdir"
   install -Dm755 "$srcdir/target/release/flea" "$pkgdir/usr/bin/flea"
   install -Dm755 tools/flea-gio-auth "$pkgdir/usr/lib/flea/flea-gio-auth"
+  # The portal backend, its registration and its D-Bus activation: xdg-desktop-portal 1.22 reads
+  # portals/ out of every data dir, and this is Flea's own package writing Flea's own files.
+  install -Dm755 tools/flea-portal "$pkgdir/usr/lib/flea/flea-portal"
+  install -Dm644 packaging/flea.portal -t "$pkgdir/usr/share/xdg-desktop-portal/portals"
+  install -Dm644 packaging/org.freedesktop.impl.portal.desktop.flea.service -t "$pkgdir/usr/share/dbus-1/services"
   install -Dm644 packaging/com.thisisgm.flea.desktop -t "$pkgdir/usr/share/applications"
   install -Dm644 packaging/com.thisisgm.flea.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps"
   install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
