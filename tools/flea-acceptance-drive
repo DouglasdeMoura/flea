@@ -205,6 +205,7 @@ keysym_for() {
     Space) printf 'space' ;;
     Greater) printf 'greater' ;;
     Period) printf 'period' ;;
+    Comma) printf 'comma' ;;
     [A-Z]) printf '%s' "$1" | tr 'A-Z' 'a-z' ;;
     [0-9]) printf '%s' "$1" ;;
     *) return 1 ;;

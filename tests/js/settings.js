@@ -1,5 +1,6 @@
 .import "../../ui/js/Settings.js" as Settings
 .import "../../ui/js/Keymap.js" as Keymap
+.import "../../ui/js/Menu.js" as Menu
 
 // The settings panel's model. ui/SettingsPanel.qml only paints what rows() returns, so every row a
 // section can draw, and every value a control can hold, is assertable here without a window.
@@ -9,6 +10,42 @@ function run(check) {
     runRows(check)
     runCursor(check)
     runPresets(check)
+    runInventory(check)
+}
+
+// No mock controls: every id the Menus section can switch is an action ui/js/Menu.js really builds,
+// and every row it builds that is not locked or background-only has a switch. Two menus are unioned
+// because Move to Dropbox and Copy share link cannot appear on one row and Extract needs an archive.
+function runInventory(check) {
+    var built = {}
+    var shapes = [
+        { rowInDropbox: false, rowIsArchive: true, rowIsImage: true },
+        { rowInDropbox: true, rowIsArchive: false, rowIsImage: false }
+    ]
+    for (var s = 0; s < shapes.length; s++) {
+        var rows = Menu.listingEntries({
+            showHidden: false, hasRow: true, dropboxPath: "/home/jw/Dropbox",
+            taildropPeers: [{ id: "x", label: "Box" }], archiveFormats: ["zip"], canConvert: true,
+            rowInDropbox: shapes[s].rowInDropbox, rowIsArchive: shapes[s].rowIsArchive,
+            rowIsImage: shapes[s].rowIsImage, hiddenActions: []
+        })
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].separator !== true)
+                built[rows[i].action] = rows[i].label
+        }
+    }
+    var switched = []
+    for (var g = 0; g < Settings.MENU_GROUPS.length; g++)
+        switched = switched.concat(Settings.MENU_GROUPS[g].ids)
+    check("every switch in the Menus section is over a row the menu really builds",
+          switched.filter(function (id) { return built[id] === undefined }).join(","), "")
+    check("and each switch carries that row's own wording, so the two cannot drift",
+          switched.filter(function (id) { return Settings.label(id) !== built[id] }).join(","), "")
+    // New folder and Settings are background rows the board gives no switch, and the two locked ones
+    // are drawn locked; anything else without a switch would be a row the panel cannot reach.
+    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder", "settings"])
+    check("and no row the menu builds is left without one",
+          Object.keys(built).filter(function (id) { return reachable.indexOf(id) < 0 }).join(","), "")
 }
 
 function kinds(rows) {
