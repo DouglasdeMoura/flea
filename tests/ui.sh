@@ -2393,8 +2393,82 @@ case_network() {
     settle
     [[ "$(ipc dialogOpen)" == "false" ]] || fail "network: escape did not close the dialog after the TLS pass"
 
+    # The same class on the rail's own rename, which derived its body from the text the rail was
+    # built from: a read that failed empties that too, so relabelling it appended the renamed share
+    # to nothing and left a bookmarks file holding one line. Only a live mount reaches it, because a
+    # saved place is drawn from the very text the failed read emptied; gio is stubbed for one (the
+    # case_sharebrowser idiom), and the mode is set before the launch so the read fails at startup
+    # rather than depending on what a chmod tells inotify. See AGENTS.md "A failed FileView read".
+    local gio_stub="$fixture_root/network-gio"
+    sandbox_scratch "$gio_stub"
+    mkdir -p "$gio_stub/bin"
+    # Nothing here is activated, so the listing is the one subcommand the stub is ever asked for.
+    cat > "$gio_stub/bin/gio" <<'EOS'
+#!/bin/sh
+if [ "$1" = mount ] && [ "$2" = "-l" ]; then
+  printf 'Mount(0): data on 198.51.100.9 -> smb://198.51.100.9/data/\n'
+fi
+exit 0
+EOS
+    chmod +x "$gio_stub/bin/gio"
+    local before_rename
+    before_rename=$(cat "$bookmarks")
+    [[ -n "$before_rename" ]] || fail "network: the rename arm needs saved places to lose, and the file is empty"
+    chmod 200 "$bookmarks"
+    local saved_path="$PATH"
+    export PATH="$gio_stub/bin:$PATH"
+    export HOME="$fixture_home"
+    launch "$dir"
+    export HOME="$real_home"
+    export PATH="$saved_path"
+    wait_listing 3
+    # Only the live mount: the two saved places are invisible because the read that would have drawn
+    # them failed, which is the state the rename then has to refuse to derive a body from.
+    for _attempt in $(seq 1 200); do
+        [[ "$(ipc networkEntries)" == "data|network|share|true" ]] && break
+        sleep 0.05
+    done
+    [[ "$(ipc networkEntries)" == "data|network|share|true" ]] \
+        || fail "network: the stubbed live mount is not the rail's only network row, got $(ipc networkEntries)"
+    rail_focus
+    key g >/dev/null
+    key j >/dev/null
+    settle
+    [[ "$(ipc railCursor)" == "1" ]] || fail "network: cursor did not reach the live mount, it is $(ipc railCursor)"
+    key -k F2 >/dev/null
+    settle
+    key "Renamed" >/dev/null
+    key -k Return >/dev/null
+    settle
+    chmod 600 "$bookmarks"
+    [[ "$(cat "$bookmarks")" == "$before_rename" ]] \
+        || fail "network: a rename derived from a read that failed still wrote, the file now reads: $(cat "$bookmarks")"
+    # And the refusal reaches the operator: a rename that reported nothing at all is how the file was
+    # lost in silence, so the sentence is asserted and not only the bytes.
+    wait_message "Saved places could not be read, so the new name was not saved."
+
+    # The other side of the same guard, and the whole reason it lets FileNotFound through: a box that
+    # has never saved a place has no file to read at all, and renaming a live mount is how the first
+    # one gets written. A guard that refused every failed read would refuse this too, in silence.
+    rm -f "$bookmarks"
+    rail_focus
+    [[ "$(ipc railCursor)" == "1" ]] || fail "network: the refused rename moved the cursor to $(ipc railCursor)"
+    key -k F2 >/dev/null
+    settle
+    key "First" >/dev/null
+    key -k Return >/dev/null
+    settle
+    for _attempt in $(seq 1 200); do
+        [[ -s "$bookmarks" ]] && break
+        sleep 0.05
+    done
+    [[ "$(cat "$bookmarks" 2>&1)" == "smb://198.51.100.9/data First" ]] \
+        || fail "network: a rename with no bookmarks file at all did not write the first place, it reads: $(cat "$bookmarks" 2>&1)"
+    printf 'NETWORK unreadable-file-renames-nothing=ok absent-file-renames-write-the-first=ok\n'
+
     printf 'NETWORK empty=ok a-scoped=ok dialog=ok submit-path=ok keyboard-after=ok\n'
     kill_flea
+    sandbox_remove "$gio_stub"
     sandbox_remove "$fixture_home"
 }
 

@@ -3276,6 +3276,16 @@ file being the one read that is legitimately empty: the dialog stays open over "
 not be read, so nothing was written." and nothing is written at all. `tests/ui.sh case_network`
 drives it with the fixture's own bookmarks file at mode 200, and asserts the file byte-for-byte.
 
+The class reaches every body that grows, so it also reached the rail's rename, where nothing in that
+fix round had put it. `ui/NetworkPlaces.qml` `rename()` derived its body from `bookmarksText`, which
+is `ui/Sidebar.qml`'s own watched `FileView.text()` and is emptied by the same failed read, so
+`Places.relabel("", uri, name)` appended the renamed share to nothing and the blocking `setText()`
+wrote a bookmarks file holding that one line. Deriving the body from `bookmarksText` is what makes
+the guard impossible there, so `rename()` reads the file itself and refuses on the same two errors.
+Only a **live mount** reaches this, because the rail draws a saved place from the very text the
+failed read emptied, and the rename arm in `tests/ui.sh case_network` stubs `gio mount -l` for one.
+`forget()` needs no guard: it writes only a body it found the line to remove in, and `""` has none.
+
 ### A server root with no share segment mounts, but GVFS gives it no FUSE path
 
 The operator's own real NAS bookmark (`smb://192.168.1.10/`, no share name) is exactly the "browse
@@ -3708,8 +3718,9 @@ used to be refused forever: Add through the dialog, then Remove in the same sess
 `ui/NetworkDialog.qml` appends through a `FileView` of its own and nothing reloads the one this
 Service writes with, so a body read back from it was the pre-Add snapshot, `next === body` was true
 and the removal was refused on every retry until a restart. Deriving the body from `bookmarksText`,
-which `ui/shell.qml:158` reloads on that dialog's own `saved()`, is what closed it, and `rename()`
-takes its body from the same place for the same reason.
+which `ui/shell.qml:158` reloads on that dialog's own `saved()`, is what closed it for `forget()`;
+`rename()` took its body from the same place for the same reason until it had to answer a failed
+read as well, and reads the file itself now (see "A failed FileView read" above).
 
 **Every edit reads the file, and no edit reads a copy of it that has aged.** Two more instances of
 that one defect were measured on this box in the fix round, both of them the mirror of the first,
@@ -3720,14 +3731,14 @@ and both are why `case_network` now runs an Add after its Remove and a rename af
   removed a line, so its "append" wrote the whole stale body plus the new line. Driven: Add
   `198.51.100.1`, Remove it, Add two more, and the rail came back with all three. It re-reads,
   blocking, before it composes the body.
-- **Two rail edits in one turn put the first one's line back.** `ui/NetworkPlaces.qml` derives every
-  body from `bookmarksText`, which is only newer than the last write if the reload that write caused
-  has landed, and `ui/Sidebar.qml reloadBookmarks()` did not wait for it. Measured through the real
-  `NetworkMounts.forget()` chain with the wiring under test as the only variable: over an
-  asynchronous reload two `forget()` calls in one turn left `smb://nas/one One` in the file, over a
-  blocking one they left it empty. `reloadBookmarks()` blocks now, and `ui/NetworkPlaces.qml`'s own
-  header says which question that answers, because "no write can be older than the rail" was never
-  an answer about this one.
+- **Two rail edits in one turn put the first one's line back.** `ui/NetworkPlaces.qml` derives
+  `forget()`'s body from `bookmarksText`, which is only newer than the last write if the reload
+  that write caused has landed, and `ui/Sidebar.qml reloadBookmarks()` did not wait for it.
+  Measured through the real `NetworkMounts.forget()` chain with the wiring under test as the only
+  variable: over an asynchronous reload two `forget()` calls in one turn left `smb://nas/one One`
+  in the file, over a blocking one they left it empty. `reloadBookmarks()` blocks now, and
+  `ui/NetworkPlaces.qml`'s own header says which question that answers, because "no removal can be
+  older than the rail" was never an answer about this one.
 
 Not reimplemented, and both are omissions of PR #21 rather than of this rail: the branch's
 Add-dialog reuse, which reopens the form prefilled to edit a place's URI (that needs a

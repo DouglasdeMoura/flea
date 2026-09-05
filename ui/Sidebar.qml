@@ -111,7 +111,7 @@ Item {
 
     // ui/NetworkDialog.qml writes this same file; a watch set up before its parent directory
     // existed never fires, so its own saved() signal drives this explicit reload instead.
-    // It blocks, because ui/NetworkPlaces.qml derives every body it writes from the text this reads:
+    // It blocks, because ui/NetworkPlaces.qml "forget" derives its body from the text this reads:
     // measured on this box, two rail edits in one turn over an asynchronous reload put the line the
     // first one removed back, and the second read the pre-write text the first had already replaced.
     function reloadBookmarks() {
