@@ -272,13 +272,16 @@ Singleton {
 
     // Flea agrees with the compositor rather than carrying its own switch, the rule the corner
     // radius already follows; FLEA_REDUCED_MOTION is the test override and skips the ask.
+    // Two forms below look like mistakes and are not: Quickshell.env returns null and not "" for
+    // an unset variable, so the guard is a truthiness test, and StdioCollector text is a property
+    // whose call throws. The query is Commons/Style.qml's own decoration:rounding shape.
     Process {
         id: motionQuery
-        running: Quickshell.env("FLEA_REDUCED_MOTION") === ""
-        command: ["hyprctl", "getoption", "animations:enabled", "-j"]
+        running: !Quickshell.env("FLEA_REDUCED_MOTION")
+        command: ["hyprctl", "-j", "getoption", "animations:enabled"]
         stdout: StdioCollector {
             waitForEnd: true
-            onStreamFinished: root.applyReducedMotion(text())
+            onStreamFinished: root.applyReducedMotion(text)
         }
     }
 }
