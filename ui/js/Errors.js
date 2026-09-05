@@ -107,3 +107,16 @@ function paneLine(state, message, mode) {
     var modeLine = lockedLine(mode)
     return modeLine.length > 0 ? modeLine : fallback
 }
+
+// The one sentence a credentialed mount reaches the user as, lifted here in the 0.1.4 composition
+// so ui/NetworkMounts.qml keeps its budget. "timeout" answers 124 for its own deadline and the shell
+// answers 126 or 127 for a helper it could not run at all; every other code is the server refusing,
+// which reads as the handshake for the schemes that negotiate one.
+function connectFailure(exitCode, uri) {
+    if (exitCode === 124) return "Connect failed: host did not respond"
+    if (exitCode === 126 || exitCode === 127)
+        return "Connect failed: authentication helper is unavailable"
+    if (/^(ftp|ftps|dav|davs):/i.test(String(uri || "")))
+        return "Connect failed: host refused the TLS handshake"
+    return "Connect failed: authentication was refused"
+}
