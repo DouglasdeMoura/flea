@@ -326,9 +326,35 @@ the name is one typed word away.
   one window, and only one listing is ever live.
 - **Columns you choose.** Right click the column titles to hide Mode, Size, Date Modified or
   Kind; the choice outlives the window, and the pane's width still wins over a column it cannot
-  carry. `Ctrl+Shift+Plus` and `Minus` scale the whole interface, `Ctrl+Shift+0` puts it back.
+  carry. `Ctrl+Shift+Plus` and `Minus` scale the whole interface, `Ctrl+Shift+0` puts it back, and
+  the settings panel's own stepper drives that same scale.
+- **A settings panel** on `,`, on the toolbar's sliders button and on the background menu, with
+  three working groups: the interface scale, which drives the same engine `Ctrl+Shift+Plus` does;
+  per-action context-menu visibility with one tri-state master over the six basic actions; and a
+  Mac/Windows keyboard preset over that one key table. Nothing else is in it yet.
 - **It looks like Omarchy** because it reads the live palette, the same tokens the shell
   bar uses, and every mark is drawn in the Omarchy cut, which is its own section below.
+
+## Settings
+
+`,` from anywhere in the window, the sliders button at the right end of the toolbar, or the
+Settings row on the background menu. Three sections, and only three, because a rail row onto a
+page with no working control is worse than no row:
+
+- **Display.** The interface scale, in the same 0.8 to 2.0 steps `Ctrl+Shift+Plus` walks, and the
+  text size Omarchy itself owns, shown as the fact it is. Flea reads the desktop's base size and
+  never carries one of its own.
+- **Menus.** Every action the context menu can build, switched on or off one at a time, with a
+  tri-state master over Cut, Copy, Paste, Duplicate, Rename and Move to Trash that reads the
+  enabled count, "5 of 6". Open and Show hidden files are listed but locked: a menu that cannot
+  open the row under the cursor is not a menu. A row that leaves takes its separator with it, and
+  the change lands on the menu's next open. Hiding a row never touches its key.
+- **Keys.** Mac or Windows, over the one `keys.toml` table. Everything the two platforms agree on
+  is shared and answers under both; the preset carries only the chords where they differ, and it
+  rebinds in the window at once. Press `?` for the whole map.
+
+The choices live in `~/.config/flea/view.json` beside the hidden columns and the scale, and a value
+this build does not recognise falls back on its own without disturbing the rest of the file.
 
 ## The Omarchy cut
 
@@ -438,9 +464,9 @@ and the application cannot disagree.
 | `j`, `k`, Down, Up | Move the cursor one row |
 | `g`, `G` | First or last row |
 | Ctrl-d, Ctrl-u | Half a viewport |
-| `h`, Backspace, Ctrl-Up | Parent directory |
+| `h`, Backspace, Ctrl-Up | Parent directory; Ctrl-Up under the Mac preset |
 | `l` | Browse forward: enter a directory, preview a file, page a PDF, or activate a rail/share row; unused in media |
-| Return, Enter, Ctrl-Down | Open a directory, or open a file with the desktop's handler |
+| Return, Enter, Ctrl-Down | Open a directory, or open a file with the desktop's handler; Ctrl-Down under the Mac preset |
 | Space | Quick Look, and close it |
 | Left, Right | Page a PDF, or seek in media |
 | `v` | Toggle selection on the row |
@@ -450,14 +476,17 @@ and the application cannot disagree.
 | `f`, Ctrl-f | Search |
 | `o` | Reveal the result in its own directory |
 | `y`, `x`, `p`, Ctrl-c, Ctrl-x, Ctrl-v | Copy, cut, paste; the chords are what Omarchy's Super-c, Super-x and Super-v deliver |
-| `dd`, Delete, Ctrl-Delete | Trash. Two presses on the letter, one on the key |
+| `dd`, Delete, Ctrl-Delete | Trash. Two presses on the letter, one on the key; Ctrl-Delete under the Mac preset |
 | `r`, F2 | Rename |
 | `z`, Ctrl-z | Undo the last operation |
 | Ctrl-Shift-n | New folder |
-| `a`, Ctrl-k | Add a network mount; `a` from the rail, Ctrl-k from either view |
+| `a`, Ctrl-k | Add a network mount; `a` from the rail, Ctrl-k from either view under the Mac preset |
 | Ctrl-e | Eject the rail's device, or the removable volume the listing is inside |
-| Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid |
+| Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid, under the Mac preset |
+| Ctrl-Shift-1, Ctrl-Shift-2, Ctrl-Shift-3 | The same three, under the Windows preset |
+| Ctrl-h | Show hidden files, under the Windows preset |
 | Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Interface scale up, down, back to the desktop's own |
+| `,`, Ctrl-, | Open the settings panel, from either view |
 | `m` | Open the context menu on the cursor row; in the rail, eject or unmount |
 | `s`, `S` | Step the sort column, reverse the sort |
 | `.`, Ctrl-Shift-. | Show hidden files |

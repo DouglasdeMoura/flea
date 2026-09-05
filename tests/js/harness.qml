@@ -25,6 +25,7 @@ import "protocols.js" as ProtocolsSuite
 import "scale.js" as ScaleSuite
 import "search.js" as SearchSuite
 import "selection.js" as SelectionSuite
+import "settings.js" as SettingsSuite
 import "sort.js" as SortSuite
 import "taildrop.js" as TaildropSuite
 import "trash.js" as TrashSuite
@@ -56,7 +57,8 @@ Item {
             ["mounts", MountsSuite], ["nav", NavSuite], ["ops", OpsSuite],
             ["palette", PaletteSuite], ["pathbar", PathBarSuite], ["places", PlacesSuite],
             ["protocols", ProtocolsSuite], ["scale", ScaleSuite], ["search", SearchSuite],
-            ["selection", SelectionSuite], ["sort", SortSuite], ["taildrop", TaildropSuite],
+            ["selection", SelectionSuite], ["settings", SettingsSuite],
+            ["sort", SortSuite], ["taildrop", TaildropSuite],
             ["trash", TrashSuite], ["tap", TapSuite], ["tabs", TabsSuite],
             ["thumbs", ThumbsSuite]
         ]

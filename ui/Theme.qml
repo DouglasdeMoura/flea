@@ -157,7 +157,7 @@ Singleton {
         return Columns.names(root.columns(width, hidden));
     }
 
-    // Five callers: ConvertDialog, KeymapSheet, NetworkDialog, NetworkForm, TransferCard; every other spacing token above is direct.
+    // Six callers: ConvertDialog, KeymapSheet, NetworkDialog, NetworkForm, SettingsPanel, TransferCard; every other spacing token above is direct.
     function space(px) {
         return Math.round(Style.space(px) * ViewState.uiScale);
     }

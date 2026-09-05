@@ -128,7 +128,14 @@ var PATHS = {
     "minus": "M5 12h14",
     "maximize": "M8 3H3v5 M16 3h5v5 M8 21H3v-5 M16 21h5v-5",
     "x": "M6 6l12 12 M18 6 6 18",
-    "sliders": "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M2 14h4 M10 8h4 M18 16h4"
+    "sliders": "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M2 14h4 M10 8h4 M18 16h4",
+    // The three basic clipboard rows the context menu grew with its visibility settings. Lucide's
+    // scissors and clipboard both carry arcs; these are the cut's own square handles and square tray.
+    "scissors": "M5 3l14 14 M19 3L5 17 M2 17h5v5H2z M17 17h5v5h-5z",
+    "copy": "M9 8h12v13H9z M4 16V3h13",
+    "clipboard": "M9 2h6v4H9z M6 4H3v18h18V4h-3 M8 12h8 M8 16h5",
+    // The Keys section's rail mark: the key caps are the same zero-length-line dots the list mark uses.
+    "keyboard": "M2 6h20v12H2z M6 10L6.01 10 M10 10L10.01 10 M14 10L14.01 10 M18 10L18.01 10 M8 14h8"
 }
 
 function pathFor(name) {

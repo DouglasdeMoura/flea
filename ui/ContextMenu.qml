@@ -96,9 +96,15 @@ Item {
             archiveFormats: root.archiveFormats,
             rowIsArchive: root.rowIsArchive,
             rowIsImage: root.rowIsImage,
-            canConvert: root.canConvert
+            canConvert: root.canConvert,
+            // The Menus settings section's stored set; ui/js/Menu.js applyHidden is what reads it.
+            hiddenActions: ViewState.menuHidden
         })
     }
+
+    // The row item at an index, for ui/Ipc.qml: a driven test clicks a menu row without deriving
+    // its geometry from a row count the Menus settings can now change under it.
+    function itemFor(index) { return menuRows.itemAt(index) }
 
     // A separator is never the cursor, so both key steps and the opening cursor skip over one.
     function stepCursor(from, delta) {
@@ -254,6 +260,7 @@ Item {
             y: Theme.spacing.rowPaddingY
 
             Repeater {
+                id: menuRows
                 model: root.entries
                 delegate: Flea.MenuRow {
                     id: row

@@ -77,6 +77,12 @@ function run(check) {
     check("shift plus zooms in", Keymap.lookup(Qt.Key_Plus, "+", shift), "zoomIn")
     check("e expands", Keymap.lookup(Qt.Key_E, "e", none), "expand")
 
+    // The Settings board's own two doors onto the panel, and both are in the shared tables so the
+    // key answers under either preset.
+    check("comma opens settings", Keymap.lookup(Qt.Key_Comma, ",", none), "settings")
+    check("and so does ctrl comma, which is how both presets spell it",
+          Keymap.lookup(Qt.Key_Comma, "", ctrl), "settings")
+
     check("an unbound key is empty", Keymap.lookup(Qt.Key_Q, "q", none), "")
     check("ctrl j is not plain j", Keymap.lookup(Qt.Key_J, "j", ctrl), "")
 
@@ -104,7 +110,7 @@ function run(check) {
           Keymap.SHEET.map(sheetAction).join("|"),
           Keymap.SHEET.map(function (row) { return row.action }).join("|"))
     check("the sheet is not empty, so the check above has a denominator",
-          Keymap.SHEET.length, 25)
+          Keymap.SHEET.length, 26)
     // A chord shares the row of the key it doubles, so every caret token must resolve to that row's
     // own action, or the sheet advertises a chord bound to something else.
     check("every chord the sheet draws is bound to the action of its own row",
@@ -118,6 +124,55 @@ function run(check) {
           Keymap.SHEET.filter(function (r) { return r.keys === "m" }).length, 1)
     check("and the sheet draws l, so browse-forward is discoverable",
           Keymap.SHEET.filter(function (r) { return r.keys === "l" && r.action === "pageForward" }).length, 1)
+
+    runSheetStability(check)
+    runPreset(check)
+}
+
+// Every cap the sheet draws is in the shared tables, never in a preset overlay: a sheet advertising
+// a Mac-only chord would be wrong for half its readers the moment the Keys toggle moved. Asked as
+// "does the whole sheet resolve to the same actions under both presets", which is the invariant.
+function runSheetStability(check) {
+    Keymap.setPreset("mac")
+    var keysUnderMac = Keymap.SHEET.map(sheetAction).join("|")
+    var chordsUnderMac = Keymap.SHEET.map(chordActions).join("|")
+    Keymap.setPreset("windows")
+    check("no cap the sheet draws depends on the selected preset",
+          Keymap.SHEET.map(sheetAction).join("|"), keysUnderMac)
+    check("and no chord it draws does either",
+          Keymap.SHEET.map(chordActions).join("|"), chordsUnderMac)
+    Keymap.setPreset("mac")
+}
+
+// The Mac/Windows toggle. lookup() consults the overlay first, so the same call answers differently
+// with the preset moved, and the default is mac because the shared tables were written as Finder's.
+function runPreset(check) {
+    var ctrl = Qt.ControlModifier
+    var shift = Qt.ShiftModifier
+    check("the default preset is mac", Keymap.preset, "mac")
+    check("so Finder's Cmd+1 read as Ctrl+1 picks the list view",
+          Keymap.lookup(Qt.Key_1, "1", ctrl), "viewList")
+    check("and Explorer's Ctrl+H is not bound under it",
+          Keymap.lookup(Qt.Key_H, "\u0008", ctrl), "")
+
+    Keymap.setPreset("windows")
+    check("the Windows preset binds Ctrl+H to the hidden files toggle",
+          Keymap.lookup(Qt.Key_H, "\u0008", ctrl), "toggleHidden")
+    check("and Explorer's own layout chords to the three views",
+          [Keymap.lookup(Qt.Key_1, "", ctrl | shift), Keymap.lookup(Qt.Key_2, "", ctrl | shift),
+           Keymap.lookup(Qt.Key_3, "", ctrl | shift)].join("|"), "viewList|viewColumns|viewGrid")
+    check("Finder's Ctrl+1 goes quiet under it, which is what makes this a preset and not an addition",
+          Keymap.lookup(Qt.Key_1, "1", ctrl), "")
+    check("and so does Connect to Server", Keymap.lookup(Qt.Key_K, "\u000b", ctrl), "")
+    // Everything the two platforms agree on stays in the shared tables and answers under both.
+    check("the shared chords are untouched by the preset",
+          [Keymap.lookup(Qt.Key_C, "\u0003", ctrl), Keymap.lookup(Qt.Key_F2, "", Qt.NoModifier),
+           Keymap.lookup(Qt.Key_Backspace, "", Qt.NoModifier)].join("|"), "copy|rename|parent")
+
+    Keymap.setPreset("marzipan")
+    check("a preset name this build does not have falls back to mac rather than an empty map",
+          Keymap.preset + " " + Keymap.lookup(Qt.Key_1, "1", ctrl), "mac viewList")
+    Keymap.setPreset("mac")
 }
 
 // The three caps that name a key rather than printing one; everything else on the sheet is the

@@ -60,6 +60,8 @@ FocusScope {
     property var shareBrowser: null
     // shell.qml's ui/KeymapSheet.qml, which ? opens from either the list or the rail.
     property var keymapSheet: null
+    // shell.qml's ui/SettingsPanel.qml, which the comma key opens from either view, see act() below.
+    property var settingsPanel: null
 
     signal opened(string path)
     signal message(string text, bool isError)
@@ -199,8 +201,9 @@ FocusScope {
     function thumbFor(index) { return list.thumbFor(index) }
 
     // Lifted to Focus.act and Focus.railAct, see ui/js/Focus.js; each just names its own target.
-    function act(action) { Focus.act(action, root) }
-    function railAct(action) { Focus.railAct(action, root, sidebar) }
+    // "settings" is caught here so both views answer the comma key and the background menu's own row.
+    function act(action) { if (action === "settings") { root.settingsPanel.open(root); return } Focus.act(action, root) }
+    function railAct(action) { if (action === "settings") { root.settingsPanel.open(root); return } Focus.railAct(action, root, sidebar) }
 
     // index is a listing row, which is what every caller outside ui/js/Filter.js holds; the clamp
     // and the scroll both happen in view space, because a filter can be narrowing what is drawn.
@@ -360,10 +363,9 @@ FocusScope {
         }
     }
 
-    // shell.qml's IPC reads this to assert menu contents without OCR, see docs "Testing".
-    function menuEntries() { return menu.entries }
-    function menuSubmenuGlyphs() { return menu.submenuGlyphs() }
-    function menuSubmenuEntries() { return menu.submenuEntries }
+    // The one ui/ContextMenu.qml this pane owns, for ui/Ipc.qml: entries, flyout and row geometry
+    // are read off it directly, so a new reader costs the seam a line and this file none.
+    function contextMenu() { return menu }
 
     function openConvert() { Ops.openConvert(root) }
     function moveToDropbox() { Ops.moveToDropbox(root, sidebar.dropboxReady ? root.home + "/Dropbox" : "") }

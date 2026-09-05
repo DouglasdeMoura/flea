@@ -25,6 +25,14 @@ ShellRoot {
         Connections { target: Quickshell; function onLastWindowClosed() { backend.quit() } }
         Connections { target: backend; function onQuitReady() { Quickshell.execDetached(["kill", String(Quickshell.processId)]) } }
 
+        // Issue 9's one engine, reached by the Ctrl+Shift chords through the pane and by the settings
+        // panel's own stepper, so a control and a keystroke cannot step two different scales.
+        function applyScale(direction) {
+            ViewState.uiScale = direction === 0 ? 1 : Scale.stepped(ViewState.uiScale, direction)
+            ViewState.save()
+            pane.message(Scale.announce(ViewState.uiScale), false)
+        }
+
         // Every *Centre reader on the IPC seam is this: an item's painted box, reduced to the point a test clicks.
         function centreOf(item) {
             if (!item)
@@ -74,6 +82,7 @@ ShellRoot {
                 // so completion adds no request type and lands in that view's own cache on the way past.
                 onCompleteRequested: function (dir, hidden) { backend.peek(dir, pane.windowSize, hidden) }
                 onSaid: function (text) { bar.say(text, false) }
+                onSettingsRequested: settingsPanel.open(pane)
             }
 
             // The peek behind Tab. Every peeked line carries the directory and the hidden flag it
@@ -102,6 +111,7 @@ ShellRoot {
                 preview: preview
                 shareBrowser: shareBrowser
                 keymapSheet: keymapSheet
+                settingsPanel: settingsPanel
                 onMessage: function (text, isError) { bar.say(text, isError) }
                 // A running operation's line, which stands until the operation replaces it; see ui/StatusBar.qml.
                 onSticky: function (text) { bar.sticky = text; bar.transfer = pane.transfer }
@@ -109,11 +119,7 @@ ShellRoot {
                 onPathBarRequested: chrome.startEdit()
                 // Issue 9. ViewState persists it and Theme multiplies its own tokens by it, so the
                 // whole window follows without any surface reading the chord itself.
-                onScaleRequested: function (direction) {
-                    ViewState.uiScale = direction === 0 ? 1 : Scale.stepped(ViewState.uiScale, direction)
-                    ViewState.save()
-                    pane.message(Scale.announce(ViewState.uiScale), false)
-                }
+                onScaleRequested: function (direction) { fleaWindow.applyScale(direction) }
                 onOpened: function (path) { shareBrowser.close() }
             }
 
@@ -149,6 +155,14 @@ ShellRoot {
             Flea.KeymapSheet {
                 id: keymapSheet
                 anchors.fill: parent
+            }
+
+            // The settings panel, reached by the comma key, the toolbar's sliders button and the
+            // background menu's own row: the Settings board's three doors onto one surface.
+            Flea.SettingsPanel {
+                id: settingsPanel
+                anchors.fill: parent
+                onScaleRequested: function (direction) { fleaWindow.applyScale(direction) }
             }
 
             Flea.NetworkDialog {
@@ -228,6 +242,7 @@ ShellRoot {
         tabBar: tabBar
         convertDialog: convertDialog
         keymapSheet: keymapSheet
+        settingsPanel: settingsPanel
         networkDialog: networkDialog
         shareBrowser: shareBrowser
     }

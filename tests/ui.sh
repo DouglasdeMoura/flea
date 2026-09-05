@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives the real Quickshell window with omarchy-drive and asserts through the read-only IPC seam.
-# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs ...]; networklive is opt-in.
+# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|settings ...]; networklive is opt-in.
 set -u
 set -o pipefail
 # Hard rule 9's guard, which owns FIXTURE_ROOT and every create and delete this suite makes.
@@ -444,6 +444,43 @@ menu_seek() {
         settle
     done
     fail "menu_seek: could not reach $want, cursor stalled at $(ipc contextMenuCursor)"
+}
+
+# The index of a menu row by its label, for a case that has to click that row: the Menus settings
+# section can change how many rows sit above it, so no case derives one from a hardcoded count.
+menu_row_index() {
+    local want="$1" entries i=0 label
+    entries=$(ipc contextMenuEntries)
+    local IFS='|'
+    for label in $entries; do
+        if [[ "$label" == "$want" ]]; then
+            unset IFS
+            printf '%s' "$i"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    unset IFS
+    return 1
+}
+
+# The listing row whose painted centre is nearest a y in window coordinates, or nothing when the
+# point lies off every row. Used to prove a menu row really does lie over a list row before a case
+# asserts that clicking it does not fall through to that row.
+list_row_at_y() {
+    local want_y="$1" total i centre _cx cy best="" best_gap=1000000 gap
+    total=$(ipc total)
+    for (( i = 0; i < total; i++ )); do
+        centre=$(ipc rowCentre "$i")
+        [[ -n "$centre" ]] || continue
+        read -r _cx cy <<< "$centre"
+        gap=$(( want_y > cy ? want_y - cy : cy - want_y ))
+        if (( gap < best_gap )); then
+            best_gap=$gap
+            best=$i
+        fi
+    done
+    (( best_gap <= $(ipc metrics | cut -d' ' -f4) / 2 )) && printf '%s' "$best"
 }
 
 # "Kind=PNG image|Size=346 B" becomes "Kind|Size": the labels are the canvas's contract, and the
@@ -1036,17 +1073,22 @@ case_menu() {
     settle
     [[ "$(ipc contextMenuVisible)" == "false" ]] || fail "an outside click did not close the context menu"
 
-    # Rename lies over visible row 3 here; its click belongs only to the menu, never that row below.
+    # Rename's click belongs only to the menu, never to the list row it lies over. Both the row's own
+    # index and the list row beneath it are found live: the Menus settings section can move Rename.
     click_row 0 right
     settle
-    centre=$(ipc rowCentre 3)
-    read -r _beneath_cx beneath_y <<< "$centre"
-    [[ -n "$beneath_y" ]] || fail "menu: row 3 is not visible beneath Rename"
-    omarchy-drive click "$((wx + cx + row_height))" "$((wy + beneath_y))" left >/dev/null
+    local rename_index rename_centre rx ry beneath
+    rename_index=$(menu_row_index "Rename") || fail "menu: the open menu has no Rename row"
+    rename_centre=$(ipc contextMenuRowCentre "$rename_index")
+    read -r rx ry <<< "$rename_centre"
+    [[ -n "$ry" ]] || fail "menu: the Rename row has no on-screen centre"
+    beneath=$(list_row_at_y "$ry")
+    [[ -n "$beneath" ]] || fail "menu: no list row lies under Rename, so a pass-through cannot happen"
+    omarchy-drive click "$((wx + rx))" "$((wy + ry))" left >/dev/null
     settle
-    printf 'MENU rename-over-row cursor=%s renaming=%s live=%s text=%q beneath=%s\n' \
-        "$(ipc cursor)" "$(ipc renamingIndex)" "$(ipc renameEditorLive)" \
-        "$(ipc renameEditorText)" "$(ipc rowAt 3 | cut -d'|' -f1)"
+    printf 'MENU rename-over-row index=%s cursor=%s renaming=%s live=%s text=%q beneath=%s\n' \
+        "$rename_index" "$(ipc cursor)" "$(ipc renamingIndex)" "$(ipc renameEditorLive)" \
+        "$(ipc renameEditorText)" "$(ipc rowAt "$beneath" | cut -d'|' -f1)"
     shot menu-rename-over-row
     [[ "$(ipc cursor)" == "0" ]] || fail "Rename passed its click to row $(ipc cursor)"
     [[ "$(ipc renamingIndex)" == "0" ]] || fail "Rename retargeted or committed row 0, renamingIndex is $(ipc renamingIndex)"
@@ -3995,11 +4037,264 @@ case_renamelife() {
     kill_flea
 }
 
+# The settings panel: its three doors, its three control groups, and the one thing a settings window
+# has to do that a menu does not, which is outlive the process that wrote it. XDG_CONFIG_HOME points
+# inside the fixture root for the whole case, so nothing here can write the operator's own
+# ~/.config/flea/view.json; hard rule 9 covers writes and not only deletes.
+case_settings() {
+    local dir="$fixture_root/settings"
+    local config="$fixture_root/settings-config"
+    sandbox_scratch "$dir"
+    sandbox_scratch "$config"
+    : > "$dir/a.txt"
+    : > "$dir/b.txt"
+    local real_config="${XDG_CONFIG_HOME-}"
+    export XDG_CONFIG_HOME="$config"
+    launch "$dir"
+    wait_listing 2
+
+    settings_doors
+    settings_scale
+    settings_menus
+    settings_keys
+
+    # Restart survival, which is what separates a setting from a session's mood. Both values are
+    # asserted in the file the panel wrote and again in the behaviour of a process that only read it.
+    local state="$config/flea/view.json"
+    [[ -f "$state" ]] || fail "settings: the panel wrote no state file at $state"
+    grep -q '"paste"' "$state" || fail "settings: the hidden action never reached the state file"
+    grep -q '"keysPreset": "windows"' "$state" || fail "settings: the preset never reached the state file"
+    kill_flea
+    launch "$dir"
+    wait_listing 2
+    click_row 0 right
+    settle
+    local reopened="|$(ipc contextMenuEntries)|"
+    [[ "$reopened" != *"|Paste|"* ]] || fail "settings: a restart brought the hidden Paste row back"
+    [[ "$reopened" == *"|Cut|"* ]] || fail "settings: a restart lost the rows that were left enabled"
+    key -k Escape >/dev/null
+    settle
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+    [[ "$(ipc showHidden)" == "true" ]] || fail "settings: the stored Windows preset did not survive a restart"
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+
+    printf 'SETTINGS doors=ok scale=ok menus=ok keys=ok restart=ok\n'
+    if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
+    kill_flea
+}
+
+# The Settings board draws three doors onto one panel: the toolbar's sliders button, the comma key
+# from anywhere in the window, and the background menu's own row.
+settings_doors() {
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the comma key did not open the panel"
+    [[ "$(ipc settingsSection)" == "display" ]] \
+        || fail "settings: the panel did not open on Display, it is on $(ipc settingsSection)"
+    shot settings-display
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "false" ]] || fail "settings: Escape did not close the panel"
+
+    local wx wy ww wh bx by
+    read -r wx wy ww wh < <(window_box)
+    read -r bx by <<< "$(ipc chromeButtonCentre sliders)"
+    [[ -n "$by" ]] || fail "settings: the chrome strip has no sliders button"
+    omarchy-drive click "$((wx + bx))" "$((wy + by))" left >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the sliders button did not open the panel"
+    key -k Escape >/dev/null
+    settle
+
+    # A row menu has a row to act on, so the board gives it no Settings row; the background one is
+    # the whole menu on empty space, which is where the third door lives.
+    click_row 0 right
+    settle
+    [[ "|$(ipc contextMenuEntries)|" != *"|Settings|"* ]] || fail "settings: a row menu offered the Settings row"
+    key -k Escape >/dev/null
+    settle
+    local cx cy row_height
+    row_height=$(ipc metrics | cut -d' ' -f4)
+    read -r cx cy <<< "$(ipc rowCentre 1)"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy + 4 * row_height))" right >/dev/null
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "settings: a right click on empty space opened no menu"
+    [[ "|$(ipc contextMenuEntries)|" == *"|Settings|"* ]] \
+        || fail "settings: the background menu has no Settings row, got $(ipc contextMenuEntries)"
+    menu_seek "Settings"
+    key -k Return >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the background menu's own row opened no panel"
+    key -k Escape >/dev/null
+    settle
+}
+
+# One control over ui/js/Scale.js, not a second scale: the stepper reaches the same engine
+# Ctrl+Shift+Plus does, so the status bar announces the step the row shows.
+settings_scale() {
+    key , >/dev/null
+    settle
+    local before after
+    before=$(ipc metrics | cut -d' ' -f1)
+    key l >/dev/null
+    settle
+    after=$(ipc metrics | cut -d' ' -f1)
+    (( after > before )) || fail "settings: the scale stepper did not grow the type, $before then $after"
+    [[ "$(ipc settingsRows)" == *"stepper|Interface scale|110%"* ]] \
+        || fail "settings: the row does not show the stepped scale, got $(ipc settingsRows)"
+    [[ "$(ipc lastMessage)" == "Interface scale 110 percent."* ]] \
+        || fail "settings: the stepper did not reach the engine that announces, got $(ipc lastMessage)"
+    shot settings-scaled
+    # Enter on the stepper is the reset the announcement names, and the chord's own reset agrees.
+    key -k Return >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"stepper|Interface scale|100%"* ]] \
+        || fail "settings: Enter on the stepper did not reset the scale"
+    [[ "$(ipc metrics | cut -d' ' -f1)" == "$before" ]] \
+        || fail "settings: the reset did not put the type back where it started"
+    key -k Escape >/dev/null
+    settle
+}
+
+# The Menus section, whose consumer is ui/js/Menu.js: every assertion here is made against the real
+# context menu, never against the stored set alone.
+settings_menus() {
+    key , >/dev/null
+    settle
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc settingsSide)" == "rail" ]] || fail "settings: Tab did not give the cursor to the rail"
+    key j >/dev/null
+    settle
+    [[ "$(ipc settingsSection)" == "menus" ]] || fail "settings: j on the rail did not reach Menus"
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|6 of 6"* ]] \
+        || fail "settings: the master row does not start at six of six, got $(ipc settingsRows)"
+    shot settings-menus
+
+    # Down three from the master is Paste, and Space is the board's own toggle key.
+    key j >/dev/null; key j >/dev/null; key j >/dev/null
+    settle
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
+        || fail "settings: switching one action off did not read as five of six"
+    key -k Escape >/dev/null
+    settle
+    settings_menu_lacks "Paste"
+    [[ "|$(ipc contextMenuEntries)|" == *"|Cut|Copy|Duplicate|"* ]] \
+        || fail "settings: hiding Paste moved the rows around it, got $(ipc contextMenuEntries)"
+    key -k Escape >/dev/null
+    settle
+
+    # The master itself: a partial one enables all six, and a checked one switches all six off.
+    key , >/dev/null
+    settle
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|6 of 6"* ]] \
+        || fail "settings: activating the partial master did not switch all six on"
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|0 of 6"* ]] \
+        || fail "settings: activating the checked master did not switch all six off"
+    key -k Escape >/dev/null
+    settle
+    local label
+    for label in Cut Copy Paste Duplicate Rename "Move to Trash"; do
+        settings_menu_lacks "$label"
+        key -k Escape >/dev/null
+        settle
+    done
+    click_row 0 right
+    settle
+    [[ "|$(ipc contextMenuEntries)|" == *"|Open|"* ]] || fail "settings: the locked Open row went with them"
+    [[ "|$(ipc contextMenuEntries)|" == *"|Show hidden files|"* ]] \
+        || fail "settings: the locked hidden toggle went with them"
+    key -k Escape >/dev/null
+    settle
+
+    # Back to all six, then off with Paste alone, which is the state the restart check reads back.
+    key , >/dev/null
+    settle
+    key -k Space >/dev/null
+    settle
+    key j >/dev/null; key j >/dev/null; key j >/dev/null
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
+        || fail "settings: the panel did not end the Menus block with Paste alone switched off"
+    key -k Escape >/dev/null
+    settle
+}
+
+# Opens the row menu and refuses a label that should not be in it, delimiters included so Copy path
+# cannot answer for Copy.
+settings_menu_lacks() {
+    local label="$1"
+    click_row 0 right
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "settings: the row menu did not open"
+    [[ "|$(ipc contextMenuEntries)|" != *"|$label|"* ]] \
+        || fail "settings: $label is still in the menu, got $(ipc contextMenuEntries)"
+}
+
+# The Mac/Windows toggle, proved by the keys themselves: a chord one preset binds and the other
+# does not, driven through the real window in both states.
+settings_keys() {
+    key , >/dev/null
+    settle
+    key -k Tab >/dev/null
+    key k >/dev/null; key k >/dev/null
+    settle
+    [[ "$(ipc settingsSection)" == "keys" ]] || fail "settings: k on the rail did not reach Keys"
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Mac"* ]] \
+        || fail "settings: the preset row does not start on Mac, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"fact|connect to server|ctrl-k"* ]] \
+        || fail "settings: the Mac preset lists none of its own chords"
+    shot settings-keys
+    key l >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Windows"* ]] \
+        || fail "settings: l did not step the preset to Windows"
+    [[ "$(ipc settingsRows)" == *"fact|hidden files|ctrl-h"* ]] \
+        || fail "settings: the Windows preset lists none of its own chords"
+    key -k Escape >/dev/null
+    settle
+
+    # The preset rebinds in this process at once, which is the whole point of a toggle over one map.
+    [[ "$(ipc showHidden)" == "false" ]] || fail "settings: the fixture did not start with hidden files off"
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+    [[ "$(ipc showHidden)" == "true" ]] || fail "settings: Ctrl+H is not bound under the Windows preset"
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+    [[ "$(ipc showHidden)" == "false" ]] || fail "settings: Ctrl+H did not toggle back"
+    # And Finder's own chord goes quiet, which is what makes this a preset and not an addition.
+    [[ "$(ipc viewMode)" == "list" ]] || fail "settings: the fixture did not start in the list view"
+    key -M ctrl -k 2 -m ctrl >/dev/null
+    settle
+    [[ "$(ipc viewMode)" == "list" ]] \
+        || fail "settings: Ctrl+2 still switched the view under the Windows preset"
+    key -M ctrl -M shift -k 2 -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc viewMode)" == "columns" ]] \
+        || fail "settings: Explorer's own Ctrl+Shift+2 did not reach the columns view"
+    key -M ctrl -M shift -k 1 -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc viewMode)" == "list" ]] || fail "settings: Ctrl+Shift+1 did not go back to the list view"
+}
+
 cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs settings)
 
 : > "$run_log"
 : > "$flea_log"

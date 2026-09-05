@@ -461,6 +461,15 @@ huge pages" below for what it is worth and what it cost.
 - `ui/js/Trash.js` is the dd pair's arm-and-fire policy, split out of `Focus.js` at its cap.
 - `ui/js/Scale.js` is the interface scale's step, clamp and sentence; `ui/ViewState.qml` stores it
   and `ui/Theme.qml` multiplies its own tokens by it, so no surface reads the chord itself.
+- `ui/js/Settings.js` is the settings panel's whole model: the three sections, the context-menu
+  action inventory and its groups, the tri-state master derived from `menuHidden`, and the row list
+  each section draws. Pure, so `tests/js/settings.js` drives every control without a window.
+  `ui/SettingsPanel.qml` paints what `rows()` returns and owns the panel's two-sided keyboard,
+  `ui/SettingsRail.qml` the section rail and `ui/SettingsRow.qml` one row of the pane.
+- `ui/js/Menu.js` `applyHidden` is the only consumer of the stored hidden set, and it runs at the
+  end of `listingEntries`, so a switched-off action leaves every menu that carried it at once.
+  `open` and `toggleHidden` are refused there as well as drawn locked in the panel, so a
+  hand-edited state file cannot empty the menu.
 - `ui/js/PathBar.js` is what a typed path line means: the tilde, the relative name, the
   `file://` URI, the interior `.` and `..`, and what Tab makes of one directory's names. Pure,
   so `tests/js/pathbar.js` drives all of it; the field itself is `ui/ChromeBar.qml`'s.
@@ -850,6 +859,25 @@ scoping, so an `action =` in a pointer block would put an item on that checklist
 can press. The generator refuses an empty or unreadable `[[pointer]]` table for the same
 reason `[digits]` is expanded by hand in that battery: a checklist derived from an empty table
 passes by having nothing in it.
+
+A `[[preset]]` table joined this with the settings panel's Keys section, and it is the whole of
+the Mac/Windows toggle. Each row names the preset it belongs to, the modifier state, the Qt key,
+the chord as the Keys section prints it, the action and a label. The generator emits it twice
+from that one row: as `Keymap.PRESET_KEYS`, which the settings panel lists, and as the if-chain
+inside `Keymap.lookupPreset`, which `lookup()` consults before every shared table. Emitting both
+from one row is what stops the panel advertising a chord the preset does not bind, and emitting
+the binding as a literal `Qt.Key_*` is what keeps it inside the `qml6` probe above.
+
+The live preset is a module-level `var preset` in the generated file, set by `ui/ViewState.qml`'s
+`onKeysPresetChanged`. A `.pragma library` holds one copy per QML engine, so that one assignment
+reaches every caller of `lookup()` with no second wire and no plumbing through `ui/js/Focus.js`
+or `ui/Pane.qml`, both of which sit against their file budget. An unrecognised name clamps to
+`mac`, which is what the shared tables were already written as: Finder's, with Cmd read as Ctrl.
+
+**A preset overlay must never hold a chord the `[[sheet]]` table draws.** The sheet is one static
+array with no preset of its own, so a cap it draws for a Mac-only chord would be wrong for half
+its readers the moment the toggle moved. `tests/js/keymap.js` resolves the whole sheet under both
+presets and fails if any row answers differently.
 
 The tool emits JavaScript only. Plan 6 adds the Rust output together with the terminal key
 type that consumes it; a generated module with no caller is dead code, so the second output

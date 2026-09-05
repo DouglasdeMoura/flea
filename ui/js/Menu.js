@@ -27,8 +27,14 @@ function listingEntries(p) {
         out.push({ label: "Open", action: "open", glyph: "folder-open" })
         out.push({ label: "Copy path", action: "copypath", glyph: "file-text" })
         out.push({ separator: true })
-        out.push({ label: "Rename", action: "rename", glyph: "rename" })
+        // SettingsMenus.html's six basic rows, in its own order. Cut, Copy and Paste were keyboard
+        // only until the Menus section grew a switch for each of them, and a switch over a row no
+        // menu draws is a mock control. Paste answers with a sentence on an empty clipboard.
+        out.push({ label: "Cut", action: "cut", glyph: "scissors" })
+        out.push({ label: "Copy", action: "copy", glyph: "copy" })
+        out.push({ label: "Paste", action: "paste", glyph: "clipboard" })
         out.push({ label: "Duplicate", action: "duplicate", glyph: "file-plus" })
+        out.push({ label: "Rename", action: "rename", glyph: "rename" })
         var ops = []
         // The submenu is exactly the table the backend probed, so a box with no tool offers nothing.
         if (p.archiveFormats.length > 0)
@@ -64,8 +70,45 @@ function listingEntries(p) {
     // The last group is the rows that need no row under the cursor, which is also the whole menu
     // on a listing's empty space.
     out.push({ label: "New folder", action: "newFolder", glyph: "folder-plus" })
+    // The background menu's own door to the settings panel, the third the Settings board draws
+    // beside the toolbar button and the comma key. A row menu has a row to act on, so it keeps none.
+    if (!p.hasRow)
+        out.push({ label: "Settings", action: "settings", glyph: "sliders" })
     out.push(hiddenRow(p.showHidden))
-    return out
+    return applyHidden(out, p.hiddenActions)
+}
+
+// The visibility consumer SettingsMenus.html specifies, and the only reader of the stored hidden
+// set: a switched-off action's row leaves, and a rule that has lost every row it divided leaves
+// with it, so a menu never grows a doubled, leading or trailing separator. Order never changes,
+// because the board offers visibility and deliberately not ordering.
+function applyHidden(entries, hiddenActions) {
+    var kept = []
+    for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i]
+        if (entry.separator === true) {
+            if (kept.length > 0 && kept[kept.length - 1].separator !== true)
+                kept.push(entry)
+            continue
+        }
+        if (!isHidden(hiddenActions, entry.action))
+            kept.push(entry)
+    }
+    while (kept.length > 0 && kept[kept.length - 1].separator === true)
+        kept.pop()
+    return kept
+}
+
+// Open and the hidden toggle are never in the stored set: ui/js/Settings.js draws them locked, and
+// this is the second half of that lock, so a hand-edited state file cannot empty the menu either.
+function isHidden(hiddenActions, action) {
+    if (action === "open" || action === "toggleHidden")
+        return false
+    for (var i = 0; hiddenActions && i < hiddenActions.length; i++) {
+        if (hiddenActions[i] === action)
+            return true
+    }
+    return false
 }
 
 // The one state toggle either menu draws. The label flips with the state, the house pattern

@@ -15,6 +15,7 @@ QtObject {
     property var tabBar: null
     property var convertDialog: null
     property var keymapSheet: null
+    property var settingsPanel: null
     property var networkDialog: null
     property var shareBrowser: null
 
@@ -54,7 +55,7 @@ QtObject {
         // One label per current menu row, joined so a test can assert contents without OCR. A
         // separator has no label of its own and reads as "-", which is what makes the grouping assertable.
         function contextMenuEntries(): string {
-            var entries = root.pane.menuEntries()
+            var entries = root.pane.contextMenu().entries
             var out = []
             for (var i = 0; i < entries.length; i++) {
                 out.push(entries[i].separator === true ? "-" : entries[i].label)
@@ -63,7 +64,7 @@ QtObject {
         }
         // The glyph each row draws, in the same order, so the "every row is marked" rule is assertable.
         function contextMenuGlyphs(): string {
-            var entries = root.pane.menuEntries()
+            var entries = root.pane.contextMenu().entries
             var out = []
             for (var i = 0; i < entries.length; i++) {
                 // A brand mark has no glyph name, so the reader names the mark instead; a row draws
@@ -74,14 +75,24 @@ QtObject {
             return out.join("|")
         }
         // A peer row names a machine and an archive row a file, so the flyout's mark is its own.
-        function contextMenuSubmenuGlyphs(): string { return root.pane.menuSubmenuGlyphs() }
+        function contextMenuSubmenuGlyphs(): string { return root.pane.contextMenu().submenuGlyphs() }
         // A peer is named by whoever is on the tailnet, so a test reads the name here rather than
         // knowing it. No separator branch: a flyout holds only Archive.formatEntries or Taildrop
         // peers, and both build {id, label} rows only.
         function contextMenuSubmenuEntries(): string {
-            return root.pane.menuSubmenuEntries().map(function (e) { return e.label }).join("|")
+            return root.pane.contextMenu().submenuEntries.map(function (e) { return e.label }).join("|")
         }
         function contextMenuCursor(): int { return root.pane.menuCursor }
+        function settingsOpen(): bool { return root.settingsPanel.opened }
+        function settingsSection(): string { return root.settingsPanel.section }
+        function settingsSide(): string { return root.settingsPanel.side }
+        function settingsCursor(): int { return root.settingsPanel.cursor }
+        // One row per line, kind|label|value, so a test reads what the panel draws without OCR and
+        // the stored value behind each control is assertable from the same string.
+        function settingsRows(): string { return root.settingsPanel.rowsText() }
+        // A menu row's own centre, so a driven click lands on the row a test named rather than on a
+        // pixel derived from a row count the Menus settings section can change under it.
+        function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
         // The row that is its own rename editor, or -1; drives the States artboard's inline rename.
         function renamingIndex(): int { return root.pane.renamingIndex }
         function renameEditorLive(): bool { return root.pane.renameEditor() !== null }
