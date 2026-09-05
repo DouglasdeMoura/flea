@@ -3428,8 +3428,10 @@ sheet draws `dd`, and `tests/js/keymap.js` resolves a doubled cap as that one ch
 ### Theme roles and sources
 
 `Theme.qml`'s `applyColors` assigns only Flea's eight palette roles and ignores unknown
-keys because Omarchy themes contain more roles than Flea uses. Alacritty-derived palettes
-contain neither background ladder key, so the measured surface fallback is `selection`.
+keys because Omarchy themes contain more roles than Flea uses. `color.surface` walks the
+ladder `ThemeRoles.html` specifies, `dark_background` then `background`, because background
+is the neutral fallback when the chrome plane is absent. Alacritty-derived palettes contain
+neither of those two, so the measured surface fallback for them is `selection`, the third rung.
 Shell parsing consumes only `[font]` and `[spacing]` because Flea has no bar, popups,
 tooltip or lock screen.
 
