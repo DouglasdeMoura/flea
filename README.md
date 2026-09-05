@@ -38,6 +38,19 @@ This sets Flea as the `inode/directory` handler and makes Omarchy's two file-man
 `SUPER + SHIFT + F` and `SUPER + ALT + SHIFT + F`, open it instead of Nautilus. Run
 `flea --default off` before `omarchy pkg drop flea` to restore the previous handlers and remove it.
 
+To make Flea the file chooser every application opens, the dialog behind `omarchy tailscale send`
+and every Flatpak's Open and Save:
+
+```bash
+flea --picker
+systemctl --user restart xdg-desktop-portal
+```
+
+Flea implements `org.freedesktop.impl.portal.FileChooser`, so this replaces the GTK dialog for every
+portal caller on the box at once. It writes one interface key to
+`~/.config/xdg-desktop-portal/portals.conf` and no default, so screen sharing, screenshots and every
+other portal keep the backend they already had. `flea --picker off` puts the GTK chooser back.
+
 To track `main` instead of releases, use the AUR package:
 
 ```bash

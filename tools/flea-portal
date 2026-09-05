@@ -178,7 +178,9 @@ class Pick:
         self.child.wait_async(None, self.on_child_exit)
 
     # The window is gone, so whatever it left in the reply file is the whole answer.
-    def on_child_exit(self, child, result, _data):
+    # PyGObject calls an async callback with user data only when it was given, so the third
+    # parameter defaults rather than making the arity a guess.
+    def on_child_exit(self, child, result, _data=None):
         try:
             child.wait_finish(result)
         except GLib.Error as error:
@@ -229,6 +231,7 @@ class Pick:
 class Service:
     def __init__(self, loop):
         self.loop = loop
+        self.owner = 0
         self.connection = None
         self.picks = {}
         self.idle_source = 0
@@ -285,17 +288,27 @@ class Service:
             GLib.source_remove(self.idle_source)
             self.idle_source = 0
 
+    # The name goes back before the process does, and the quit waits half a second behind it: a call
+    # that arrives after the release activates a fresh instance instead of reaching a dead one.
     def on_idle(self):
         self.idle_source = 0
-        if not self.picks:
-            self.loop.quit()
+        if self.picks:
+            return GLib.SOURCE_REMOVE
+        if self.owner:
+            Gio.bus_unown_name(self.owner)
+            self.owner = 0
+        GLib.timeout_add(500, self.on_quit)
+        return GLib.SOURCE_REMOVE
+
+    def on_quit(self):
+        self.loop.quit()
         return GLib.SOURCE_REMOVE
 
 
 def main():
     loop = GLib.MainLoop()
     service = Service(loop)
-    owner = Gio.bus_own_name(
+    service.owner = Gio.bus_own_name(
         Gio.BusType.SESSION,
         BUS_NAME,
         Gio.BusNameOwnerFlags.NONE,
@@ -306,7 +319,8 @@ def main():
     try:
         loop.run()
     finally:
-        Gio.bus_unown_name(owner)
+        if service.owner:
+            Gio.bus_unown_name(service.owner)
     return 0
 
 

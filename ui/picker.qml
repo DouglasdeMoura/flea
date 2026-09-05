@@ -7,7 +7,6 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import "." as Flea
-import "js/Filter.js" as Filter
 import "js/Picker.js" as Picker
 
 // One portal request, one window: the org.freedesktop.impl.portal.FileChooser dialog every caller on
@@ -101,13 +100,14 @@ ShellRoot {
             win.marks = Picker.toggle(win.marks, Picker.join(win.path, row.n), row.s, win.req.multiple)
         }
 
-        // Enter. A directory is walked into, a file submits what is checked, and nothing checked is
-        // nothing to submit: the board's own rule, and it is what keeps a stray Enter from sending.
+        // Enter. A directory is always walked into, even in the folder request the board draws it
+        // marked in, and a file submits what is checked: nothing checked is nothing to submit, which
+        // is the board's own rule and what keeps a stray Enter from sending.
         function activate(index) {
             var row = win.rowFor(index)
             if (!row)
                 return
-            if (row.d && !(win.folderMode && Picker.marked(win.marks, Picker.join(win.path, row.n)))) {
+            if (row.d) {
                 win.open(Picker.join(win.path, row.n))
                 return
             }
@@ -164,13 +164,16 @@ ShellRoot {
             id: replyFile
             path: Quickshell.env("FLEA_PICKER_REPLY")
             atomicWrites: true
-            printErrors: true
+            // The reply file does not exist until this window writes it, and a preload read of a
+            // path that is not there is not an error worth a line; onSaveFailed below is.
+            printErrors: false
             // Sequenced on saved(), never on setText() returning: the answer has to be readable
-            // before this process ends, and Quickshell writes it on its own thread.
-            onSaved: Quickshell.execDetached(["kill", String(Quickshell.processId)])
+            // before this process ends, and Quickshell writes it on its own thread. The backend is
+            // told next, ui/shell.qml's own exit gate, so no listing child outlives this window.
+            onSaved: backend.quit()
             onSaveFailed: {
                 console.warn("the portal reply could not be written, so the request fails rather than reporting a refusal")
-                Quickshell.execDetached(["kill", String(Quickshell.processId)])
+                backend.quit()
             }
         }
 
@@ -184,6 +187,10 @@ ShellRoot {
                 win.finish(Picker.RESPONSE_CANCELLED, [])
             }
         }
+
+        // Quickshell 0.3.1 has no exit API and Qt.quit() is a no-op, so the window signals itself,
+        // exactly as ui/shell.qml does, once the backend says it has drained.
+        Connections { target: backend; function onQuitReady() { Quickshell.execDetached(["kill", String(Quickshell.processId)]) } }
 
         Flea.Backend {
             id: backend
@@ -317,6 +324,8 @@ ShellRoot {
             function shownTotal(): int { return win.shownTotal }
             function cursor(): int { return win.cursorIndex }
             function marks(): string { return Picker.paths(win.marks).join(",") }
+            function rowAt(index: int): string { var row = win.rowFor(index); return row ? row.n : "" }
+            function cursorName(): string { return win.rowFor(win.cursorIndex) ? win.rowFor(win.cursorIndex).n : "" }
             function state(): string { return win.listingState }
             function accept(): string { return Picker.acceptLabel(win.req, win.marks.length) }
             function chip(): int { return win.filterIndex }

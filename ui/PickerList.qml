@@ -76,14 +76,18 @@ ListView {
         }
 
         TapHandler {
+            id: tap
             acceptedButtons: Qt.LeftButton
+            // ui/js/Tap.js's rule, one tap selects and the second opens, with the chooser's one
+            // difference: the second tap on a file marks it and never sends, because a double click
+            // that hands a file to the caller is a send nobody asked for.
             onTapped: function (eventPoint, button) {
                 root.picker.cursorIndex = cell.listingIndex
                 root.forceActiveFocus()
-                // The box is the mark and the row is the walk, the same split the keyboard makes.
-                if (box.visible && eventPoint.position.x <= box.x + box.width + Theme.spacing.gap)
+                var onBox = box.visible && eventPoint.position.x <= box.x + box.width + Theme.spacing.gap
+                if (onBox || (tap.tapCount === 2 && cell.markable))
                     root.picker.toggleMark(cell.listingIndex)
-                else if (cell.row && cell.row.d)
+                else if (tap.tapCount === 2 && cell.row && cell.row.d)
                     root.picker.open(cell.rowPath)
             }
         }
