@@ -37,6 +37,10 @@ Item {
     // What the seam reads: the line as it stands, and the box a test double-clicks to open the bar.
     readonly property alias editText: field.text
     readonly property alias pathArea: pathArea
+    // The elided head's own marker, so a test can click the one spot the crumbs slide underneath.
+    readonly property alias elisionMarker: elision
+    // Issue 45's segments as items, so tests/ui.sh can press one the way it presses a tab.
+    readonly property alias crumbItems: crumbs
     // The directory a Tab is waiting on, and the one that came back. Both are keyed by the hidden
     // flag as well as the path, or a Tab on ".conf" would answer off rows peeked without dotfiles in
     // them: the key is what the request asked for and never what the line happens to read later.
@@ -147,15 +151,6 @@ Item {
         color: Theme.color.surface
     }
 
-    Rectangle {
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: Theme.spacing.hairline
-        color: Theme.color.foreground
-        opacity: 0.12
-    }
-
     // A test drives these by coordinate, because a glyph button carries no text to find on screen.
     function buttonFor(glyph) {
         var groups = [nav, views]
@@ -217,6 +212,7 @@ Item {
                 x: Math.min(0, crumbSlot.width - crumbRow.width)
 
                 Repeater {
+                    id: crumbs
                     model: Nav.crumbs(root.path, root.home)
 
                     // corner: a path is arbitrary text, so PlainText, the same rule every filename on this surface follows.
@@ -228,6 +224,11 @@ Item {
                         font.family: Theme.font.family
                         font.pixelSize: Theme.font.caption
                         textFormat: Text.PlainText
+                        // The box is the strip's height with the glyphs centred in it, because the
+                        // handlers below are the path area's whole gesture and a text-tall box left
+                        // 11 of the strip's 27 px dead, measured at the window.
+                        height: crumbSlot.height
+                        verticalAlignment: Text.AlignVCenter
 
                         HoverHandler {
                             cursorShape: crumb.modelData.last ? Qt.IBeamCursor : Qt.PointingHandCursor
@@ -268,18 +269,30 @@ Item {
             }
 
             // The head that ran off the left, marked where the elided Text drew its own ellipsis; the
-            // fill behind it is the chrome's own colour, because the crumbs slide underneath it.
+            // fill behind it is the chrome's own colour, because the crumbs slide underneath it. It
+            // is the marker's box, and that box is the strip's height for the same reason a crumb's is.
             Rectangle {
                 visible: elision.visible
                 anchors.fill: elision
                 color: Theme.color.surface
+
+                // The crumbs slide under this fill, so without a gesture of its own a press here
+                // opened whichever one had scrolled behind it, a directory nobody could see. A
+                // MouseArea and not a TapHandler: the default DragThreshold policy takes a passive
+                // grab, so the crumb underneath still tapped, measured on the box.
+                MouseArea {
+                    anchors.fill: parent
+                    onDoubleClicked: root.startEdit()
+                }
             }
 
             Text {
                 id: elision
                 visible: crumbRow.width > crumbSlot.width
                 anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                verticalAlignment: Text.AlignVCenter
                 text: "\u2026"
                 color: Theme.color.muted
                 font.family: Theme.font.family
@@ -370,5 +383,16 @@ Item {
                 onActivated: root.viewChosen(modelData)
             }
         }
+    }
+
+    // The strip's own bottom edge, declared last so it draws over the path area: the elided head's
+    // opaque fill reaches the same row and used to leave a seven pixel gap in it.
+    Rectangle {
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: Theme.spacing.hairline
+        color: Theme.color.foreground
+        opacity: 0.12
     }
 }

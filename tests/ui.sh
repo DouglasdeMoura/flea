@@ -92,6 +92,10 @@ transient_clear_s=5
 rail_poll_wait_s=7
 # The window coalescer is 16 ms and a refill is a round trip, so injected input needs a moment.
 settle_s=0.4
+# Two pixels inside each edge of the strip: the rows a font-tall crumb box left dead, measured at y=2 and y=24 of 27.
+chrome_band_inset=2
+# Wide enough to hold the elided head's opaque fill and the hairline either side of it; that gap measured at x 80 to 86.
+chrome_edge_sample_width=200
 # The Hyprland corner arc shows wallpaper through the window's own top-left pixels, so start past it.
 header_sample_x=16
 header_sample_width=600
@@ -1181,6 +1185,112 @@ case_click() {
     grep -q "^OPENED $dir/beta.txt$" "$opened" || fail "click: a double click in the columns did not open beta.txt"
     click_chrome list
     settle
+
+    # The elided head is an opaque fill drawn over crumbs that have slid underneath it, so a press
+    # there used to open whichever one was behind it: a directory the operator could not see.
+    # Twelve of these overflow the strip on this box's own 2560 wide monitor; six did not, measured.
+    local seg="a-directory-with-a-deliberately-long-name" deep="$dir" _level
+    for _level in $(seq 1 12); do deep="$deep/$seg"; done
+    mkdir -p "$deep"
+    : > "$deep/leaf.txt"
+    launch "$deep"
+    wait_listing 1
+    local marker ex ey wx wy
+    marker=$(ipc elisionCentre)
+    [[ -n "$marker" ]] || fail "click: the path fits the bar here, so the elision marker is not under test at all"
+    read -r ex ey <<< "$marker"
+    read -r wx wy _ww _wh < <(window_box)
+    # The status is read, because a click that never reached the compositor leaves the path
+    # unchanged too and would satisfy both assertions below without pressing anything.
+    omarchy-drive click "$((ex + wx))" "$((ey + wy))" >/dev/null \
+        || fail "click: omarchy-drive refused the press on the elision marker"
+    # A crumb's single tap is deferred until the double-tap interval expires, see ui/ChromeBar.qml
+    # "exclusiveSignals", so the reading is taken well after the click rather than on top of it.
+    settle
+    settle
+    printf 'CLICK elision path=%q barOpen=%s\n' "$(ipc path)" "$(ipc pathBarOpen)"
+    shot click-elision
+    [[ "$(ipc path)" == "$deep" ]] || fail "click: a tap on the elision marker navigated to $(ipc path)"
+    [[ "$(ipc pathBarOpen)" == "false" ]] || fail "click: a tap on the elision marker opened the path bar"
+
+    # keys.toml's chrome/left x2/any row is the whole strip, and the chrome is the window's own top item, so its band is y 0 to chromeHeight - 1.
+    local chrome_h band_crumb band_x band
+    chrome_h=$(ipc chromeHeight)
+    band_crumb=$(( $(ipc crumbCount) - 2 ))
+    read -r band_x _band_y <<< "$(ipc crumbCentre "$band_crumb")"
+    [[ -n "$band_x" ]] || fail "click: crumb $band_crumb has no on-screen centre, so no band of the strip can be pressed over one"
+    for band in "$chrome_band_inset" "$(( chrome_h - 1 - chrome_band_inset ))"; do
+        omarchy-drive click "$((band_x + wx))" "$((band + wy))" --double >/dev/null \
+            || fail "click: omarchy-drive refused the double click at y $band of the strip"
+        settle
+        settle
+        printf 'CLICK chrome-band y=%s of %s barOpen=%s path=%q\n' "$band" "$chrome_h" "$(ipc pathBarOpen)" "$(ipc path)"
+        shot "click-chrome-band-$band"
+        [[ "$(ipc pathBarOpen)" == "true" ]] \
+            || fail "click: a double click at y $band of the ${chrome_h}px strip did not open the path bar"
+        [[ "$(ipc path)" == "$deep" ]] || fail "click: the double click at y $band navigated to $(ipc path)"
+        key -k Escape >/dev/null
+        settle
+        [[ "$(ipc pathBarOpen)" == "false" ]] || fail "click: Escape did not close the path bar opened at y $band"
+    done
+
+    # The strip's own bottom edge is one flat rule, so that row holds one colour until something opaque draws over it.
+    local edge_y edge_colours
+    edge_y=$(( chrome_h - 1 ))
+    shot click-chrome-edge
+    edge_colours=$(magick "$evidence_dir/click-chrome-edge.png" \
+        -crop "${chrome_edge_sample_width}x1+0+${edge_y}" +repage -unique-colors -format "%[fx:w]" info:)
+    printf 'CLICK chrome-edge y=%s width=%s colours=%s\n' "$edge_y" "$chrome_edge_sample_width" "$edge_colours"
+    [[ "$edge_colours" == "1" ]] \
+        || fail "click: the strip's bottom edge holds $edge_colours colours across ${chrome_edge_sample_width}px, so something drew over it"
+
+    # Issue 45's own control, and the positive half the elision check needs: with only the negative
+    # above, a click that missed the window entirely passed it. Nothing drove a crumb at all, so a
+    # ChromeBar that ignored every press passed the whole suite.
+    local crumbs target centre cx cy up
+    up=$(dirname "$deep")
+    crumbs=$(ipc crumbCount)
+    (( crumbs >= 3 )) || fail "click: the bar drew $crumbs crumbs, too few to press a parent"
+    # keys.toml declares the press on a parent and not on the leaf, which is the directory already
+    # listed; the segment before the leaf is the one this fixture is standing in.
+    target=$((crumbs - 2))
+    centre=$(ipc crumbCentre "$target")
+    [[ -n "$centre" ]] || fail "click: crumb $target has no on-screen centre"
+    read -r cx cy <<< "$centre"
+    omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null \
+        || fail "click: omarchy-drive refused the press on crumb $target"
+    settle
+    settle
+    printf 'CLICK crumb=%s path=%q barOpen=%s\n' "$target" "$(ipc path)" "$(ipc pathBarOpen)"
+    shot click-crumb
+    [[ "$(ipc path)" == "$up" ]] || fail "click: a tap on the parent crumb went to $(ipc path), not $up"
+    [[ "$(ipc pathBarOpen)" == "false" ]] || fail "click: a single tap on a crumb opened the path bar"
+
+    # Issue 20's own control, the other row this table declares and nothing pressed. omarchy-drive
+    # click knows left, right and middle only, so the extra button goes through ydotool directly;
+    # 0xC3 is its down|up for button 3, which Hyprland delivers as Qt.BackButton on this box.
+    command -v ydotool >/dev/null || fail "click: ydotool is missing, so the mouse back button cannot be pressed"
+    # The same default omarchy-drive exports, because calling ydotool directly skips that wrapper.
+    export YDOTOOL_SOCKET="${YDOTOOL_SOCKET:-$XDG_RUNTIME_DIR/.ydotool_socket}"
+    [[ -S "$YDOTOOL_SOCKET" ]] || fail "click: no ydotoold socket at $YDOTOOL_SOCKET"
+    local rx ry
+    read -r rx ry <<< "$(ipc rowCentre 0)"
+    omarchy-drive move "$((rx + wx))" "$((ry + wy))" >/dev/null \
+        || fail "click: the pointer could not be parked over the listing"
+    ydotool click 0xC3 >/dev/null 2>&1 || fail "click: ydotool refused the mouse back button"
+    settle
+    settle
+    printf 'CLICK back path=%q\n' "$(ipc path)"
+    shot click-back
+    [[ "$(ipc path)" == "$deep" ]] || fail "click: the back button went to $(ipc path), not back to $deep"
+    # The same button's other half: with the history spent it climbs, which is the whole of
+    # ui/js/Nav.js mouseBack and the half a stub calling mouseBack directly cannot prove is bound.
+    ydotool click 0xC3 >/dev/null 2>&1 || fail "click: ydotool refused the second back button press"
+    settle
+    settle
+    printf 'CLICK back-climb path=%q\n' "$(ipc path)"
+    [[ "$(ipc path)" == "$up" ]] || fail "click: the back button with no history left went to $(ipc path), not $up"
+    kill_flea
 }
 
 # Catches narrowing the delegate TapHandler back to Qt.LeftButton in ui/Pane.qml.
@@ -2224,9 +2334,9 @@ case_preview() {
     # seconds, not one: an omarchy-drive ipc round trip costs 190 to 565 ms measured on this box
     # (see the KB's ipc-timing-loops entry), so a one-second clip leaves the poll below one or two
     # samples to land the Playing state in, and this case caught that exact miss before the fix.
-    # Task 22's own Right/Left checks need headroom on both sides of a 5 s seek (Focus.js's
-    # SEEK_MS) starting from whatever position the round trips above already spent: at three
-    # seconds the clip had finished before the checks ran at all, and at eight, Right alone
+    # Task 22's own Right/Left checks need headroom on both sides of a 5 s seek (the SEEK_MS in
+    # ui/js/PreviewKeys.js) starting from whatever position the round trips above already spent:
+    # at three seconds the clip had finished before the checks ran at all, and at eight, Right alone
     # landed within 5 s of the end, clamped to it, and stopped the player before Left ran.
     clip_seconds=15
     python3 - "$dir/tone.wav" "$clip_seconds" <<'PYEOF'
@@ -2309,7 +2419,7 @@ PYEOF
     wait_preview_state playing
     shot preview-audio
 
-    # Left/Right seek 5 s (Focus.js's SEEK_MS), read before the pause/resume dance below spends
+    # Left/Right seek 5 s (PreviewKeys.js's SEEK_MS), read before the pause/resume dance below spends
     # its own several IPC round trips (190 to 565 ms each, see the clip_seconds comment above): an
     # eight-second clip still has room left once this runs, so both directions are unclamped.
     local pos_before pos_after
