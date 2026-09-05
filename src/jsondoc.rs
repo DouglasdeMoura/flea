@@ -322,9 +322,12 @@ mod tests {
     // The whole sentence, not is_err(): a message that names no byte, or names the wrong one, is
     // what this test's own name promises against and it could not see either before.
     #[test]
-    fn malformed_input_is_an_error_naming_where_it_stopped() {
+    fn malformed_input_is_an_error_naming_the_byte_it_is_about() {
         for (bad, message) in [
             ("", "the document ended before a value at byte 0"),
+            // Byte 0 is any format string's own default, so the two messages this branch added
+            // are each pinned at a nonzero offset as well.
+            ("{\"a\":", "the document ended before a value at byte 5"),
             ("{", "a string was expected at byte 1"),
             ("{\"a\"}", "a colon was expected at byte 4"),
             ("{\"a\":}", "a value that is not JSON at byte 5"),
@@ -332,12 +335,16 @@ mod tests {
             ("tru", "true expected at byte 0"),
             ("{\"a\":1}x", "trailing text at byte 7"),
             ("\"unterminated", "a string opened at byte 0 ran to the end of the document"),
+            ("{\"a\":\"unterminated", "a string opened at byte 5 ran to the end of the document"),
             ("{\"a\":+5}", "a value that is not JSON at byte 5"),
             ("{\"a\":.5}", "a value that is not JSON at byte 5"),
             ("{\"a\":1.2.3}", "a value that is not JSON at byte 5"),
             ("{\"a\":inf}", "a value that is not JSON at byte 5"),
             ("{\"a\":\"\\q\"}", "an unknown escape at byte 7"),
             ("{\"a\":\"\\u12\"}", "a \\u escape that is not hex at byte 8"),
+            // u32::from_str_radix takes a leading + and JSON takes no sign at all, so "\u+041"
+            // decoded to 'A' and a settle could write back what the window's JSON.parse refuses.
+            ("{\"a\":\"\\u+041\"}", "a \\u escape that is not hex at byte 8"),
             ("{\"a\":\"\\u\u{20ac}\u{20ac}\"}", "a \\u escape that is not hex at byte 8"),
             ("{\"a\":\"\\u12", "a short \\u escape at byte 8"),
             ("{\"a\":\"\\", "an escape ran off the end at byte 7"),

@@ -116,6 +116,10 @@ check "an accepted patch prints the document on stdout" "1" "$(echo "$merged" | 
 check "an accepted patch prints nothing on stderr" "" "$(flea_ui '{"view":"grid"}' 2>&1 >/dev/null)"
 check "a refused patch prints its sentence on stderr" "1" "$(flea_ui '{"view":"miller"}' 2>&1 >/dev/null | grep -c '^flea: ')"
 check "a refused patch prints nothing on stdout" "" "$(flea_ui '{"view":"miller"}' 2>/dev/null)"
+check "a patch that is not JSON prints its sentence on stderr" "1" "$(flea_ui 'not json at all' 2>&1 >/dev/null | grep -c '^flea: ')"
+check "a patch that is not JSON prints nothing on stdout" "" "$(flea_ui 'not json at all' 2>/dev/null)"
+check "two arguments prints its sentence on stderr" "1" "$(flea_ui a b 2>&1 >/dev/null | grep -c '^flea: ')"
+check "two arguments prints nothing on stdout" "" "$(flea_ui a b 2>/dev/null)"
 
 # columns names what the list row SHOWS and src/uischema.rs says name is never optional, so an empty
 # array, a subset without name and a duplicate are all refused. Measured through the real singleton:
@@ -126,6 +130,8 @@ for bad_columns in '{"columns":[]}' '{"columns":["size","date"]}' '{"columns":["
   check "a columns array that is not a set exits 2: $bad_columns" "2" "$rc"
   check "and names the key it refused: $bad_columns" "1" "$(echo "$out" | grep -c 'columns')"
   check "and writes no state file: $bad_columns" "0" "$([ -e "$UI" ] && echo 1 || echo 0)"
+  # ls -A, because [ -e "$UI" ] alone cannot see the directory and the lock update() takes first.
+  check "and leaves only the lock it took: $bad_columns" "ui.json.lock" "$(ls -A "$STATE/flea" | sort | tr '\n' ' ' | sed 's/ $//')"
 done
 
 # A hand edit is not a patch: it costs that one key its own default and the key beside it stands.
@@ -166,6 +172,8 @@ check "and that launch also goes on to the window" "1" "$(echo "$out" | grep -c 
 out=$(env XDG_STATE_HOME="$STATE" XDG_CONFIG_HOME="$CONFIG" $BIN --ui-state '{"hidden":true}' </dev/null 2>&1); rc=$?
 check "a patch into an unwritable state directory exits 2" "2" "$rc"
 check "and no state file appears under it" "0" "$([ -e "$UI" ] && echo 1 || echo 0)"
+check "and prints its sentence on stderr" "1" "$(flea_ui '{"hidden":true}' 2>&1 >/dev/null | grep -c '^flea: ')"
+check "and prints nothing on stdout" "" "$(flea_ui '{"hidden":true}' 2>/dev/null)"
 # Restored before anything else runs: a 0500 directory is one rm -rf can descend and a later mkdir cannot.
 chmod 700 "$STATE"
 

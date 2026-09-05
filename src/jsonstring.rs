@@ -62,11 +62,15 @@ fn unescape_hex(bytes: &[u8], at: &mut usize) -> Result<char, String> {
     Ok(char::from_u32(point).unwrap_or(char::REPLACEMENT_CHARACTER))
 }
 
+// The four digits are checked one by one, because u32::from_str_radix takes a leading + as well.
 fn hex4(bytes: &[u8], at: &mut usize) -> Result<u32, String> {
     let end = *at + 4;
     let digits = bytes.get(*at..end).ok_or_else(|| format!("a short \\u escape at byte {}", *at))?;
-    let text = std::str::from_utf8(digits).map_err(|_| format!("a \\u escape that is not hex at byte {}", *at))?;
-    let point = u32::from_str_radix(text, 16).map_err(|_| format!("a \\u escape that is not hex at byte {}", *at))?;
+    let mut point = 0;
+    for &digit in digits {
+        let value = (digit as char).to_digit(16);
+        point = point * 16 + value.ok_or_else(|| format!("a \\u escape that is not hex at byte {}", *at))?;
+    }
     *at = end;
     Ok(point)
 }

@@ -328,7 +328,7 @@ scale, menus and places are the window's. **The streams and the status are the c
 that `Process` reads the status alone: either shape prints the whole document on stdout and exits 0,
 and every refusal, a patch that is not JSON, a key or value this Flea does not take, a state file it
 could not write, or more than one argument, prints one `flea: ` sentence on stderr, prints nothing
-on stdout at all, and exits 2. Pinned in `tests/uistate.sh` beside the refusals themselves.
+on stdout at all, and exits 2. Pinned in `tests/uistate.sh`, both streams for each of the four.
 
 **The window's read is the settled file, and not a raw one.** `main()` calls `Store::settle` before
 it hands off to `qs`: an empty patch through the same lock and the same per-key validation, so
@@ -401,9 +401,18 @@ as an `f64` and none of them is a JSON number, and accepting one would have let 
 `ui.json` into a document the window's own `JSON.parse` refuses, after which every setting reads as
 default. The shape check is `is_json_number` in `src/jsondoc.rs`, run before the `f64` parse and not
 instead of it: the parse is what bounds the magnitude, since `1e400` is a JSON number and no finite
-`f64`. **Every parse error names the byte it stopped at**, the four that ran off an end included, so
-a hand edit is answered with a position and `malformed_input_is_an_error_naming_where_it_stopped`
-asserts the whole sentence rather than `is_err()`, which is all it could see before.
+`f64`. **A `\u` escape is four hex digits and nothing else**, each digit checked on its own, because
+`u32::from_str_radix` takes a leading `+` for an unsigned type as well and `\u+041` decoded to `A`:
+the same divergence as the number grammar, one escape further in. **Every parse error names a
+byte**, the four that ran off an end included, so a hand edit is answered with a position. It is the
+byte the parse stopped at, except for the six messages that name where the offending token STARTED
+instead, because on those that is the end a reader can act on: a string that runs to the end of the
+document names its opening quote, a number that is not JSON or not UTF-8 names its first character,
+a byte that is not UTF-8 names the first byte of the sequence, and a `\u` escape that is short or
+not hex names the first of its four digits.
+`malformed_input_is_an_error_naming_the_byte_it_is_about` asserts the whole sentence rather than
+`is_err()`, which is all it could see before, and it pins a nonzero offset for each of the two
+messages this branch added, because byte 0 is what a hardcoded format string would print too.
 
 **`columns` names what the list row SHOWS, and it is a set that always holds `name`.** Every entry
 is one of the five column keys, no key appears twice, and `name` is among them, because
@@ -827,8 +836,8 @@ are the test module. It is one job in two directions: pull one
 named field out of one JSON line, and escape one string into one. Nothing here builds or
 validates a document, because the wire is one object per line and never anything else.
 
-`src/jsondoc.rs` is 372 lines by `wc -l`, over the soft budget and 28 under the hard cap, with its
-`#[cfg(test)]` at 273, so 272 lines of implementation and 100 of tests. **Those three read 352, 272
+`src/jsondoc.rs` is 379 lines by `wc -l`, over the soft budget and 21 under the hard cap, with its
+`#[cfg(test)]` at 273, so 272 lines of implementation and 107 of tests. **Those three read 352, 272
 and 271 until this round and all three were one out**: `wc -l` on the commit that wrote them said
 353, the fourth count on this branch read off the shape of an edit rather than off the artefact.
 It is one job in two
@@ -841,8 +850,8 @@ in four files and buys a reader nothing. The string decoder went instead, to `sr
 different job on the same bytes, with exactly one caller in this file. `parse` against `render` is
 still the cut if this file needs another one.
 
-`src/jsonstring.rs` is 109 lines by `wc -l`, inside both budgets, with its `#[cfg(test)]` at 88, so
-87 lines of implementation and 22 of tests. It is one job: one JSON string in and one Rust `String`
+`src/jsonstring.rs` is 113 lines by `wc -l`, inside both budgets, with its `#[cfg(test)]` at 92, so
+91 lines of implementation and 22 of tests. It is one job: one JSON string in and one Rust `String`
 out, the `\u` escapes and UTF-16's surrogate pairing, which is the reading half of what `json.rs`'s
 `escape` writes. It came out of `jsondoc.rs` when `parse_number` needed JSON's own number grammar
 and that file had two lines of headroom left; `parse_value` is its only caller.
