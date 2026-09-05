@@ -93,11 +93,13 @@ start_client() {
     omarchy-drive focus "$title" >/dev/null || fail "the picker window would not take focus"
 }
 
+# The exit status lands in a variable, never on stdout: a command substitution runs this in a
+# subshell, which does not own the background client and answers 127 for every run.
+client_status=0
 wait_for_client() {
-    local status=0
-    wait "$client" || status=$?
+    client_status=0
+    wait "$client" || client_status=$?
     client=0
-    printf '%s' "$status"
 }
 
 case_pick() {
@@ -111,9 +113,8 @@ case_pick() {
     press -k space
     [[ "$(ipc marks)" == "$fixture/alpha.txt,$fixture/beta.txt" ]] || fail "the second mark left $(ipc marks)"
     press -k Return
-    local status
-    status=$(wait_for_client)
-    [[ "$status" == 0 ]] || fail "the caller exited $status with $(cat "$fixture/client.err")"
+    wait_for_client
+    [[ "$client_status" == 0 ]] || fail "the caller exited $client_status with $(cat "$fixture/client.err")"
     local want
     want=$(printf '%s\n%s' "$fixture/alpha.txt" "$fixture/beta.txt")
     [[ "$(cat "$fixture/picked.txt")" == "$want" ]] || fail "the caller received $(cat "$fixture/picked.txt")"
@@ -124,10 +125,9 @@ case_cancel() {
     make_fixture
     start_client --multiple
     press -k Escape
-    local status
-    status=$(wait_for_client)
+    wait_for_client
     # 1 is the caller's "nothing picked", which is a decision; anything above it is a fault.
-    [[ "$status" == 1 ]] || fail "a cancelled chooser exited $status, not 1"
+    [[ "$client_status" == 1 ]] || fail "a cancelled chooser exited $client_status, not 1"
     [[ ! -s "$fixture/picked.txt" ]] || fail "a cancelled chooser printed $(cat "$fixture/picked.txt")"
     printf 'cancel: the caller exited 1 with nothing picked, and nothing was sent\n'
 }
@@ -135,15 +135,15 @@ case_cancel() {
 # The response the portal actually answered with, which the caller collapses: 1 is the user's refusal
 # and 2 is everything else, and omarchy-file-select turns both into exit 1. This is where the two can
 # be told apart. Prints "<code> <uri...>", or "none" when nothing answered at all.
-# Usage: portal_ask <OpenFile|SaveFile> <close|wait> [current_name]
+# Usage: portal_ask <OpenFile|SaveFile> [current_name]
 portal_ask() {
-    python3 - "$title" "$1" "$2" "${3:-}" <<'ASK'
+    python3 - "$title" "$1" "${2:-}" <<'ASK'
 import sys
 import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
-title, method, withdraw, name = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+title, method, name = sys.argv[1], sys.argv[2], sys.argv[3]
 bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 loop = GLib.MainLoop()
 seen = []
@@ -161,18 +161,52 @@ bus.signal_subscribe("org.freedesktop.portal.Desktop", "org.freedesktop.portal.R
 options = {"handle_token": GLib.Variant("s", token)}
 if name:
     options["current_name"] = GLib.Variant("s", name)
-handle = bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
-                       "org.freedesktop.portal.FileChooser", method,
-                       GLib.Variant("(ssa{sv})", ("", title, options)),
-                       None, Gio.DBusCallFlags.NONE, -1, None).unpack()[0]
+bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+              "org.freedesktop.portal.FileChooser", method,
+              GLib.Variant("(ssa{sv})", ("", title, options)),
+              None, Gio.DBusCallFlags.NONE, -1, None)
+
+# A request that never answers is the defect this bounds: the caller would wait 600 s for it.
+GLib.timeout_add_seconds(40, loop.quit)
+loop.run()
+print(seen[0] if seen else "none")
+ASK
+}
+
+# The backend's own answer to a withdrawn request. org.freedesktop.portal.Request says a request the
+# caller closed emits no Response, so the frontend signal portal_ask reads is never sent for this one
+# and the backend's return value is the only place the contract is observable. Prints "<code>".
+backend_withdraw() {
+    python3 - "$title" <<'ASK'
+import sys
+import gi
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib
+
+BACKEND = "org.freedesktop.impl.portal.desktop.flea"
+CHOOSER = "org.freedesktop.impl.portal.FileChooser"
+REQUEST = "org.freedesktop.impl.portal.Request"
+handle = "/org/freedesktop/portal/desktop/request/fleatest/withdrawn"
+bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+loop = GLib.MainLoop()
+seen = []
+
+def on_reply(source, result, _data=None):
+    try:
+        seen.append(str(source.call_finish(result).unpack()[0]))
+    except GLib.Error as error:
+        seen.append("error " + error.message)
+    loop.quit()
+
+bus.call(BACKEND, "/org/freedesktop/portal/desktop", CHOOSER, "OpenFile",
+         GLib.Variant("(osssa{sv})", (handle, "", "", sys.argv[1], {})),
+         None, Gio.DBusCallFlags.NONE, 60000, None, on_reply)
 
 def close():
-    bus.call_sync("org.freedesktop.portal.Desktop", handle, "org.freedesktop.portal.Request",
-                  "Close", None, None, Gio.DBusCallFlags.NONE, -1, None)
+    bus.call_sync(BACKEND, handle, REQUEST, "Close", None, None, Gio.DBusCallFlags.NONE, 10000, None)
     return False
 
-if withdraw == "close":
-    GLib.timeout_add_seconds(6, close)
+GLib.timeout_add_seconds(6, close)
 # A request that never answers is the defect this bounds: the caller would wait 600 s for it.
 GLib.timeout_add_seconds(40, loop.quit)
 loop.run()
@@ -182,7 +216,7 @@ ASK
 
 case_withdrawn() {
     make_fixture
-    portal_ask OpenFile close > "$fixture/codes.txt"
+    backend_withdraw > "$fixture/codes.txt"
     [[ "$(cat "$fixture/codes.txt")" == "2" ]] || fail "a withdrawn request answered $(cat "$fixture/codes.txt"), not 2"
     printf 'withdrawn: a request the caller closed answers 2, which is not the 1 a refusal answers\n'
 }
@@ -191,7 +225,7 @@ case_withdrawn() {
 # It must answer 2 rather than the 1 a refusal answers, and it must answer at all.
 case_died() {
     make_fixture
-    portal_ask OpenFile wait > "$fixture/died.txt" &
+    portal_ask OpenFile > "$fixture/died.txt" &
     local asker=$!
     omarchy-drive wait window "$title" --timeout 25 >/dev/null || fail "no picker window named $title appeared"
     omarchy-drive window kill "$title" >/dev/null || fail "could not kill the picker window"
@@ -204,7 +238,7 @@ case_died() {
 # window is standing in, and the caller owns the write after that.
 case_save() {
     make_fixture
-    portal_ask SaveFile wait notes.md > "$fixture/saved.txt" &
+    portal_ask SaveFile notes.md > "$fixture/saved.txt" &
     local asker=$!
     omarchy-drive wait window "$title" --timeout 25 >/dev/null || fail "SaveFile raised no picker window"
     omarchy-drive focus "$title" >/dev/null || fail "the picker window would not take focus"
@@ -245,8 +279,12 @@ case_taildrop() {
     local sent="flea-picker-acceptance-$(date +%Y%m%d-%H%M%S).txt"
     printf 'Flea file picker acceptance fixture, generated %s. Safe to delete.\n' "$(date -Is)" > "$fixture/$sent"
     title="Send to $peer"
-    omarchy-drive ipc omarchy.tailscale open >/dev/null || fail "the stock Tailscale panel would not open"
+    # The panel is a toggle, so a run that ended with it open would close it here instead: this
+    # dismisses whatever is up before asking for it, or the click below reads an empty screen.
+    omarchy-drive key -k Escape >/dev/null 2>&1
     sleep 1
+    omarchy-drive ipc omarchy.tailscale open >/dev/null || fail "the stock Tailscale panel would not open"
+    sleep 3
     # The peer row has no click action of its own; the hover under the click is what moves the
     # panel's own cursor, and s is the panel's own send key. Neither is Flea's. The label is a
     # separate variable because the panel draws the peer's display name, which is not always the
