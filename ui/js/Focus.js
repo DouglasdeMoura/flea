@@ -8,7 +8,6 @@
 .import "RailKeys.js" as RailKeys
 .import "Search.js" as Search
 .import "Sort.js" as Sort
-.import "Scale.js" as Scale
 .import "Trash.js" as Trash
 .import "Tabs.js" as Tabs
 
@@ -244,9 +243,9 @@ function handleKey(event, root, sidebar) {
         root.act(action)
         return true
     }
-    // Issue 9: the interface scale belongs to the window, so it answers from either view.
-    if (action.indexOf("scale") === 0) {
-        root.scaleRequested(action === "scaleReset" ? 0 : (action === "scaleUp" ? 1 : -1))
+    // Issue 9: the text size belongs to the window, so it answers from either view.
+    if (action.indexOf("textSize") === 0) {
+        root.textSizeRequested(action === "textSizeReset" ? 0 : (action === "textSizeUp" ? 1 : -1))
         return true
     }
     // The bar lives in the chrome above both views, so neither owns it; shell.qml holds the field.

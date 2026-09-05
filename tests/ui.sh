@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drives the real Quickshell window with omarchy-drive and asserts through the read-only IPC seam.
-# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal|renderer ...]; networklive is opt-in.
+# Usage: ./tests/ui.sh [cursor|terminal|open|click|menu|hidden|selection|select|colour|lifted|icons|thumbs|hashcache|stale|nosweep|oem|header|overflow|focus|preview|network|netmark|networktimeout|networklive|gvfs|sharebrowser|unmount|eject|rename|renamelife|taildrop|grid|columns|operations|tabs|openterminal|renderer|settings ...]; networklive is opt-in.
 set -u
 set -o pipefail
 # Hard rule 9's guard, which owns FIXTURE_ROOT and every create and delete this suite makes.
@@ -463,6 +463,43 @@ menu_seek() {
         settle
     done
     fail "menu_seek: could not reach $want, cursor stalled at $(ipc contextMenuCursor)"
+}
+
+# The index of a menu row by its label, for a case that has to click that row: the Menus settings
+# section can change how many rows sit above it, so no case derives one from a hardcoded count.
+menu_row_index() {
+    local want="$1" entries i=0 label
+    entries=$(ipc contextMenuEntries)
+    local IFS='|'
+    for label in $entries; do
+        if [[ "$label" == "$want" ]]; then
+            unset IFS
+            printf '%s' "$i"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    unset IFS
+    return 1
+}
+
+# The listing row whose painted centre is nearest a y in window coordinates, or nothing when the
+# point lies off every row. Used to prove a menu row really does lie over a list row before a case
+# asserts that clicking it does not fall through to that row.
+list_row_at_y() {
+    local want_y="$1" total i centre _cx cy best="" best_gap=1000000 gap
+    total=$(ipc total)
+    for (( i = 0; i < total; i++ )); do
+        centre=$(ipc rowCentre "$i")
+        [[ -n "$centre" ]] || continue
+        read -r _cx cy <<< "$centre"
+        gap=$(( want_y > cy ? want_y - cy : cy - want_y ))
+        if (( gap < best_gap )); then
+            best_gap=$gap
+            best=$i
+        fi
+    done
+    (( best_gap <= $(ipc metrics | cut -d' ' -f4) / 2 )) && printf '%s' "$best"
 }
 
 # "Kind=PNG image|Size=346 B" becomes "Kind|Size": the labels are the canvas's contract, and the
@@ -1303,8 +1340,16 @@ case_menu() {
     : > "$dir/b.txt"
     : > "$dir/c.txt"
     : > "$dir/plain.txt"
+    # Five more rows than this case used to need: with the six basic actions drawn, Rename is the
+    # eighth menu row and no list row lay under it on a five-row listing, which the check below says
+    # out loud rather than passing on a click that hit nothing.
+    : > "$dir/z1.txt"
+    : > "$dir/z2.txt"
+    : > "$dir/z3.txt"
+    : > "$dir/z4.txt"
+    : > "$dir/z5.txt"
     launch "$dir"
-    wait_listing 5
+    wait_listing 10
     local row_height row_padding_x centre cx cy wx wy ww wh row_left beneath_y metrics
     metrics=$(ipc metrics) || fail "menu: metrics unavailable"
     read -r _body _caption row_padding_x row_height <<< "$metrics"
@@ -1337,17 +1382,22 @@ case_menu() {
     settle
     [[ "$(ipc contextMenuVisible)" == "false" ]] || fail "an outside click did not close the context menu"
 
-    # Rename lies over visible row 3 here; its click belongs only to the menu, never that row below.
+    # Rename's click belongs only to the menu, never to the list row it lies over. Both the row's own
+    # index and the list row beneath it are found live: the Menus settings section can move Rename.
     click_row 0 right
     settle
-    centre=$(ipc rowCentre 3)
-    read -r _beneath_cx beneath_y <<< "$centre"
-    [[ -n "$beneath_y" ]] || fail "menu: row 3 is not visible beneath Rename"
-    omarchy-drive click "$((wx + cx + row_height))" "$((wy + beneath_y))" left >/dev/null
+    local rename_index rename_centre rx ry beneath
+    rename_index=$(menu_row_index "Rename") || fail "menu: the open menu has no Rename row"
+    rename_centre=$(ipc contextMenuRowCentre "$rename_index")
+    read -r rx ry <<< "$rename_centre"
+    [[ -n "$ry" ]] || fail "menu: the Rename row has no on-screen centre"
+    beneath=$(list_row_at_y "$ry")
+    [[ -n "$beneath" ]] || fail "menu: no list row lies under Rename, so a pass-through cannot happen"
+    omarchy-drive click "$((wx + rx))" "$((wy + ry))" left >/dev/null
     settle
-    printf 'MENU rename-over-row cursor=%s renaming=%s live=%s text=%q beneath=%s\n' \
-        "$(ipc cursor)" "$(ipc renamingIndex)" "$(ipc renameEditorLive)" \
-        "$(ipc renameEditorText)" "$(ipc rowAt 3 | cut -d'|' -f1)"
+    printf 'MENU rename-over-row index=%s cursor=%s renaming=%s live=%s text=%q beneath=%s\n' \
+        "$rename_index" "$(ipc cursor)" "$(ipc renamingIndex)" "$(ipc renameEditorLive)" \
+        "$(ipc renameEditorText)" "$(ipc rowAt "$beneath" | cut -d'|' -f1)"
     shot menu-rename-over-row
     [[ "$(ipc cursor)" == "0" ]] || fail "Rename passed its click to row $(ipc cursor)"
     [[ "$(ipc renamingIndex)" == "0" ]] || fail "Rename retargeted or committed row 0, renamingIndex is $(ipc renamingIndex)"
@@ -4410,11 +4460,534 @@ case_renamelife() {
     kill_flea
 }
 
+# The settings panel: its doors, its three control groups, and the one thing a settings window
+# has to do that a menu does not, which is outlive the process that wrote it. XDG_STATE_HOME and
+# XDG_CONFIG_HOME both point inside the fixture root for the whole case, so nothing here can write
+# the operator's own ~/.local/state/flea/ui.json; hard rule 9 covers writes and not only deletes.
+case_settings() {
+    local dir="$fixture_root/settings"
+    local config="$fixture_root/settings-config"
+    local state="$fixture_root/settings-state"
+    sandbox_scratch "$dir"
+    sandbox_scratch "$config"
+    sandbox_scratch "$state"
+    : > "$dir/a.txt"
+    : > "$dir/b.txt"
+    local real_config="${XDG_CONFIG_HOME-}"
+    local real_state="${XDG_STATE_HOME-}"
+    export XDG_CONFIG_HOME="$config"
+    export XDG_STATE_HOME="$state"
+    local stored="$state/flea/ui.json"
+
+    # Seeded through the same CLI the window writes through: a column set the header menu owns, two
+    # keys the backend owns and no control in this panel writes, and one key only a newer Flea knows.
+    # What keeps them below is src/uistate.rs's merge, not a copy the window happened to be holding.
+    settings_seed "$state" "$config" "$stored"
+
+    launch "$dir"
+    wait_listing 2
+
+    settings_doors
+    settings_display
+    settings_menus
+    settings_keys
+
+    # One override left standing, so the restart below has a text size to bring back as well.
+    key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
+    settle
+    local pinned_base
+    pinned_base=$(token_of baseSize)
+
+    # Restart survival, which is what separates a setting from a session's mood. Every value is
+    # asserted in the file the panel wrote, again through the backend that owns it, and again in the
+    # behaviour of a process that only read it.
+    [[ -f "$stored" ]] || fail "settings: the panel wrote no state file at $stored"
+    grep -q '"paste"' "$stored" || fail "settings: the hidden action never reached the state file"
+    grep -q '"keys": "windows"' "$stored" || fail "settings: the preset never reached the state file"
+    grep -q "\"mode\": $pinned_base" "$stored" \
+        || fail "settings: the state file holds no ${pinned_base}px stop"
+    # The board's own words: an override stores a stop, never a free number or a multiplier, and one
+    # stored vocabulary rather than two that would have to be kept in step.
+    ! grep -q 'uiScale' "$stored" || fail "settings: the state file still carries an interface-scale multiplier"
+    ! grep -q '"px"' "$stored" || fail "settings: the state file still carries 0.1.3's override shape"
+    [[ ! -e "$config/flea/view.json" ]] \
+        || fail "settings: a second settings file was written at $config/flea/view.json"
+
+    settings_assert_backend "$state" "$config" "$pinned_base"
+
+    kill_flea
+    launch "$dir"
+    wait_listing 2
+    [[ "$(token_of baseSize)" == "$pinned_base" ]] \
+        || fail "settings: a restart lost the ${pinned_base}px override, it draws at $(token_of baseSize)"
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Size|${pinned_base}px"* ]] \
+        || fail "settings: a restart brought the panel back on a different stop"
+    # settingsRows draws the section the panel is ON and a new process always opens on Display, so
+    # the master row is not reachable until the rail has been walked. The master is derived from the
+    # stored set, so a restart that read only menu.hidden must still draw the five of six the panel
+    # left behind, and the six rows under it must agree with it.
+    settings_section menus
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
+        || fail "settings: a restart did not derive the master back to five of six, got $(ipc settingsRows)"
+    key -k Escape >/dev/null
+    settle
+    click_row 0 right
+    settle
+    local reopened="|$(ipc contextMenuEntries)|"
+    [[ "$reopened" != *"|Paste|"* ]] || fail "settings: a restart brought the hidden Paste row back"
+    [[ "$reopened" == *"|Cut|"* ]] || fail "settings: a restart lost the rows that were left enabled"
+    key -k Escape >/dev/null
+    settle
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+    [[ "$(ipc showHidden)" == "true" ]] || fail "settings: the stored Windows preset did not survive a restart"
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+
+    settings_write_refused "$state" "$pinned_base"
+
+    # Back to following, so nothing after this case runs at a size it did not ask for.
+    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    settle
+
+    settings_read_refused "$stored" "$dir"
+
+    printf 'SETTINGS doors=ok display=ok menus=ok keys=ok restart=ok backend=ok refused=ok unread=ok\n'
+    if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
+    if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
+    kill_flea
+}
+
+# The state this case starts from, laid down through flea --ui-state so the schema sees it too. The
+# unknown key goes in by hand afterwards, because the CLI refuses a key this build does not know.
+settings_seed() {
+    local state="$1" config="$2" stored="$3"
+    env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$config" "$flea_bin" --ui-state \
+        '{"columns":["name","size"],"places":{"sidebarWidth":240},"sort":{"key":"size"}}' >/dev/null \
+        || fail "settings: the seeding write through flea --ui-state failed"
+    jq '. + {fromANewerFlea: {aKeyThisBuildHasNeverHeardOf: true}}' "$stored" > "$stored.seed" \
+        || fail "settings: the newer-Flea key could not be added to the seed"
+    mv "$stored.seed" "$stored"
+}
+
+# flea --ui-state with no patch is the read half of the one shared path, so this reads the panel's
+# own three settings back out of the backend, and every key beside them that nobody here writes.
+settings_assert_backend() {
+    local state="$1" config="$2" pinned_base="$3" doc
+    doc=$(env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$config" "$flea_bin" --ui-state) \
+        || fail "settings: flea --ui-state could not read the state file back"
+    settings_backend_holds "$doc" ".display.textSize.mode == $pinned_base" "the ${pinned_base}px stop"
+    settings_backend_holds "$doc" '.keys == "windows"' "the Windows preset"
+    settings_backend_holds "$doc" '.menu.hidden | index("paste")' "the hidden Paste action"
+    # menu.hidden is the sole state: the five of six the panel drew is derived from it, so a second
+    # value beside it here would be a value that could disagree with the set the menus actually read.
+    settings_backend_holds "$doc" '.menu | has("basic") | not' "menu.hidden alone, with no stored master"
+    # The preservation half, and the whole point of one store: four settings writes are four merges,
+    # so the retained view state, the backend's own keys and a newer Flea's key are all still here.
+    settings_backend_holds "$doc" '.columns == ["name","size"]' "the stored column set"
+    settings_backend_holds "$doc" '.places.sidebarWidth == 240' "places.sidebarWidth"
+    settings_backend_holds "$doc" '.sort.key == "size"' "sort.key"
+    settings_backend_holds "$doc" '.fromANewerFlea.aKeyThisBuildHasNeverHeardOf == true' \
+        "the key only a newer Flea knows"
+}
+
+settings_backend_holds() {
+    local doc="$1" filter="$2" what="$3"
+    printf '%s' "$doc" | jq -e "$filter" >/dev/null \
+        || fail "settings: the backend does not read $what back, it reads $(printf '%s' "$doc" | jq -c 'del(.places.favourites)')"
+}
+
+# The other half of the same honesty: a state file this window could not READ is a window about to
+# draw the shipped defaults over the operator's own settings, which is the unchecked-read defect
+# ui/NetworkDialog.qml carried once. It has to say so rather than look like a first launch.
+settings_read_refused() {
+    local stored="$1" dir="$2"
+    chmod 000 "$stored" || fail "settings: the state file could not be made unreadable"
+    launch "$dir"
+    wait_listing 2
+    [[ "$(ipc lastMessage)" == "Your saved settings could not be read, so these are the defaults." ]] \
+        || fail "settings: an unreadable state file was not reported, the status bar says $(ipc lastMessage)"
+    kill_flea
+    chmod 600 "$stored" || fail "settings: the state file could not be made readable again"
+}
+
+# A failed write is reported, never swallowed. The state directory is made unwritable, so the temp
+# file src/uistore.rs renames into place cannot be created at all, and the panel's next change is a
+# change the file does not have. The user is told that in the one place Flea says things.
+settings_write_refused() {
+    local state="$1" pinned_base="$2" before refused_base retried_base
+    before=$(cat "$state/flea/ui.json")
+    chmod 500 "$state/flea" || fail "settings: the state directory could not be made read-only"
+    key , >/dev/null
+    settle
+    # The stop row is Display's, and the panel reopens on whatever section the last block left it on.
+    settings_section display
+    key j >/dev/null
+    settle
+    key h >/dev/null
+    settle
+    refused_base=$(token_of baseSize)
+    (( refused_base < pinned_base )) \
+        || fail "settings: the refused step did not move the size on screen, still $refused_base"
+    [[ "$(ipc lastMessage)" == "That setting could not be saved." ]] \
+        || fail "settings: a refused write was not reported, the status bar says $(ipc lastMessage)"
+    chmod 700 "$state/flea" || fail "settings: the state directory could not be made writable again"
+    [[ "$(cat "$state/flea/ui.json")" == "$before" ]] \
+        || fail "settings: a refused write changed the state file anyway"
+    grep -q "\"mode\": $pinned_base" "$state/flea/ui.json" \
+        || fail "settings: the state file did not keep the stop the refusal could not replace"
+    # The book must not have believed the refusal: the next step still writes, and lands.
+    key h >/dev/null
+    settle
+    retried_base=$(token_of baseSize)
+    (( retried_base < refused_base )) \
+        || fail "settings: the step after a refusal did not move the size, still $retried_base"
+    grep -q "\"mode\": $retried_base" "$state/flea/ui.json" \
+        || fail "settings: the step after a refusal never reached the state file"
+    key -k Escape >/dev/null
+    settle
+}
+
+# Two of the three doors the Settings board draws: the comma key from either view and the toolbar's
+# sliders button. The third is a background-menu row this product has no background menu for.
+settings_doors() {
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the comma key did not open the panel"
+    [[ "$(ipc settingsSection)" == "display" ]] \
+        || fail "settings: the panel did not open on Display, it is on $(ipc settingsSection)"
+    shot settings-display
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "false" ]] || fail "settings: Escape did not close the panel"
+
+    local wx wy ww wh bx by
+    read -r wx wy ww wh < <(window_box)
+    read -r bx by <<< "$(ipc chromeButtonCentre sliders)"
+    [[ -n "$by" ]] || fail "settings: the chrome strip has no sliders button"
+    omarchy-drive click "$((wx + bx))" "$((wy + by))" left >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the sliders button did not open the panel"
+    key -k Escape >/dev/null
+    settle
+
+    # The board draws a third door on the background menu, and this product has no background menu to
+    # put it on: ui/ContextMenu.qml's hasRow has no writer anywhere in ui/, and the listing's only
+    # right-click route is a row delegate's own TapHandler. So no menu offers a Settings row, and
+    # this asserts that rather than shipping one nothing can reach.
+    click_row 0 right
+    settle
+    [[ "|$(ipc contextMenuEntries)|" != *"|Settings|"* ]] \
+        || fail "settings: a menu offered a Settings row, and no menu in this product can reach one"
+    key -k Escape >/dev/null
+    settle
+}
+
+# The Display section, whose consumer is ui/Theme.qml. The board rules that Omarchy owns the size
+# until Flea is told otherwise, that an override takes one of seven stops and not a free number, and
+# that the monitor scale is read-only. Every stop is walked and its whole token row is read back off
+# the live seam against the board's own layout table, because the table is the contract.
+settings_display() {
+    key , >/dev/null
+    settle
+    local omarchy_base
+    omarchy_base=$(token_of baseSize)
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
+        || fail "settings: Display did not open on Follow Omarchy, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"fact|Effective|${omarchy_base}px"* ]] \
+        || fail "settings: the effective row does not report Omarchy's own ${omarchy_base}px"
+    # Read-only means read-only: the compositor's two rows are facts, and no control sits on them.
+    [[ "$(ipc settingsRows)" == *"fact|Scale|"* ]] \
+        || fail "settings: the Display section draws no monitor scale, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" != *"choice|Scale|"* ]] \
+        || fail "settings: the monitor scale is a control, and the board says Flea never steps it"
+    assert_monitor_scale_row
+    shot settings-text-follow
+
+    # Switching to Override changes the mode and nothing on screen, which is what makes the switch
+    # safe to press: only a step moves the type.
+    local before after
+    before=$(ipc metrics)
+    key -k Return >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Override"* ]] \
+        || fail "settings: Enter on the mode row did not reach Override, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"choice|Size|${omarchy_base}px"* ]] \
+        || fail "settings: the override did not start on Omarchy's own stop"
+    [[ "$(ipc metrics)" == "$before" ]] \
+        || fail "settings: switching to Override moved the type before any step, $before then $(ipc metrics)"
+
+    # Down onto the stop row, then the whole list, each stop checked against the board's table.
+    key j >/dev/null
+    settle
+    settings_walk_to_stop 9
+    local stop
+    for stop in 9 10 11 12 14 16 20; do
+        settings_walk_to_stop "$stop"
+        assert_board_row "$stop"
+    done
+    after=$(ipc metrics | cut -d' ' -f1)
+    (( after > $(cut -d' ' -f1 <<< "$before") )) \
+        || fail "settings: the largest stop did not grow the type past Omarchy's own size"
+    shot settings-text-override
+
+    # The way back is one row, and it puts every token where Omarchy had it.
+    key k >/dev/null
+    settle
+    key -k Return >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
+        || fail "settings: the mode row did not go back to Follow Omarchy"
+    [[ "$(ipc settingsRows)" != *"choice|Size|"* ]] \
+        || fail "settings: following Omarchy still draws an override stop row"
+    [[ "$(ipc metrics)" == "$before" ]] \
+        || fail "settings: following Omarchy again did not put the type back, $before then $(ipc metrics)"
+    key -k Escape >/dev/null
+    settle
+
+    settings_chord_alias "$omarchy_base"
+}
+
+# The chord is an alias, not a second engine: keys.toml binds textSizeUp, textSizeDown and
+# textSizeReset, and each one has to move the very state the panel's own rows show.
+settings_chord_alias() {
+    local omarchy_base="$1"
+    key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
+    settle
+    local grown
+    grown=$(token_of baseSize)
+    (( grown > omarchy_base )) \
+        || fail "settings: Ctrl+Shift+Plus did not grow the text size, still $grown"
+    [[ "$(ipc lastMessage)" == "Text size ${grown}px. Ctrl+Shift+0 follows Omarchy again." ]] \
+        || fail "settings: the chord did not announce its stop, got $(ipc lastMessage)"
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Size|${grown}px"* ]] \
+        || fail "settings: the panel does not show the stop the chord set, got $(ipc settingsRows)"
+    key -k Escape >/dev/null
+    settle
+    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(token_of baseSize)" == "$omarchy_base" ]] \
+        || fail "settings: Ctrl+Shift+Minus did not step back one stop"
+    key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc lastMessage)" == "Text size follows Omarchy, ${omarchy_base}px." ]] \
+        || fail "settings: Ctrl+Shift+0 did not announce following Omarchy, got $(ipc lastMessage)"
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
+        || fail "settings: the chord's reset did not reach the panel's own mode row"
+    key -k Escape >/dev/null
+    settle
+}
+
+# h and l walk the stop row. The floor and the ceiling clamp, so pressing past either is a no-op
+# rather than a wrap, and this walks far enough to reach any stop from any other.
+settings_walk_to_stop() {
+    local want="$1" step=h attempt
+    (( want > $(token_of baseSize) )) && step=l
+    for attempt in 1 2 3 4 5 6 7; do
+        [[ "$(token_of baseSize)" == "$want" ]] && return 0
+        key "$step" >/dev/null
+        settle
+    done
+    [[ "$(token_of baseSize)" == "$want" ]] \
+        || fail "settings: seven steps did not reach the ${want}px stop, stopped at $(token_of baseSize)"
+}
+
+# One key of Theme.tokens(), which is the live seam tools/flea-metrics-gate diffs.
+token_of() {
+    ipc tokens | grep "^$1=" | cut -d= -f2-
+}
+
+# The SettingsScale board's layout table, base|bodySmall|caption|paddingY|rowHeight|iconSize|mark.
+# mark is the board's own unrounded number rounded to whole pixels, which is what Theme draws.
+assert_board_row() {
+    local want_base="$1" row got
+    for row in "9|8|7|5|24|14|12" "10|9|8|5|26|16|13" "11|10|9|6|30|18|15" \
+               "12|11|10|6|32|20|16" "14|13|12|7|37|23|19" "16|15|13|8|43|27|22" \
+               "20|18|17|10|52|32|26"; do
+        IFS='|' read -r base body caption padding height icon mark <<< "$row"
+        [[ "$base" == "$want_base" ]] || continue
+        got="$(token_of baseSize)|$(token_of bodySmall)|$(token_of caption)|$(token_of rowPaddingY)|$(token_of rowHeight)|$(token_of iconSize)|$(token_of markSize)"
+        printf 'SETTINGS stop=%s tokens=%s\n' "$base" "$got"
+        [[ "$got" == "$base|$body|$caption|$padding|$height|$icon|$mark" ]] \
+            || fail "settings: the ${base}px stop draws $got, and the board's table says $base|$body|$caption|$padding|$height|$icon|$mark"
+        return 0
+    done
+    fail "settings: ${want_base}px is not a stop the board tabulates"
+}
+
+# The compositor's own number, read the same way ui/Theme.qml reads it, so the row cannot show a
+# scale Hyprland is not on and cannot quietly read "not reported" on a box that answers.
+assert_monitor_scale_row() {
+    local live shown
+    live=$(hyprctl monitors -j | jq -r 'map(select(.focused)) | .[0].scale // empty')
+    [[ -n "$live" ]] || fail "settings: hyprctl reports no focused monitor, so the row has no contract"
+    shown=$(awk -v s="$live" 'BEGIN { printf "%g", s + 0 }')
+    [[ "$(ipc settingsRows)" == *"fact|Scale|${shown}x"* ]] \
+        || fail "settings: the Scale row does not show the compositor's ${shown}x, got $(ipc settingsRows)"
+}
+
+# The Menus section, whose consumer is ui/js/Menu.js: every assertion here is made against the real
+# context menu, never against the stored set alone.
+settings_menus() {
+    key , >/dev/null
+    settle
+    settings_section menus
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|6 of 6"* ]] \
+        || fail "settings: the master row does not start at six of six, got $(ipc settingsRows)"
+    shot settings-menus
+
+    # Down three from the master is Paste, and Space is the board's own toggle key.
+    key j >/dev/null; key j >/dev/null; key j >/dev/null
+    settle
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
+        || fail "settings: switching one action off did not read as five of six"
+    key -k Escape >/dev/null
+    settle
+    settings_menu_lacks "Paste"
+    [[ "|$(ipc contextMenuEntries)|" == *"|Cut|Copy|Duplicate|"* ]] \
+        || fail "settings: hiding Paste moved the rows around it, got $(ipc contextMenuEntries)"
+    key -k Escape >/dev/null
+    settle
+
+    # The master itself: a partial one enables all six, and a checked one switches all six off.
+    key , >/dev/null
+    settle
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|6 of 6"* ]] \
+        || fail "settings: activating the partial master did not switch all six on"
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|0 of 6"* ]] \
+        || fail "settings: activating the checked master did not switch all six off"
+    key -k Escape >/dev/null
+    settle
+    local label
+    for label in Cut Copy Paste Duplicate Rename "Move to Trash"; do
+        settings_menu_lacks "$label"
+        key -k Escape >/dev/null
+        settle
+    done
+    click_row 0 right
+    settle
+    [[ "|$(ipc contextMenuEntries)|" == *"|Open|"* ]] || fail "settings: the locked Open row went with them"
+    [[ "|$(ipc contextMenuEntries)|" == *"|Show hidden files|"* ]] \
+        || fail "settings: the locked hidden toggle went with them"
+    key -k Escape >/dev/null
+    settle
+
+    # Back to all six, then off with Paste alone, which is the state the restart check reads back.
+    key , >/dev/null
+    settle
+    key -k Space >/dev/null
+    settle
+    key j >/dev/null; key j >/dev/null; key j >/dev/null
+    key -k Space >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"master|All basic file actions|5 of 6"* ]] \
+        || fail "settings: the panel did not end the Menus block with Paste alone switched off"
+    key -k Escape >/dev/null
+    settle
+}
+
+# The rail walk to a named section, with the panel already open, from wherever it was last left. The
+# section outlives a close, so a block that needs one says so rather than inheriting it: leaving the
+# panel on Menus after the restart check sent the whole refusal block's h presses to a menu row.
+# ui/SettingsPanel.qml clamps the rail rather than wrapping it, so two k presses reach the top row
+# from any of the three and j walks down from there.
+settings_section() {
+    local want="$1" down step
+    case "$want" in
+        keys) down=0 ;;
+        display) down=1 ;;
+        menus) down=2 ;;
+        *) fail "settings: $want is not a rail section" ;;
+    esac
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc settingsSide)" == "rail" ]] || fail "settings: Tab did not give the cursor to the rail"
+    key k >/dev/null
+    key k >/dev/null
+    settle
+    [[ "$(ipc settingsSection)" == "keys" ]] \
+        || fail "settings: two k presses did not reach the top of the rail, it is on $(ipc settingsSection)"
+    for (( step = 0; step < down; step++ )); do
+        key j >/dev/null
+        settle
+    done
+    [[ "$(ipc settingsSection)" == "$want" ]] \
+        || fail "settings: the rail did not reach $want, it is on $(ipc settingsSection)"
+    key -k Tab >/dev/null
+    settle
+}
+
+# Opens the row menu and refuses a label that should not be in it, delimiters included so Copy path
+# cannot answer for Copy.
+settings_menu_lacks() {
+    local label="$1"
+    click_row 0 right
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "settings: the row menu did not open"
+    [[ "|$(ipc contextMenuEntries)|" != *"|$label|"* ]] \
+        || fail "settings: $label is still in the menu, got $(ipc contextMenuEntries)"
+}
+
+# The Mac/Windows toggle, proved by the keys themselves: a chord one preset binds and the other
+# does not, driven through the real window in both states.
+settings_keys() {
+    key , >/dev/null
+    settle
+    settings_section keys
+    [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Mac"* ]] \
+        || fail "settings: the preset row does not start on Mac, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"fact|connect to server|ctrl-k"* ]] \
+        || fail "settings: the Mac preset lists none of its own chords"
+    shot settings-keys
+    key l >/dev/null
+    settle
+    [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Windows"* ]] \
+        || fail "settings: l did not step the preset to Windows"
+    [[ "$(ipc settingsRows)" == *"fact|hidden files|ctrl-h"* ]] \
+        || fail "settings: the Windows preset lists none of its own chords"
+    key -k Escape >/dev/null
+    settle
+
+    # The preset rebinds in this process at once, which is the whole point of a toggle over one map.
+    [[ "$(ipc showHidden)" == "false" ]] || fail "settings: the fixture did not start with hidden files off"
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+    [[ "$(ipc showHidden)" == "true" ]] || fail "settings: Ctrl+H is not bound under the Windows preset"
+    key -M ctrl -k h -m ctrl >/dev/null
+    settle
+    [[ "$(ipc showHidden)" == "false" ]] || fail "settings: Ctrl+H did not toggle back"
+    # And Finder's own chord goes quiet, which is what makes this a preset and not an addition.
+    [[ "$(ipc viewMode)" == "list" ]] || fail "settings: the fixture did not start in the list view"
+    key -M ctrl -k 2 -m ctrl >/dev/null
+    settle
+    [[ "$(ipc viewMode)" == "list" ]] \
+        || fail "settings: Ctrl+2 still switched the view under the Windows preset"
+    key -M ctrl -M shift -k 2 -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc viewMode)" == "columns" ]] \
+        || fail "settings: Explorer's own Ctrl+Shift+2 did not reach the columns view"
+    key -M ctrl -M shift -k 1 -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc viewMode)" == "list" ]] || fail "settings: Ctrl+Shift+1 did not go back to the list view"
+}
+
 cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings)
 
 : > "$run_log"
 : > "$flea_log"

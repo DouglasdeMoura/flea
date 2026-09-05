@@ -379,6 +379,29 @@ and every refusal, a patch that is not JSON, a key or value this Flea does not t
 could not write, or more than one argument, prints one `flea: ` sentence on stderr, prints nothing
 on stdout at all, and exits 2. Pinned in `tests/uistate.sh`, both streams for each of the four.
 
+**A patch names what that window changed, and nothing else.** `ui/ViewState.qml` holds a second
+document beside the one it draws from, `unsaved`, built by the same two rebuilds and starting empty;
+`patch()` is that document. It used to render a snapshot of all four keys the window owns, and the
+lock cannot save that: the merge in `src/uistate.rs` protects a key the caller leaves OUT, and a
+snapshot names every key explicitly, so a window that changed only the text size wrote its startup
+read of `keys` back over a change another window made after that read. The lock was working
+correctly and the data was still lost. Running the rebuild over both documents is what keeps them
+honest in the other direction too: `changeLeaf` merges a leaf into the group the window DRAWS, so a
+sub-key a newer Flea left in `display` or `menu` stays on screen, and owes the leaf alone, because
+this Flea has no rule for that sub-key and `check()` refuses a whole patch that names one. The owed
+document is a union rather than the newest change alone, so a change made while a writer runs
+coalesces with whatever is queued behind it; a refused write keeps it owed so the next patch carries
+it again. **A write that LANDS takes its own settings back out, leaf by leaf, the moment it exits**,
+and never when the queue happens to drain: waiting for the drain left a setting that was already in
+the file still owed, so it rode along inside the patch queued behind it and overwrote whatever
+another window or the CLI had put there in the meantime, which is the same lost update one step
+later in time. The queued writer is therefore launched with what is owed when it starts rather than
+with the bytes that were waiting, and a setting whose value changed again while the writer that
+carried the old one ran is NOT taken out, because the file does not have the new one. A setter that
+lands the value already held owes nothing at all. `tests/uiwriter.sh` drives two windows over one
+state file both ways round and holds a queued writer at the door while the CLI writes under it, and
+`tests/js/uistate.js` pins the patch bytes.
+
 **The window's read is the settled file, and not a raw one.** `main()` calls `Store::settle` before
 it hands off to `qs`: an empty patch through the same lock and the same per-key validation, so
 whenever that settle succeeded on a document it could read, a value a hand edit left in a key this
@@ -479,7 +502,9 @@ key exists because issue 27 asked for the wrap, and it ships off because a secon
 that same jump past the top as a bug.
 
 **`menu.hidden` stores what is hidden**, and its rule is deliberately open, an action id rather than
-a closed list, because a closed list would make this Flea drop an id a newer one hid.
+a closed list, because a closed list would make this Flea drop an id a newer one hid. It is the
+Menus section's whole state: the panel's master row over the six basic actions is derived from the
+set every time it is drawn, so there is no second value for a hand edit to leave it disagreeing with.
 
 **`display.textSize.mode` is `"system"` or one Omarchy stop**, one of 9, 10, 11, 12, 14, 16 and 20.
 It is one key and not two, so there is nowhere for a free number to be stored.
@@ -653,9 +678,12 @@ huge pages" below for what it is worth and what it cost.
 - `ui/Backend.qml` is the only QML component that talks to the Rust child, and carries
   `thumb` and `thumbcancel` out and `thumbed` in alongside `list`, `window` and `sort`.
 - `ui/ViewState.qml` reads `ui.json` once at startup with a blocking `FileView` and writes nothing
-  itself: every change goes back out through `flea --ui-state`, see "The state file".
-- `ui/js/UiState.js` is `ViewState`'s writer bookkeeping and nothing else: what the state file is
-  known to hold, what the running writer carries and what waits behind it. It imports no QML, so
+  itself: every change, the header menu's columns and all three settings sections alike, goes back
+  out through `flea --ui-state` as a patch naming that change alone, see "The state file".
+- `ui/js/UiState.js` is `ViewState`'s writer bookkeeping and the two pure rebuilds every writer goes
+  through: the newest patch a writer landed, what the running writer carries and what waits behind
+  it, and the key and group rebuilds `ViewState` runs over both the state it draws and the patch it
+  owes. It imports no QML, so
   `tests/js/uistate.js` can redden on a mutation of the rule that only a zero exit proves a save.
 - `ui/Theme.qml` owns the singleton palette, type and spacing tokens from the Omarchy
   theme plus the user override.
@@ -688,6 +716,25 @@ huge pages" below for what it is worth and what it cost.
   snapshot carries a cursor and a selection only across a switch that re-lists nothing, because an
   index names a row and a re-read can put a different file behind the same number.
 - `ui/js/Trash.js` is the dd pair's arm-and-fire policy, split out of `Focus.js` at its cap.
+- `ui/js/TextSize.js` is the Display section's text size: the seven stops the SettingsScale board
+  documents, 9, 10, 11, 12, 14, 16 and 20 px, the two modes it names, and the sentence a chord
+  announces. `ui/ViewState.qml` stores `display.textSize` as `{"mode":"system"}` or `{"mode":N}`,
+  which is `src/uischema.rs`'s own rule for that key and the only stored shape, and owns
+  the writers, `ui/Theme.qml` derives its whole token ladder from the size in force, and `keys.toml`
+  aliases `textSizeUp`, `textSizeDown` and `textSizeReset` onto the same three writers, so no
+  surface reads the chord itself and a chord and a row cannot hold two different sizes. The monitor
+  scale is the compositor's: `ui/Theme.qml` reads it once from `hyprctl monitors -j` and the panel
+  shows it read-only, because the board rules that Flea does not step or cycle it.
+- `ui/js/Settings.js` is the settings panel's whole model: the three sections, the context-menu
+  action inventory and its groups, the tri-state master over the six basic actions, which
+  `masterState` derives from `menu.hidden` rather than storing beside it, and the row list
+  each section draws. Pure, so `tests/js/settings.js` drives every control without a window.
+  `ui/SettingsPanel.qml` paints what `rows()` returns and owns the panel's two-sided keyboard,
+  `ui/SettingsRail.qml` the section rail and `ui/SettingsRow.qml` one row of the pane.
+- `ui/js/Menu.js` `applyHidden` is the only consumer of the stored hidden set, and it runs at the
+  end of `listingEntries`, so a switched-off action leaves every menu that carried it at once.
+  `open` and `toggleHidden` are refused there as well as drawn locked in the panel, so a
+  hand-edited state file cannot empty the menu.
 - `ui/js/PreviewKeys.js` is what the preview overlay does with a key, and the 5 s seek step only it
   reads, split out of `Focus.js` at its cap the second time it reached one.
 - `ui/js/RailKeys.js` is what the rail does with a key, split out of `Focus.js` at its cap the third
@@ -939,9 +986,11 @@ It is one job in two
 directions, the same shape as `json.rs`: a whole JSON document in, and the same document back out
 with its own numbers written the way they were read. **It stood at 398**, and this register said the
 next change here would split `parse` off from the `Json` type plus `render`. That is not the cut
-that was taken. `jsondoc::parse` is called from 17 sites in four other modules, two of which
-(`uistore.rs` and `uistate.rs`) are themselves over the soft budget, so that split renames 17 lines
-in four files and buys a reader nothing. The string decoder went instead, to `src/jsonstring.rs`: a
+that was taken. `jsondoc::parse` is called from 20 sites in four other modules, two of which
+(`uistore.rs` and `uistate.rs`) are themselves over the soft budget, so that split renames 20 lines
+in four files and buys a reader nothing. **That count read 17 until this round**, and it was counted
+off the shape of the source rather than off `grep -o` over `src/`, which is the fourth count on this
+branch to be wrong that way. The string decoder went instead, to `src/jsonstring.rs`: a
 different job on the same bytes, with exactly one caller in this file. `parse` against `render` is
 still the cut if this file needs another one.
 
@@ -951,11 +1000,14 @@ out, the `\u` escapes and UTF-16's surrogate pairing, which is the reading half 
 `escape` writes. It came out of `jsondoc.rs` when `parse_number` needed JSON's own number grammar
 and that file had two lines of headroom left; `parse_value` is its only caller.
 
-`src/uischema.rs` is 250 lines by `wc -l`, exactly at the soft budget and so not one the tool warns
-about, with its `#[cfg(test)]` at 128, so 127 lines of implementation and 123 of tests. It is one
-job: the shipped `ui.json` shape and the rule table beside it. Its tests are half the file because
-each one is a table read back, and the rule-edge test lives here rather than in `uistate.rs` because
-the rules it bites are declared here and that file has 36 lines of headroom left.
+`src/uischema.rs` is 237 lines by `wc -l`, inside the soft budget, with its `#[cfg(test)]` at 117,
+so 116 lines of implementation and 121 of tests. It is one job: the shipped `ui.json` shape and the
+rule table beside it. Its tests are half the file because each one is a table read back, and the
+rule-edge test lives here rather than in `uistate.rs` because the rules it bites are declared here
+and that file has 37 lines of headroom left. **It stood at 250, exactly at the soft budget**, and
+the five keys that came out are the round's own subject: `display.opacity`, `display.hyprlandIcons`
+and `display.shadows`, which are the compositor's and which Flea mirrors rather than owning a second
+writable copy of, and `language` and `updates`, which nothing in this release reads.
 
 `src/uistore.rs` is 394 lines by `wc -l`, over the soft budget and 6 under the hard cap, with its
 `#[cfg(test)]` at 192, so 191 lines of implementation and 203 of tests. Just over half the file is
@@ -964,8 +1016,8 @@ a real rename, and each of those costs a fixture on disk. The seam for the next 
 write helpers at the bottom, `make_dir`, `take_lock`, `refuse_a_link` and `write_new`, which know
 nothing about `Store` beyond the paths they are handed.
 
-`src/uistate.rs` is 364 lines by `wc -l`, over the soft budget and 36 under the hard cap, with its
-`#[cfg(test)]` at 189, so 188 lines of implementation and 176 of tests. It is one job in three
+`src/uistate.rs` is 363 lines by `wc -l`, over the soft budget and 37 under the hard cap, with its
+`#[cfg(test)]` at 188, so 187 lines of implementation and 176 of tests. It is one job in three
 shapes and all three are the same merge: a file onto the shipped defaults, one caller patch onto a
 document, and 0.1.3's `view.json` onto the defaults. They share `merge`, `fits` and the `SCHEMA`
 walk, so cutting `patched` away from `from_file` would put the validator on one side of a file
@@ -1168,6 +1220,25 @@ scoping, so an `action =` in a pointer block would put an item on that checklist
 can press. The generator refuses an empty or unreadable `[[pointer]]` table for the same
 reason `[digits]` is expanded by hand in that battery: a checklist derived from an empty table
 passes by having nothing in it.
+
+A `[[preset]]` table joined this with the settings panel's Keys section, and it is the whole of
+the Mac/Windows toggle. Each row names the preset it belongs to, the modifier state, the Qt key,
+the chord as the Keys section prints it, the action and a label. The generator emits it twice
+from that one row: as `Keymap.PRESET_KEYS`, which the settings panel lists, and as the if-chain
+inside `Keymap.lookupPreset`, which `lookup()` consults before every shared table. Emitting both
+from one row is what stops the panel advertising a chord the preset does not bind, and emitting
+the binding as a literal `Qt.Key_*` is what keeps it inside the `qml6` probe above.
+
+The live preset is a module-level `var preset` in the generated file, set by `ui/ViewState.qml`'s
+`onKeysPresetChanged`. A `.pragma library` holds one copy per QML engine, so that one assignment
+reaches every caller of `lookup()` with no second wire and no plumbing through `ui/js/Focus.js`
+or `ui/Pane.qml`, both of which sit against their file budget. An unrecognised name clamps to
+`mac`, which is what the shared tables were already written as: Finder's, with Cmd read as Ctrl.
+
+**A preset overlay must never hold a chord the `[[sheet]]` table draws.** The sheet is one static
+array with no preset of its own, so a cap it draws for a Mac-only chord would be wrong for half
+its readers the moment the toggle moved. `tests/js/keymap.js` resolves the whole sheet under both
+presets and fails if any row answers differently.
 
 The tool emits JavaScript only. Plan 6 adds the Rust output together with the terminal key
 type that consumes it; a generated module with no caller is dead code, so the second output

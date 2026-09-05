@@ -30,6 +30,8 @@ Item {
     signal editClosed()
     signal completeRequested(string dir, bool hidden)
     signal said(string text)
+    // The settings panel's pointer door, beside the comma key; see ui/shell.qml for the third.
+    signal settingsRequested()
 
     // The path bar: the same strip, typed instead of drawn. ":" and Ctrl+L open it, so does a double
     // click on the path, and it is where the whole of keys.toml's pathBar action lands.
@@ -382,6 +384,21 @@ Item {
                 active: root.viewMode === modelData
                 onActivated: root.viewChosen(modelData)
             }
+        }
+
+        // The Settings board draws the sliders button at the right end, past a rule that separates
+        // it from the three view buttons: it changes the window, not the way the listing is drawn.
+        // Row lays its own children out, so the rule takes the strip's height rather than anchoring.
+        Rectangle {
+            width: Theme.spacing.hairline
+            height: Theme.chromeHeight
+            color: Theme.color.muted
+            opacity: 0.4
+        }
+
+        Flea.ChromeButton {
+            glyph: "sliders"
+            onActivated: root.settingsRequested()
         }
     }
 

@@ -17,6 +17,9 @@ ProtocolChip 1.0 ProtocolChip.qml
 DialogField 1.0 DialogField.qml
 ContextMenu 1.0 ContextMenu.qml
 KeymapSheet 1.0 KeymapSheet.qml
+SettingsPanel 1.0 SettingsPanel.qml
+SettingsRail 1.0 SettingsRail.qml
+SettingsRow 1.0 SettingsRow.qml
 MediaStrip 1.0 MediaStrip.qml
 MenuRow 1.0 MenuRow.qml
 RenameField 1.0 RenameField.qml

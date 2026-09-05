@@ -76,17 +76,32 @@ function runMenu(check) {
     })
     check("the listing menu opens with the row's own Open", full[0].label, "Open")
     check("Copy path sits beside Open", findEntry(full, "copypath").label, "Copy path")
+    // SettingsMenus.html's six basic rows, in its own order. Cut, Copy and Paste were keyboard-only
+    // until the Menus section grew a switch for each, and a switch over a row no menu draws is a mock.
+    check("the six basic rows are drawn in the board's order",
+          labels(full).indexOf("Cut|Copy|Paste|Duplicate|Rename") >= 0, true)
+    check("each of the three new rows carries its own cut mark",
+          findEntry(full, "cut").glyph + "|" + findEntry(full, "copy").glyph + "|"
+          + findEntry(full, "paste").glyph, "scissors|copy|clipboard")
     // Top level, not behind a submenu: it is the menu's most used row and tests/ui.sh pins it there.
     check("the hidden toggle is a top-level row",
           findEntry(full, "toggleHidden").label, "Show hidden files")
     check("and its label flips with the state",
           Menu.hiddenRow(false).label + "|" + Menu.hiddenRow(true).label,
           "Show hidden files|Hide hidden files")
-    check("an empty listing still offers New folder and the hidden toggle",
+    // The board's background menu is not reachable in this product: hasRow has no writer anywhere in
+    // ui/, and the listing's only right-click route is a row delegate's own TapHandler, so this
+    // branch is what a background menu WOULD hold. The settings panel therefore takes the two doors
+    // that do exist, the comma key and the toolbar's sliders button, and no row here.
+    check("an empty listing offers New folder and the hidden toggle",
           labels(Menu.listingEntries({ showHidden: false, hasRow: false, rowInDropbox: false,
                                        dropboxPath: "", taildropPeers: [], archiveFormats: [],
                                        rowIsArchive: false, rowIsImage: false, canConvert: false })),
           "New folder|Show hidden files")
+    check("and no menu offers a Settings row, because no menu can reach one",
+          findEntry(full, "settings").label, undefined)
+
+    runHidden(check, full)
 
     // ui/Header.qml's own rows, on a right click over the column titles. Four toggles, flipping
     // labels, each answering "col:<key>"; Name is absent because it never hides.
@@ -119,4 +134,47 @@ function runMenu(check) {
     check("and with no delegate under the cursor it opens nothing and answers false",
           Menu.openAtCursor(withoutRow, { openAt: function (point) { placed.push(point) } }, 8)
               + "|" + placed.length, "false|1")
+}
+
+// The Menus section's consumer. menu.hidden stores what is HIDDEN, so a row named there leaves the
+// menu; the rules it divided leave with it, and neither of the two locked rows can be taken out.
+function runHidden(check, full) {
+    function menu(hiddenActions) {
+        return labels(Menu.listingEntries({
+            showHidden: false, hasRow: true, rowInDropbox: false,
+            dropboxPath: "/home/jw/Dropbox", taildropPeers: [{ id: "x", label: "Box" }],
+            archiveFormats: ["zip"], rowIsArchive: false, rowIsImage: false, canConvert: true,
+            hiddenActions: hiddenActions
+        }))
+    }
+    check("no hidden set at all draws the whole menu", menu([]), labels(full))
+    check("an undefined set is the same as an empty one", menu(undefined), labels(full))
+    check("one hidden action loses its row and nothing else",
+          menu(["paste"]),
+          "Open|Copy path|-|Cut|Copy|Duplicate|Rename|-|Compress|-|Send with Taildrop|"
+          + "Move to Dropbox|-|Move to Trash|-|New folder|Show hidden files")
+    // A group that loses every member loses its separator too, which is the board's own rule and
+    // the reason the answer below has three rules and not six.
+    check("a group emptied by the settings takes its rule with it",
+          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath"]),
+          "Open|-|Compress|-|Send with Taildrop|Move to Dropbox|-|New folder|Show hidden files")
+    check("hiding everything hideable still leaves the two locked rows and New folder",
+          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath",
+                "compress", "taildrop", "dropbox", "open", "toggleHidden"]),
+          "Open|-|New folder|Show hidden files")
+    check("Open and the hidden toggle are refused by the filter itself, not only by the panel",
+          Menu.isHidden(["open", "toggleHidden"], "open") + "|"
+          + Menu.isHidden(["open", "toggleHidden"], "toggleHidden"), "false|false")
+    // applyHidden is called on a built list, so it is checked on one too: a leading rule would be
+    // drawn against the top of the frame, and a trailing one against nothing at all.
+    check("a leading rule left by a hidden first row is dropped",
+          Menu.applyHidden([{ action: "a", label: "A" }, { separator: true },
+                            { action: "b", label: "B" }], ["a"]).length, 1)
+    check("a trailing rule is dropped as well",
+          Menu.applyHidden([{ action: "a", label: "A" }, { separator: true },
+                            { action: "b", label: "B" }], ["b"]).length, 1)
+    check("two rules never end up beside each other",
+          Menu.applyHidden([{ action: "a", label: "A" }, { separator: true },
+                            { action: "b", label: "B" }, { separator: true },
+                            { action: "c", label: "C" }], ["b"]).length, 3)
 }

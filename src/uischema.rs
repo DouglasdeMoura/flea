@@ -20,20 +20,14 @@ pub const DEFAULTS: &str = r#"{
     "driveSize": true, "sidebarWidth": 192
   },
   "preview": {
-    "column": true, "loadOn": "click",
+    "column": true, "loadOn": "automatic",
     "thumbnails": "media", "thumbSize": "medium",
     "ctrlZoom": true
   },
-  "keys": "default",
-  "display": {
-    "textSize": { "mode": "system" },
-    "hyprlandIcons": false, "opacity": 1.0,
-    "shadows": true
-  },
-  "menu": { "basic": true, "hidden": ["delete", "openwith", "terminal",
-            "moveto", "copyto", "properties", "permissions", "copypath"] },
-  "language": "en",
-  "updates": { "check": true, "channel": "stable" }
+  "keys": "mac",
+  "display": { "textSize": { "mode": "system" } },
+  "menu": { "hidden": ["delete", "openwith", "terminal",
+            "moveto", "copyto", "properties", "permissions", "copypath"] }
 }"#;
 
 // The list row's optional columns in the order ui/js/Columns.js lays them out; name is never optional.
@@ -57,7 +51,6 @@ pub enum Rule {
     // menu.hidden is deliberately open: a closed list would make this Flea drop an id a newer one hid.
     Ids,
     Count(f64, f64),
-    Fraction,
     TextSize,
     Group(&'static [(&'static str, Rule)]),
 }
@@ -80,7 +73,7 @@ pub const PLACES: &[(&str, Rule)] = &[
 
 pub const PREVIEW: &[(&str, Rule)] = &[
     ("column", Rule::Bool),
-    ("loadOn", Rule::Word(&["click", "space"])),
+    ("loadOn", Rule::Word(&["automatic", "manual"])),
     ("thumbnails", Rule::Word(&["off", "images", "media"])),
     ("thumbSize", Rule::Word(&["small", "medium", "large", "xlarge"])),
     ("ctrlZoom", Rule::Bool),
@@ -89,16 +82,13 @@ pub const PREVIEW: &[(&str, Rule)] = &[
 // mode is "system" or one stop, so there is nowhere to put a free number; see the handoff's Display row.
 pub const TEXT_SIZE: &[(&str, Rule)] = &[("mode", Rule::TextSize)];
 
-pub const DISPLAY: &[(&str, Rule)] = &[
-    ("textSize", Rule::Group(TEXT_SIZE)),
-    ("hyprlandIcons", Rule::Bool),
-    ("opacity", Rule::Fraction),
-    ("shadows", Rule::Bool),
-];
+// textSize alone. Window opacity, icon theme and shadows are the compositor's, and Flea mirrors it
+// rather than carrying a second writable copy of a setting Hyprland already owns.
+pub const DISPLAY: &[(&str, Rule)] = &[("textSize", Rule::Group(TEXT_SIZE))];
 
-pub const MENU: &[(&str, Rule)] = &[("basic", Rule::Bool), ("hidden", Rule::Ids)];
-
-pub const UPDATES: &[(&str, Rule)] = &[("check", Rule::Bool), ("channel", Rule::Word(&["stable"]))];
+// hidden is the whole of the Menus section's state: the master row SettingsMenus draws over the six
+// basic actions derives from it by masterState in ui/js/Settings.js, and cannot disagree with it.
+pub const MENU: &[(&str, Rule)] = &[("hidden", Rule::Ids)];
 
 pub const SCHEMA: &[(&str, Rule)] = &[
     ("view", Rule::Word(&["list", "columns", "grid", "dual"])),
@@ -113,12 +103,11 @@ pub const SCHEMA: &[(&str, Rule)] = &[
     ("wrapAtEnds", Rule::Bool),
     ("places", Rule::Group(PLACES)),
     ("preview", Rule::Group(PREVIEW)),
-    ("keys", Rule::Word(&["default", "vim", "mac", "windows"])),
+    // ui/js/Keymap.js holds one table with a Mac and a Windows overlay, so those are the two values
+    // this Flea can honour; a preset system with no table behind it would be a setting and no feature.
+    ("keys", Rule::Word(&["mac", "windows"])),
     ("display", Rule::Group(DISPLAY)),
     ("menu", Rule::Group(MENU)),
-    // English is the only catalogue that exists, so anything else is a value this Flea cannot honour.
-    ("language", Rule::Word(&["en"])),
-    ("updates", Rule::Group(UPDATES)),
 ];
 
 pub fn defaults() -> Json {
@@ -171,14 +160,13 @@ mod tests {
             [
                 "view", "density", "columns", "addressBar", "sort", "dual", "foldersFirst",
                 "groupByKind", "hidden", "wrapAtEnds", "places", "preview", "keys", "display",
-                "menu", "language", "updates"
+                "menu"
             ]
         );
         assert_eq!(d.get("view").and_then(Json::as_str), Some("list"));
         assert_eq!(d.get("density").and_then(Json::as_str), Some("normal"));
         assert_eq!(d.get("addressBar").and_then(Json::as_str), Some("breadcrumb"));
-        assert_eq!(d.get("keys").and_then(Json::as_str), Some("default"));
-        assert_eq!(d.get("language").and_then(Json::as_str), Some("en"));
+        assert_eq!(d.get("keys").and_then(Json::as_str), Some("mac"));
         assert_eq!(d.get("foldersFirst").and_then(Json::as_bool), Some(true));
         assert_eq!(d.get("groupByKind").and_then(Json::as_bool), Some(false));
         assert_eq!(d.get("hidden").and_then(Json::as_bool), Some(false));
@@ -190,16 +178,14 @@ mod tests {
         assert_eq!(d.get("dual").and_then(|s| s.get("paths")).and_then(Json::as_array).map(<[Json]>::len), Some(0));
         assert_eq!(d.get("dual").and_then(|s| s.get("focus")).and_then(Json::as_f64), Some(0.0));
         assert_eq!(d.get("places").and_then(|p| p.get("sidebarWidth")).and_then(Json::as_f64), Some(192.0));
-        assert_eq!(d.get("preview").and_then(|p| p.get("loadOn")).and_then(Json::as_str), Some("click"));
+        assert_eq!(d.get("preview").and_then(|p| p.get("loadOn")).and_then(Json::as_str), Some("automatic"));
         assert_eq!(d.get("preview").and_then(|p| p.get("thumbnails")).and_then(Json::as_str), Some("media"));
         assert_eq!(d.get("preview").and_then(|p| p.get("thumbSize")).and_then(Json::as_str), Some("medium"));
         assert_eq!(d.get("display").and_then(|p| p.get("textSize")).and_then(|t| t.get("mode")).and_then(Json::as_str), Some("system"));
-        assert_eq!(d.get("display").and_then(|p| p.get("opacity")).and_then(Json::as_f64), Some(1.0));
-        assert_eq!(d.get("display").and_then(|p| p.get("hyprlandIcons")).and_then(Json::as_bool), Some(false));
-        assert_eq!(d.get("display").and_then(|p| p.get("shadows")).and_then(Json::as_bool), Some(true));
-        assert_eq!(d.get("menu").and_then(|m| m.get("basic")).and_then(Json::as_bool), Some(true));
-        assert_eq!(d.get("updates").and_then(|u| u.get("check")).and_then(Json::as_bool), Some(true));
-        assert_eq!(d.get("updates").and_then(|u| u.get("channel")).and_then(Json::as_str), Some("stable"));
+        let display: Vec<&str> = d.get("display").and_then(Json::as_object).expect("display").iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(display, ["textSize"], "the compositor owns opacity, icons and shadows");
+        let menu: Vec<&str> = d.get("menu").and_then(Json::as_object).expect("menu").iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(menu, ["hidden"], "the master row is derived from menu.hidden, not stored beside it");
     }
 
     // menu.hidden stores what is hidden, so an action added later is visible without a migration.
@@ -220,22 +206,25 @@ mod tests {
         );
     }
 
-    // The rules nothing else reached: an exact stop, a fraction of one and never zero, a non-empty path.
+    // The rules nothing else reached: an exact stop, a non-empty path, and the two shipped presets.
     #[test]
-    fn the_stop_the_opacity_and_the_favourites_rules_each_bite_at_their_own_edge() {
+    fn the_stop_the_preset_and_the_favourites_rules_each_bite_at_their_own_edge() {
         let current = crate::uistate::from_file("{}");
         let takes = |patch: &str| crate::uistate::patched(&current, &jsondoc::parse(patch).expect("patch parses"));
         for good in [r#"{"display":{"textSize":{"mode":"system"}}}"#, r#"{"display":{"textSize":{"mode":9}}}"#,
-                     r#"{"display":{"opacity":1.0}}"#, r#"{"display":{"opacity":0.5}}"#,
+                     r#"{"keys":"mac"}"#, r#"{"keys":"windows"}"#,
                      r#"{"places":{"favourites":[]}}"#] {
             assert!(takes(good).is_ok(), "{} is a value its key takes", good);
         }
         for (bad, named) in [(r#"{"display":{"textSize":{"mode":13}}}"#, "display.textSize.mode"),
                              (r#"{"display":{"textSize":{"mode":14.5}}}"#, "display.textSize.mode"),
                              (r#"{"display":{"textSize":{"mode":"14"}}}"#, "display.textSize.mode"),
-                             (r#"{"display":{"opacity":0}}"#, "display.opacity"),
-                             (r#"{"display":{"opacity":1.5}}"#, "display.opacity"),
-                             (r#"{"display":{"opacity":"half"}}"#, "display.opacity"),
+                             (r#"{"display":{"textSize":{"mode":"override"}}}"#, "display.textSize.mode"),
+                             (r#"{"display":{"opacity":1.0}}"#, "display.opacity"),
+                             (r#"{"display":{"shadows":true}}"#, "display.shadows"),
+                             (r#"{"menu":{"basic":false}}"#, "menu.basic"),
+                             (r#"{"keys":"vim"}"#, "keys"),
+                             (r#"{"language":"en"}"#, "language"),
                              (r#"{"places":{"favourites":[""]}}"#, "places.favourites"),
                              (r#"{"places":{"favourites":"/a"}}"#, "places.favourites")] {
             let message = takes(bad).expect_err("the patch must be refused");

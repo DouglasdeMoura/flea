@@ -1,15 +1,58 @@
 .pragma library
 
 // Generated from keys.toml by tools/flea-keymap-gen. Do not edit.
+// The selected Mac/Windows preset. A .pragma library holds one copy per QML engine, so
+// ui/ViewState.qml sets it once and every caller of lookup() below follows without a
+// second wire; an unknown name falls back to mac rather than leaving the map empty.
+var preset = "mac"
+function setPreset(name) { preset = name === "windows" ? "windows" : "mac" }
+
+// The [[preset]] rows of keys.toml, for ui/SettingsPanel.qml's Keys section. code is the Qt
+// name the overlay below matches on, so a row here and the binding are the same keys.toml row.
+var PRESET_KEYS = [
+    { preset: "mac", ctrl: true, shift: false, code: "Key_1", keys: "ctrl-1", action: "viewList", label: "list view" },
+    { preset: "mac", ctrl: true, shift: false, code: "Key_2", keys: "ctrl-2", action: "viewColumns", label: "columns view" },
+    { preset: "mac", ctrl: true, shift: false, code: "Key_3", keys: "ctrl-3", action: "viewGrid", label: "grid view" },
+    { preset: "mac", ctrl: true, shift: false, code: "Key_Up", keys: "ctrl-up", action: "parent", label: "up one level" },
+    { preset: "mac", ctrl: true, shift: false, code: "Key_Down", keys: "ctrl-down", action: "open", label: "open" },
+    { preset: "mac", ctrl: true, shift: false, code: "Key_Delete", keys: "ctrl-delete", action: "trash", label: "move to trash" },
+    { preset: "mac", ctrl: true, shift: false, code: "Key_K", keys: "ctrl-k", action: "addNetwork", label: "connect to server" },
+    { preset: "windows", ctrl: true, shift: false, code: "Key_H", keys: "ctrl-h", action: "toggleHidden", label: "hidden files" },
+    { preset: "windows", ctrl: true, shift: true, code: "Key_1", keys: "ctrl-shift-1", action: "viewList", label: "list view" },
+    { preset: "windows", ctrl: true, shift: true, code: "Key_2", keys: "ctrl-shift-2", action: "viewColumns", label: "columns view" },
+    { preset: "windows", ctrl: true, shift: true, code: "Key_3", keys: "ctrl-shift-3", action: "viewGrid", label: "grid view" },
+]
+
+// Checked before every shared table, so a preset can claim a chord the shared tables bind.
+function lookupPreset(name, key, text, modifiers) {
+    var ctrl = (modifiers & Qt.ControlModifier) !== 0
+    var shift = (modifiers & Qt.ShiftModifier) !== 0
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_1) return "viewList"
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_2) return "viewColumns"
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_3) return "viewGrid"
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_Up) return "parent"
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_Down) return "open"
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_Delete) return "trash"
+    if (name === "mac" && ctrl && !shift && key === Qt.Key_K) return "addNetwork"
+    if (name === "windows" && ctrl && !shift && key === Qt.Key_H) return "toggleHidden"
+    if (name === "windows" && ctrl && shift && key === Qt.Key_1) return "viewList"
+    if (name === "windows" && ctrl && shift && key === Qt.Key_2) return "viewColumns"
+    if (name === "windows" && ctrl && shift && key === Qt.Key_3) return "viewGrid"
+    return ""
+}
+
 function lookup(key, text, modifiers) {
+    var chosen = lookupPreset(preset, key, text, modifiers)
+    if (chosen.length > 0)
+        return chosen
     if (modifiers & Qt.ControlModifier) {
         if (modifiers & Qt.ShiftModifier) {
             if (key === Qt.Key_N) return "newFolder"
-            if (key === Qt.Key_Plus) return "scaleUp"
-            if (key === Qt.Key_Equal) return "scaleUp"
-            if (key === Qt.Key_Minus) return "scaleDown"
-            if (key === Qt.Key_Underscore) return "scaleDown"
-            if (key === Qt.Key_0) return "scaleReset"
+            if (key === Qt.Key_Plus) return "textSizeUp"
+            if (key === Qt.Key_Equal) return "textSizeUp"
+            if (key === Qt.Key_Minus) return "textSizeDown"
+            if (key === Qt.Key_Underscore) return "textSizeDown"
+            if (key === Qt.Key_0) return "textSizeReset"
             if (key === Qt.Key_Greater) return "toggleHidden"
             if (key === Qt.Key_Period) return "toggleHidden"
         }
@@ -22,15 +65,9 @@ function lookup(key, text, modifiers) {
         if (key === Qt.Key_Z) return "undo"
         if (key === Qt.Key_F) return "search"
         if (key === Qt.Key_E) return "eject"
-        if (key === Qt.Key_K) return "addNetwork"
         if (key === Qt.Key_L) return "pathBar"
         if (key === Qt.Key_T) return "openTerminal"
-        if (key === Qt.Key_Delete) return "trash"
-        if (key === Qt.Key_Up) return "parent"
-        if (key === Qt.Key_Down) return "open"
-        if (key === Qt.Key_1) return "viewList"
-        if (key === Qt.Key_2) return "viewColumns"
-        if (key === Qt.Key_3) return "viewGrid"
+        if (key === Qt.Key_Comma) return "settings"
         return ""
     }
 
@@ -84,6 +121,7 @@ function lookup(key, text, modifiers) {
     case ".": return "toggleHidden"
     case "a": return "addNetwork"
     case "m": return "menu"
+    case ",": return "settings"
     case "?": return "keymapSheet"
     case "-": return "zoomOut"
     case "+": return "zoomIn"
@@ -123,8 +161,9 @@ var SHEET = [
     { keys: "m", action: "menu", label: "context menu" },
     { keys: "^e", action: "eject", label: "eject" },
     { keys: "^t", action: "openTerminal", label: "open terminal" },
-    { keys: "^+", action: "scaleUp", label: "scale up" },
-    { keys: "^-", action: "scaleDown", label: "scale down" },
+    { keys: "^+", action: "textSizeUp", label: "text size up" },
+    { keys: "^-", action: "textSizeDown", label: "text size down" },
+    { keys: ",", action: "settings", label: "settings" },
     { keys: "?", action: "keymapSheet", label: "this sheet" },
 ]
 

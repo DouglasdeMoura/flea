@@ -26,11 +26,12 @@ import "places.js" as PlacesSuite
 import "protocols.js" as ProtocolsSuite
 import "railkeys.js" as RailKeysSuite
 import "renderer.js" as RendererSuite
-import "scale.js" as ScaleSuite
 import "search.js" as SearchSuite
 import "selection.js" as SelectionSuite
+import "settings.js" as SettingsSuite
 import "sort.js" as SortSuite
 import "taildrop.js" as TaildropSuite
+import "textsize.js" as TextSizeSuite
 import "trash.js" as TrashSuite
 import "tap.js" as TapSuite
 import "tabs.js" as TabsSuite
@@ -63,8 +64,10 @@ Item {
             ["palette", PaletteSuite], ["pathbar", PathBarSuite], ["places", PlacesSuite],
             ["protocols", ProtocolsSuite], ["railkeys", RailKeysSuite],
             ["renderer", RendererSuite],
-            ["scale", ScaleSuite], ["search", SearchSuite],
             ["selection", SelectionSuite], ["sort", SortSuite], ["taildrop", TaildropSuite],
+            ["protocols", ProtocolsSuite], ["search", SearchSuite],
+            ["selection", SelectionSuite], ["settings", SettingsSuite],
+            ["sort", SortSuite], ["taildrop", TaildropSuite], ["textsize", TextSizeSuite],
             ["trash", TrashSuite], ["tap", TapSuite], ["tabs", TabsSuite],
             ["thumbs", ThumbsSuite], ["uistate", UiStateSuite]
         ]

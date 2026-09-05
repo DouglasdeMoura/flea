@@ -73,6 +73,31 @@ pointer() {
   done < "$src"
 }
 
+# Sample input: a [[preset]] block is 'name = "mac"', then 'mods = "ctrl"', then 'key = "1"', then
+# 'keys = "ctrl-1"', then 'action = "viewList"', then 'label = "list view"', printed tab separated in
+# that order. label is printed last, so it must be written last in the block, the same rule the three
+# above put on their own final field.
+preset() {
+  local inblock=0 name_="" mods="" key="" keys="" action="" name eq value
+  while read -r name eq value || [ -n "$name" ]; do
+    case "$name" in
+      "[[preset]]") inblock=1; name_=""; mods=""; key=""; keys=""; action=""; continue ;;
+      '['*)         inblock=0; continue ;;
+    esac
+    [ "$inblock" = 1 ] || continue
+    value=${value#\"}
+    value=${value%\"}
+    case "$name" in
+      name)   name_=$value ;;
+      mods)   mods=$value ;;
+      key)    key=$value ;;
+      keys)   keys=$value ;;
+      action) action=$value ;;
+      label)  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name_" "$mods" "$key" "$keys" "$action" "$value" ;;
+    esac
+  done < "$src"
+}
+
 # Sample input: [digits] holds 'from = 1', 'to = 9' and 'prefix = "tab"'; those three names are unique in the file.
 digit() {
   grep "^$1 = " "$src" | cut -d= -f2 | tr -d ' "'
@@ -82,6 +107,11 @@ digit() {
 # passes by having nothing in it, which is exactly what the [digits] blind spot cost this project.
 if [ -z "$(pointer)" ]; then
   echo "flea-keymap-gen: the [[pointer]] table in $src is missing or unreadable" >&2
+  exit 1
+fi
+
+if [ -z "$(preset)" ]; then
+  echo "flea-keymap-gen: the [[preset]] table in $src is missing or unreadable" >&2
   exit 1
 fi
 
@@ -97,7 +127,36 @@ fi
   echo ".pragma library"
   echo
   echo "// Generated from keys.toml by tools/flea-keymap-gen. Do not edit."
+  echo "// The selected Mac/Windows preset. A .pragma library holds one copy per QML engine, so"
+  echo "// ui/ViewState.qml sets it once and every caller of lookup() below follows without a"
+  echo "// second wire; an unknown name falls back to mac rather than leaving the map empty."
+  echo "var preset = \"mac\""
+  echo "function setPreset(name) { preset = name === \"windows\" ? \"windows\" : \"mac\" }"
+  echo
+  echo "// The [[preset]] rows of keys.toml, for ui/SettingsPanel.qml's Keys section. code is the Qt"
+  echo "// name the overlay below matches on, so a row here and the binding are the same keys.toml row."
+  echo "var PRESET_KEYS = ["
+  preset | while IFS=$'\t' read -r n m k caps a l; do
+    if [ "$m" = ctrlshift ]; then shift_state=true; else shift_state=false; fi
+    echo "    { preset: \"$n\", ctrl: true, shift: $shift_state, code: \"Key_$k\", keys: \"$caps\", action: \"$a\", label: \"$l\" },"
+  done
+  echo "]"
+  echo
+  echo "// Checked before every shared table, so a preset can claim a chord the shared tables bind."
+  echo "function lookupPreset(name, key, text, modifiers) {"
+  echo "    var ctrl = (modifiers & Qt.ControlModifier) !== 0"
+  echo "    var shift = (modifiers & Qt.ShiftModifier) !== 0"
+  preset | while IFS=$'\t' read -r n m k caps a l; do
+    if [ "$m" = ctrlshift ]; then shift_state=shift; else shift_state="!shift"; fi
+    echo "    if (name === \"$n\" && ctrl && $shift_state && key === Qt.Key_$k) return \"$a\""
+  done
+  echo "    return \"\""
+  echo "}"
+  echo
   echo "function lookup(key, text, modifiers) {"
+  echo "    var chosen = lookupPreset(preset, key, text, modifiers)"
+  echo "    if (chosen.length > 0)"
+  echo "        return chosen"
   echo "    if (modifiers & Qt.ControlModifier) {"
   # A shifted chord is checked before the plain ctrl rows and falls through when unmatched, so a
   # ctrl-shift chord nobody bound still reaches the ctrl row for its key.

@@ -7,6 +7,7 @@ import qs.Commons
 import "js/Columns.js" as Columns
 import "js/Contrast.js" as Contrast
 import "js/Palette.js" as Palette
+import "js/TextSize.js" as TextSize
 
 // Flea is its own process, so it plays the role shell.qml plays for the bar: it feeds Color and Style.
 Singleton {
@@ -16,6 +17,17 @@ Singleton {
 
     // True only once colors.toml parsed to a palette, so a test can tell one from a fallback.
     property bool ready: false
+
+    // The size Flea draws at: Omarchy's own unless the Display section pinned an override stop.
+    readonly property int baseSize: TextSize.effective(ViewState.textSize, Style.font.baseSize)
+    readonly property bool overridden: !TextSize.following(ViewState.textSize)
+    // One while following, so every OEM token below is Omarchy's own until an override moves it,
+    // and then moves by the ratio between the pinned stop and Omarchy's size.
+    readonly property real sizeRatio: Style.font.baseSize > 0 ? root.baseSize / Style.font.baseSize : 1
+
+    // The compositor's own monitor scale, which the Display section shows and never steps; 0 until
+    // hyprctl has answered, and the panel says so rather than claiming a number it does not have.
+    property real monitorScale: 0
 
     // A property and not a Motion.js var: a plain library var notifies nothing, so every Behavior
     // reading it would keep whatever it was built with when the compositor's answer arrives.
@@ -44,15 +56,17 @@ Singleton {
 
     readonly property QtObject font: QtObject {
         readonly property string family: Style.font.family
-        readonly property int bodySmall: Math.round(Style.font.bodySmall * ViewState.uiScale)
-        readonly property int caption: Math.round(Style.font.caption * ViewState.uiScale)
+        // Following takes Omarchy's resolved token, so a theme's own font override still wins. An
+        // override runs Style's own fontPx ratios at the pinned stop, which is the same ladder.
+        readonly property int bodySmall: root.overridden ? TextSize.bodySmall(root.baseSize) : Style.font.bodySmall
+        readonly property int caption: root.overridden ? TextSize.caption(root.baseSize) : Style.font.caption
     }
 
     readonly property QtObject spacing: QtObject {
         readonly property int hairline: Style.spacing.hairline
-        readonly property int rowPaddingX: Math.round(Style.spacing.rowPaddingX * ViewState.uiScale)
-        readonly property int rowPaddingY: Math.round(Style.spacing.controlPaddingY * ViewState.uiScale)
-        readonly property int gap: Math.round(Style.spacing.rowGap * ViewState.uiScale)
+        readonly property int rowPaddingX: Math.round(Style.spacing.rowPaddingX * root.sizeRatio)
+        readonly property int rowPaddingY: Math.round(Style.spacing.controlPaddingY * root.sizeRatio)
+        readonly property int gap: Math.round(Style.spacing.rowGap * root.sizeRatio)
     }
 
     // One glyph's advance in a monospace face is every glyph's advance, so this sizes every fixed column.
@@ -87,13 +101,13 @@ Singleton {
     readonly property int heroMarkSize: Math.round(root.font.bodySmall * 3.7)
     // A chrome strip's mark is the OEM's own icon token, the one Ui/Button.qml and the Tailscale and
     // Dropbox bar icons size from: 16 at base-size 14, which is the canvas's chrome mark on every board.
-    readonly property int chromeMarkSize: Math.round(Style.font.icon * ViewState.uiScale)
+    readonly property int chromeMarkSize: Math.round(Style.font.icon * root.sizeRatio)
     // Lucide ships stroke 2 on its 24 unit grid; 1.5 is the operator's tune (Tabler ships 2 as well, see the A/B report).
     readonly property real strokeWidth: 1.5
     // WCAG 2.5.8 floor. Marks stay at their type-scale size; the hit box grows to this.
     readonly property int hitMin: 24
     // Wide enough for "Send with Taildrop" at bodySmall, 257 at base-size 14; ui/ContextMenu.qml draws it.
-    readonly property int menuWidth: Math.round(Style.space(220) * ViewState.uiScale)
+    readonly property int menuWidth: Math.round(Style.space(220) * root.sizeRatio)
 
     // Leading a row gives its text, above and below, before the padding is added.
     readonly property real lineBoxRatio: 1.8
@@ -157,9 +171,9 @@ Singleton {
         return Columns.names(root.columns(width, hidden));
     }
 
-    // Five callers: ConvertDialog, KeymapSheet, NetworkDialog, NetworkForm, TransferCard; every other spacing token above is direct.
+    // Six callers: ConvertDialog, KeymapSheet, NetworkDialog, NetworkForm, SettingsPanel, TransferCard; every other spacing token above is direct.
     function space(px) {
-        return Math.round(Style.space(px) * ViewState.uiScale);
+        return Math.round(Style.space(px) * root.sizeRatio);
     }
 
     // The metrics contract as the app resolves it, one key=value per line in the Blueprint board's
@@ -168,7 +182,7 @@ Singleton {
     function tokens() {
         var t = {
             family: Style.font.resolvedFamily,
-            baseSize: Style.font.baseSize,
+            baseSize: root.baseSize,
             bodySmall: root.font.bodySmall,
             caption: root.font.caption,
             lineBoxRatio: root.lineBoxRatio,
@@ -222,6 +236,19 @@ Singleton {
         root.ready = Palette.isPalette(found);
     }
 
+    // Sample input: [{"id":0,"name":"DP-1","width":2560,"height":1440,"scale":1.00,"focused":true}]
+    function applyMonitorScale(body) {
+        try {
+            var monitors = JSON.parse(body);
+            for (var i = 0; i < monitors.length; i++) {
+                if (monitors[i].focused === true)
+                    root.monitorScale = monitors[i].scale;
+            }
+        } catch (e) {
+            // hyprctl unreachable, or a shape this build does not know: the row keeps saying so.
+        }
+    }
+
     // Sample input: {"option": "animations:enabled", "bool": false, "set": true }
     function applyReducedMotion(body) {
         root.reducedMotion = String(body).indexOf('"bool": false') >= 0;
@@ -267,6 +294,19 @@ Singleton {
             shellFile.reload();
             // The OEM shell's applyTheme runs this beside the two reloads above, and without it a theme that moves decoration:rounding leaves every corner here on the old value.
             Style.scheduleRefresh();
+        }
+    }
+
+    // Read once, not watched: the Display section reports the compositor's scale and Flea owns no
+    // control that could change it, so there is nothing here for a poll to keep in step with.
+    Process {
+        running: true
+        command: ["hyprctl", "monitors", "-j"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            // text is a property on this type and not a function, which every other collector in
+            // this tree already reads that way; calling it throws and the row stays unanswered.
+            onStreamFinished: root.applyMonitorScale(text)
         }
     }
 

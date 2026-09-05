@@ -326,9 +326,45 @@ the name is one typed word away.
   one window, and only one listing is ever live.
 - **Columns you choose.** Right click the column titles to hide Mode, Size, Date Modified or
   Kind; the choice outlives the window, and the pane's width still wins over a column it cannot
-  carry. `Ctrl+Shift+Plus` and `Minus` scale the whole interface, `Ctrl+Shift+0` puts it back.
+  carry. `Ctrl+Shift+Plus` and `Minus` walk Flea's text size along Omarchy's own stops,
+  `Ctrl+Shift+0` goes back to following the desktop, and the settings panel's Display section is
+  the same one setting.
+- **A settings panel** on `,` and on the toolbar's sliders button, with three working groups: a text
+  size that follows Omarchy or pins one of its stops; per-action context-menu visibility with one
+  tri-state master over the six basic actions; and a Mac/Windows keyboard preset over that one key
+  table. Nothing else is in it yet.
 - **It looks like Omarchy** because it reads the live palette, the same tokens the shell
   bar uses, and every mark is drawn in the Omarchy cut, which is its own section below.
+
+## Settings
+
+`,` from anywhere in the window, or the sliders button at the right end of the toolbar. Three
+sections, and only three, because a rail row onto a page with no working control is worse than no
+row:
+
+- **Display.** Text size follows Omarchy by default, and that is the whole of it until you switch
+  the row to Override, which pins one of Omarchy's own seven stops: 9, 10, 11, 12, 14, 16 or 20 px.
+  `Ctrl+Shift+Plus` and `Ctrl+Shift+Minus` walk the same stops and `Ctrl+Shift+0` goes back to
+  following, so the chord and the row are one setting and not two. Body text, captions, padding,
+  row height, icon slots and marks all derive from the size in force. The monitor scale and the
+  corner rounding are read-only beside it: Flea shows the compositor's values and never steps one.
+- **Menus.** Every action the context menu can build, switched on or off one at a time, with a
+  tri-state master over Cut, Copy, Paste, Duplicate, Rename and Move to Trash that reads the
+  enabled count, "5 of 6". Open and Show hidden files are listed but locked: a menu that cannot
+  open the row under the cursor is not a menu. A row that leaves takes its separator with it, and
+  the change lands on the menu's next open. Hiding a row never touches its key.
+- **Keys.** Mac or Windows, over the one `keys.toml` table. Everything the two platforms agree on
+  is shared and answers under both; the preset carries only the chords where they differ, and it
+  rebinds in the window at once. Press `?` for the whole map.
+
+The choices live in `~/.local/state/flea/ui.json`, the one file Flea keeps for itself, beside the
+column set and everything else that outlives a window. The text size is stored as `{"mode":"system"}`
+while it follows Omarchy and `{"mode":16}` once it does not, which is a stop and never a free number.
+Every change goes through `flea --ui-state`, which takes a lock, checks the value and merges it, so a
+setting written here never overwrites one written somewhere else, and a change it could not save is
+reported in the status bar rather than lost quietly. A value this build does not recognise falls back
+on its own without disturbing the rest of the file, and deleting the file puts every section back on
+its default.
 
 ## The Omarchy cut
 
@@ -445,9 +481,9 @@ and the application cannot disagree.
 | `j`, `k`, Down, Up | Move the cursor one row |
 | `g`, `G` | First or last row |
 | Ctrl-d, Ctrl-u | Half a viewport |
-| `h`, Backspace, Ctrl-Up | Parent directory |
+| `h`, Backspace, Ctrl-Up | Parent directory; Ctrl-Up under the Mac preset |
 | `l` | Browse forward: enter a directory, preview a file, page a PDF, or activate a rail/share row; unused in media |
-| Return, Enter, Ctrl-Down | Open a directory, or open a file with the desktop's handler |
+| Return, Enter, Ctrl-Down | Open a directory, or open a file with the desktop's handler; Ctrl-Down under the Mac preset |
 | Space | Quick Look, and close it |
 | Left, Right | Page a PDF, or seek in media |
 | `v` | Toggle selection on the row |
@@ -457,15 +493,20 @@ and the application cannot disagree.
 | `f`, Ctrl-f | Search the subtree from home; Tab on the query line points the walk at the folder the pane is in instead, and the strip names the scope it will use |
 | `o` | Reveal the result in its own directory |
 | `y`, `x`, `p`, Ctrl-c, Ctrl-x, Ctrl-v | Copy, cut, paste; the chords are what Omarchy's Super-c, Super-x and Super-v deliver |
-| `dd`, Delete, Ctrl-Delete | Trash. Two presses on the letter, one on the key |
+| `dd`, Delete, Ctrl-Delete | Trash. Two presses on the letter, one on the key; Ctrl-Delete under the Mac preset |
 | `r`, F2 | Rename |
 | `z`, Ctrl-z | Undo the last operation |
 | Ctrl-Shift-n | New folder |
-| `a`, Ctrl-k | Add a network mount; `a` from the rail, Ctrl-k from either view |
+| `a`, Ctrl-k | Add a network mount; `a` from the rail, Ctrl-k from either view under the Mac preset |
 | Ctrl-e | Eject the rail's device, or the removable volume the listing is inside |
 | Ctrl-t | Open the configured terminal in the directory being shown; the topbar's terminal button is the same action |
 | Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid |
 | Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Interface scale up, down, back to the desktop's own |
+| Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid, under the Mac preset |
+| Ctrl-Shift-1, Ctrl-Shift-2, Ctrl-Shift-3 | The same three, under the Windows preset |
+| Ctrl-h | Show hidden files, under the Windows preset |
+| Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Text size up a stop, down a stop, back to following Omarchy |
+| `,`, Ctrl-, | Open the settings panel, from either view |
 | `m` | Open the context menu on the cursor row; in the rail, eject or unmount |
 | `s`, `S` | Step the sort column, reverse the sort |
 | `.`, Ctrl-Shift-. | Show hidden files |
