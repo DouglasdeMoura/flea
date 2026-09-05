@@ -376,9 +376,10 @@ and exits 2; `flea --open` with no path and `flea --open a b` are both that case
 predates this branch for `--prewarm` and this branch extended it to `--open` and `--terminal`. `--open` takes exactly one path and exits with the whole of its contract: `0` is a
 successful handoff, `2` is anything that could not be opened and carries one elided
 sentence, and `3` means the resolved target is a directory and carries no output at all. A
-directory is refused rather than handed on because `xdg-mime query default inode/directory`
-here is `org.gnome.Nautilus.desktop`, so handing one to the desktop's opener from inside a file
-manager opens a different file manager; the caller navigates instead. See "Opening a file".
+directory is refused rather than handed on because the desktop default for `inode/directory` is a
+file manager either way, `org.gnome.Nautilus.desktop` on an unclaimed box and
+`com.thisisgm.flea.desktop` once `--default` has claimed it, so handing one on opens a file manager
+from inside a file manager; the caller navigates instead. See "Opening a file".
 
 `--terminal` takes exactly one directory and has a two-value contract: `0` is a successful handoff
 to `xdg-terminal-exec`, and `2` is everything else, carrying one elided sentence on stderr. A path
@@ -2747,7 +2748,7 @@ mechanism under it. The simpler call is the right one.
 nothing foreign.** Today the only descendants are the backend and the `bwrap` thumbnailer children,
 both measured to pay nothing for it: `ffmpegthumbnailer` on a fixture clip ran 88 to 94 ms with huge
 pages on against 89 to 92 ms off over five interleaved pairs, output byte-identical. A foreign program
-CAN now be launched from the window, because Enter on a file runs `flea --open`, and the undo the
+CAN now be launched from the window, because Enter on most files runs `flea --open`, and the undo the
 corner asked for ships with it: `open::open` calls `thp::enable()`, which is
 `prctl(PR_SET_THP_DISABLE, 0, ...)`, in the `flea --open` process before it spawns `gio open`, so the
 opened program inherits huge pages back on. That call lives in `src/open.rs`, after the
@@ -2818,8 +2819,9 @@ all: a path that does not resolve gets `that file could not be opened, check tha
 `gio open` that exits nonzero gets `gio open refused that file, so no application on this system took
 it`, and a `gio` that could not be run at all gets `nothing on this system could be asked to open that
 file`, so the set tells a refused open from an unimplemented one and neither one blames the path. A directory is refused rather than handed on because
-`xdg-mime query default inode/directory` is `org.gnome.Nautilus.desktop` here, so opening one through
-the opener from inside a file manager opens a different file manager; the caller navigates instead.
+the desktop default for `inode/directory` is a file manager either way, `org.gnome.Nautilus.desktop`
+on an unclaimed box and `com.thisisgm.flea.desktop` once `--default` has claimed it, so opening one
+through the opener from inside a file manager opens a file manager; the caller navigates instead.
 `flea --open` with no path and `flea --open a b` both fall through to the unknown-flag branch, which
 names the flag and exits 2.
 
@@ -2847,9 +2849,43 @@ after the wait cleared produced the second call, so the drop is the guard and no
 Saying something in the status bar is what the tree now does. Bounding the wait was declined because
 a deadline above the measured range is a guess and one below it cuts off a legitimate cold start, and
 queueing was declined because it fires an open after the operator gave up and answers a double Enter
-on one archive with two windows. `Pane.openCursor` sends a row with `d` true to `open()` and every
-other row to the opener, so a symlink to a directory reaches the opener, comes back 3 and
-navigates; `tests/ui.sh open` asserts all three answers on one listing.
+on one archive with two windows. **Enter no longer reaches that wait on an archive at all**, which
+is the ruling below; the numbers stand as the cost of any `DBusActivatable` default and as what the
+guard exists for. `Pane.openCursor` sends a row with `d` true to `open()`, an archive to the preview
+and every other row to the opener, so a symlink to a directory reaches the opener, comes back 3 and
+navigates; `tests/ui.sh open` asserts all four answers on one listing.
+
+**Enter on an archive opens Flea's own view and launches nothing, which is the operator's ruling of
+2026-09-05.** `ui/js/Nav.js` `openCursor` carries one branch beside the directory branch: a row whose
+`Kinds.quickLookKind(row.i, path)` is `archive` goes to `pane.preview.open(path, row.i, row.s)`, the
+same call `ui/js/PreviewKeys.js` already makes for Space and `l`, so the three keys cannot disagree
+and the routing test is the same function `ui/Preview.qml` runs on the same two arguments a moment
+later. It is a route and not a mechanism: `ui/PreviewArchive.qml`, `ui/js/Archive.js` and
+`src/backend/archivelist.rs` already drew that frame and the wire already carried its index. The
+classifier is the icon rather than an extension table because the icon is what the frame itself
+reads; measured here, all eight extensions in `ui/js/Archive.js` resolve through
+`/usr/share/mime/globs2` to a type whose `/usr/share/mime/generic-icons` row is `package-x-generic`,
+and so do `.deb`, `.rpm`, `.jar`, `.cab`, `.gz` and `.xz`.
+
+**That one icon covers the whole Nautilus class on this box, derived rather than assumed.**
+`org.gnome.Nautilus.desktop` lists 26 `MimeType` entries; 25 resolve to it as the default and the
+26th is `inode/directory`, which `flea --default` has claimed. Of those 25, 20 carry
+`package-x-generic` in `generic-icons`, and the other five have no glob at all in `globs2`, so
+`src/backend/mime.rs`, which classifies by glob and by nothing else, cannot produce them for any
+filename. 89 `generic-icons` rows carry `package-x-generic`: 20 default to Nautilus, 69 have no
+default handler at all, and none defaults to anything else, so the branch takes over exactly the rows
+that used to open another file manager, plus rows `gio open` used to refuse.
+
+**The other half of that ruling was measured and then declined, and the expectation did not hold.**
+The candidate was resolving the handler in Flea and running `gio launch <desktop-file> <path>` in
+place of `gio open <path>`, on the theory that the default-handler machinery was pulling something
+extra in. Measured under `flock /tmp/flea-display.lock` on one real `text/plain` file, two
+repetitions of each arm plus a third pass with the whole session bus captured: both launchers
+produced the same process tree (`kitty -- nvim <path>` reparented to pid 1, with `nvim` and
+`nvim --embed` beneath it), both exited `0` in 8 to 10 ms, both made exactly one
+`org.freedesktop.DBus.StartServiceByName` call and both named `org.gtk.vfs.Daemon` in it, and neither
+produced a single line of bus traffic or one journal entry naming Nautilus. **They are the same on a
+text file, so `gio open` stays** and no desktop-entry parsing enters `src/open.rs`.
 
 **Issue 41: `xdg-open` does not honour `Terminal=true`, which is why the handoff is `gio open`.**
 `xdg-mime query default text/plain` is `nvim.desktop` here, whose `Exec` is `nvim %F` and whose

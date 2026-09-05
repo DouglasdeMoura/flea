@@ -413,7 +413,7 @@ terminal. `--default` opens no window: it sets the `inode/directory` handler and
 two file-manager keys, and `off` undoes both, see
 [`docs/install.md`](docs/install.md). `--backend`, `--prewarm`, `--open` and `--terminal` are the
 internal modes the UI and the benchmarks drive directly; `flea --open <path>` is what Enter
-on a file runs, and it hands the file to `gio open` and waits for it, while
+on a file other than an archive runs, and it hands the file to `gio open` and waits for it, while
 `flea --terminal <dir>` is what the topbar's terminal button and `Ctrl+T` run, and it hands the
 directory to `xdg-terminal-exec --dir=`. See `AGENTS.md` for their contract.
 
@@ -446,7 +446,7 @@ and the application cannot disagree.
 | Ctrl-d, Ctrl-u | Half a viewport |
 | `h`, Backspace, Ctrl-Up | Parent directory |
 | `l` | Browse forward: enter a directory, preview a file, page a PDF, or activate a rail/share row; unused in media |
-| Return, Enter, Ctrl-Down | Open a directory, or open a file with the desktop's handler |
+| Return, Enter, Ctrl-Down | Open a directory, open an archive in Flea's own view, or open any other file with the desktop's handler |
 | Space | Quick Look, and close it |
 | Left, Right | Page a PDF, or seek in media |
 | `v` | Toggle selection on the row |
