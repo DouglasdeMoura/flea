@@ -69,7 +69,7 @@ Item {
         id: glyphMark
         Glyph {
             name: root.modelData.glyph
-            color: root.cursor ? Theme.color.foreground : Theme.color.muted
+            color: Theme.color.foreground
         }
     }
 
@@ -78,7 +78,7 @@ Item {
         id: dropboxMark
         DropboxMark {
             iconSize: Theme.railIconSize
-            color: root.cursor ? Theme.color.foreground : Theme.color.muted
+            color: Theme.color.foreground
         }
     }
 
@@ -90,7 +90,7 @@ Item {
         anchors.rightMargin: Style.spacing.rowGap
         anchors.verticalCenter: parent.verticalCenter
         text: root.modelData.label
-        color: root.cursor ? Theme.color.foreground : Theme.color.muted
+        color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.bodySmall
         elide: Text.ElideRight
@@ -128,7 +128,8 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: Style.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
-        width: Theme.font.caption
+        // A row with no badge gives the slot back to its label, which is how the canvas fits "minipc . nvme0n1".
+        width: root.showsDot ? Theme.font.caption : 0
         height: Theme.font.caption
 
         // Green once gio mount -l lists it, muted at half strength while it is only a bookmark waiting
