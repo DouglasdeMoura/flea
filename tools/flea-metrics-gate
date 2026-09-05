@@ -97,7 +97,10 @@ menuWidth|257|space(220)
 cornerRadius|$rounding|hyprctl getoption decoration:rounding, read live above
 previewFraction|0.82|Flea constant, Quick-Look sized inset
 gridIconSize|46|2 x 23
-gridMinCellWidth|175|space(150)"
+gridMinCellWidth|146|space(125), GridView.dc.html's five-column reference viewport over five tiles
+settingsPanelWidth|560|space(480), the Settings board's border-box panel
+settingsRailWidth|150|560 - 408 - 2 outer hairlines
+settingsPaneWidth|408|space(350), the pane inside those hairlines"
 
 checked=0
 drift=0

@@ -144,8 +144,19 @@ Singleton {
     // slot is 46 at base-size 14, and the token wins over the mock, see the icon-language spec.
     readonly property QtObject grid: QtObject {
         readonly property int iconSize: root.iconSize * 2
-        // Wide enough for a name of ordinary length under the mark; the view fits as many as this allows.
-        readonly property int minCellWidth: root.space(150)
+        // GridView.dc.html's own five-column reference viewport: 880 body less 2x40 board padding,
+        // 2x1 window hairline, 2x18 grid padding and 4x8 gap, over five tiles, is 146 at base-size 14.
+        readonly property int minCellWidth: root.space(125)
+    }
+
+    // The Settings board's anatomy, resolved at base-size 14: a border-box panel 560 wide whose two
+    // outer hairlines leave 558 inside, split into a 150 rail and a 408 pane. 480 and 350 are those
+    // two at the OEM's own 12 anchor, so the pair scales once and the rail is what is left over.
+    readonly property QtObject settings: QtObject {
+        readonly property int panelWidth: root.space(480)
+        readonly property int paneWidth: root.space(350)
+        readonly property int railWidth: root.settings.panelWidth - root.settings.paneWidth
+                                         - 2 * root.spacing.hairline
     }
 
     readonly property QtObject preview: QtObject {
@@ -176,7 +187,7 @@ Singleton {
         return Columns.names(root.columns(width, hidden, dateWidth));
     }
 
-    // Six callers: ConvertDialog, KeymapSheet, NetworkDialog, NetworkForm, SettingsPanel, TransferCard; every other spacing token above is direct.
+    // Five callers plus the grid and settings tokens above: ConvertDialog, KeymapSheet, NetworkDialog, NetworkForm, TransferCard; every other spacing token is direct.
     function space(px) {
         return Math.round(Style.space(px) * root.sizeRatio);
     }
@@ -214,7 +225,10 @@ Singleton {
             cornerRadius: Style.cornerRadius,
             previewFraction: root.preview.fraction,
             gridIconSize: root.grid.iconSize,
-            gridMinCellWidth: root.grid.minCellWidth
+            gridMinCellWidth: root.grid.minCellWidth,
+            settingsPanelWidth: root.settings.panelWidth,
+            settingsRailWidth: root.settings.railWidth,
+            settingsPaneWidth: root.settings.paneWidth
         };
         var lines = [];
         for (var key in t)
