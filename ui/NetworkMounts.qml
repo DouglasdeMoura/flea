@@ -280,8 +280,8 @@ Item {
         }
     }
 
-    // The helper is the only credentialed leg, and "timeout" bounds it rather than mountTimeout: it
-    // owns a password on its stdin and has to be reaped by the same process that handed it over.
+    // The credentialed leg: "timeout" bounds it rather than mountTimeout, so a hung helper answers
+    // 124 and Errors.connectFailure names it, and the C locale above reaches the gio the helper runs.
     Process {
         id: authProcess
         environment: root.gioEnvironment
