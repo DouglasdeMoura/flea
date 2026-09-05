@@ -393,7 +393,8 @@ huge pages" below for what it is worth and what it cost.
   an exclusive temp plus rename, see "Predictable path writes".
 - `error.rs` the one error type, naming the failing operation and input.
 - `json.rs` the whole of this tree's JSON: read one named field out of a line, escape one string into one.
-- `backend/mod.rs` declares the forty-six backend modules plus the test-only `testdir.rs`, nothing else.
+- `backend/mod.rs` is module declarations and nothing else, the `#[cfg(test)]` ones included. It
+  declares more modules than the list below names, which is the load-bearing ones and not a census.
 - `backend/listing.rs` the arena-backed `Listing`.
 - `backend/aliases.rs` resolves a MIME alias to its canonical name, see "MIME aliases".
 - `backend/scan.rs` phase 1: readdir plus `file_type()`.

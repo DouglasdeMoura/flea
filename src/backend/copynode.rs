@@ -1,17 +1,23 @@
 // Recreating a node at the destination, which is how a copy carries a fifo, a socket or a device
-// across without opening one.
+// across without an open that could block on one.
 use crate::error::{from_io, FleaError};
 use std::ffi::{c_char, CString};
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-// std has no wrapper for the call that makes a node, so the syscall is declared here as ops.rs declares renameat2.
+// std has no wrapper for either call, so they are declared here as ops.rs declares renameat2.
 extern "C" {
     fn mknod(path: *const c_char, mode: u32, dev: u64) -> i32;
+    fn fchmodat(dirfd: i32, path: *const c_char, mode: u32, flags: i32) -> i32;
 }
 
-// A node is recreated and never opened: a fifo's open waits for a writer, a socket's answers ENXIO,
+// Unlike the O_ flags copyfile.rs and regfile.rs pin per architecture, these two come from the
+// architecture-independent uapi header and are the same value on every Linux flea is built for.
+const AT_FDCWD: i32 = -100;
+const AT_SYMLINK_NOFOLLOW: i32 = 0x100;
+
+// A node is recreated rather than read: a fifo's open waits for a writer, a socket's answers ENXIO,
 // and a device would stream until the destination filesystem was full.
 pub fn copy_node(src: &Metadata, dst: &Path) -> Result<(), FleaError> {
     let c_dst = match CString::new(dst.as_os_str().as_encoded_bytes()) {
@@ -25,10 +31,15 @@ pub fn copy_node(src: &Metadata, dst: &Path) -> Result<(), FleaError> {
             })
         }
     };
-    // The source's own st_mode carries the kind and the permission bits, so a copy is never wider
-    // than what it copied, and mknod refuses a taken name with EEXIST as create_new does elsewhere.
+    // The source's own st_mode carries the kind mknod needs, and mknod refuses a taken name with
+    // EEXIST as create_new does elsewhere; its mode argument is masked by the process umask, so a
+    // 0666 fifo would land 0644 under the usual 022 and the mode is set again below.
     // corner: a device node needs CAP_MKNOD, so an unprivileged copy of one reports EPERM and streams nothing.
     if unsafe { mknod(c_dst.as_ptr(), src.mode(), src.rdev()) } != 0 {
+        return Err(from_io("copy", &dst.to_string_lossy(), &std::io::Error::last_os_error()));
+    }
+    // AT_SYMLINK_NOFOLLOW: mknod cannot land on a symlink, but the name could be one by the time this runs.
+    if unsafe { fchmodat(AT_FDCWD, c_dst.as_ptr(), src.mode() & 0o7777, AT_SYMLINK_NOFOLLOW) } != 0 {
         return Err(from_io("copy", &dst.to_string_lossy(), &std::io::Error::last_os_error()));
     }
     Ok(())
@@ -144,16 +155,22 @@ mod tests {
         );
     }
 
+    // corner: the 0666 half needs a non-zero umask to redden, and every shell on this box reports 022.
     #[test]
-    fn a_node_is_recreated_no_wider_than_its_source() {
+    fn a_node_is_recreated_at_the_mode_its_source_had() {
         let d = TestDir::new("copyfifomode");
-        let src = d.join("pipe");
-        mkfifo(&src);
-        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o600)).expect("a private fifo");
-        let dst = d.join("copied");
-        copied(src, dst.clone()).expect("copy");
-        let mode = dst.symlink_metadata().expect("the copy").permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "a constant 0666 widens a private fifo that cp -a and rsync -a preserve");
+        // 0600 catches a constant wider than the source, 0666 catches mknod masking with the umask.
+        for mode in [0o600u32, 0o666u32] {
+            let src = d.join(&format!("pipe-{:o}", mode));
+            mkfifo(&src);
+            std::fs::set_permissions(&src, std::fs::Permissions::from_mode(mode)).expect("the source mode");
+            let dst = d.join(&format!("copied-{:o}", mode));
+            copied(src.clone(), dst.clone()).expect("copy");
+            // Read back off the source rather than reused from the loop, so the two sides are measured alike.
+            let want = src.symlink_metadata().expect("the source").permissions().mode() & 0o7777;
+            let got = dst.symlink_metadata().expect("the copy").permissions().mode() & 0o7777;
+            assert_eq!(got, want, "cp -a and rsync -a recreate a node at the mode its source had");
+        }
     }
 
     // copy_any routes every kind it can name away from copy_file, so a fifo arriving there was

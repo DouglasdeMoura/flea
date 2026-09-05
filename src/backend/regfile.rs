@@ -12,7 +12,7 @@ const O_NONBLOCK: i32 = 0o4000;
 compile_error!("O_NONBLOCK needs a verified value for this architecture");
 
 pub fn open_regular(path: &Path) -> Option<File> {
-    // Refused before any open, so a fifo's blocked writer is never woken by a reader that will not read.
+    // Refused before any open, so the only fifo whose blocked writer this wakes is one swapped in after this stat.
     if !std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false) {
         return None;
     }
