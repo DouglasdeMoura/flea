@@ -117,6 +117,8 @@ Item {
     // What the editor holds right now, for tests through ui/Ipc.qml's railRenameEditorText.
     readonly property string editorText: renameField.current
     readonly property bool editorShown: renameField.visible
+    // The rail's real trailing indicator slot, so ui/Ipc.qml measures this dot instead of recomputing it.
+    readonly property Item indicatorSlot: dot
 
     // Every right-aligned mark in the rail is centred in a caption-wide slot, so this dot and the
     // NETWORK header's "+" share one centre line whatever their ink does: align by slot, never by ink.

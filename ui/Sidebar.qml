@@ -288,7 +288,6 @@ Item {
 
             // Self-hides with its list below when gio, the bookmarks file and Dropbox all have nothing to say.
             Item {
-                id: netHeadingRow
                 visible: root.networkEntries.length > 0
                 width: rail.width
                 height: netHeading.implicitHeight + Style.spacing.rowGap
@@ -304,30 +303,29 @@ Item {
                 }
 
                 // A hand-drawn plus, not a Text "+": at caption size the font glyph read as a Christian cross, not a plus. Sized off the heading's own font token.
-                Item {
-                    id: addMark
-                    width: Math.max(Theme.hitMin, Theme.font.caption)
-                    height: Math.max(Theme.hitMin, Theme.font.caption)
+                Glyph {
+                    id: addGlyph
+                    // The rail's trailing indicator slot: caption wide, inset by rowPaddingX, anchored exactly as ui/SidebarRow.qml's dot is.
                     anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.rowPaddingX
                     anchors.verticalCenter: netHeading.verticalCenter
+                    name: "plus"
+                    color: Theme.color.muted
+                    width: Theme.font.caption
+                    height: width
+                }
 
+                // Bigger than the ink it covers, so it centres on the ink's own box, in real pixels: a centre anchor quantises an odd size difference and leaves the two centres half a pixel apart.
+                Item {
+                    id: addMark
+                    width: Math.max(Theme.hitMin, Theme.font.caption)
+                    height: width
+                    x: addGlyph.x + (addGlyph.width - width) / 2
+                    y: addGlyph.y + (addGlyph.height - height) / 2
                     Accessible.role: Accessible.Button
                     Accessible.name: "Add network location"
                     Accessible.onPressAction: root.addRequested()
-                    Glyph {
-                        id: addGlyph
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        name: "plus"
-                        color: Theme.color.muted
-                        width: Theme.font.caption
-                        height: Theme.font.caption
-                    }
-
-                    TapHandler {
-                        onTapped: root.addRequested()
-                    }
+                    TapHandler { onTapped: root.addRequested() }
                 }
             }
 
@@ -378,7 +376,8 @@ Item {
         }
     }
 
-    function networkMarkItems() { return [addGlyph, netHeadingRow] }
+    // The "+" ink, its hit target and the rail's own indicator dot: the three boxes that share one centre.
+    function networkMarkItems() { var netRow = netRepeater.itemAt(0); return [addGlyph, addMark, netRow ? netRow.indicatorSlot : null] }
     // The rail has no ListView virtualization, so every row already exists; the same itemFor idiom ui/Pane.qml uses for the list, so a test can find a rail row's on-screen box.
     function railItemFor(index) {
         if (index < root.favoriteEntries.length)

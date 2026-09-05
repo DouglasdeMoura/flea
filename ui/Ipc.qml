@@ -260,13 +260,17 @@ QtObject {
         function networkDialogMetricTargets(): string { return root.networkDialog.formMetricTargets() }
         // Durable and non-secret, unlike the four-second status-bar transient.
         function networkResult(): string { return root.pane.sidebar.networkResult() }
+        // The "+" ink, its hit target and the rail's own indicator dot, each "x width centre" in window
+        // coordinates. Three measured rectangles, because a computed slot only restates the anchoring.
         function networkMarkGeometry(): string {
             var items = root.pane.sidebar.networkMarkItems()
-            var mark = root.fleaWindow.itemRect(items[0])
-            var heading = root.fleaWindow.itemRect(items[1])
-            var slot = heading.x + heading.width - Style.spacing.rowPaddingX - Theme.font.caption / 2
-            return ViewState.uiScale.toFixed(1) + "|" + Math.round(mark.x + mark.width / 2) + "|" + Math.round(slot)
+            if (!items[0] || !items[1] || !items[2])
+                return ""
+            return [root.fleaWindow.boxOf(items[0]), root.fleaWindow.boxOf(items[1]),
+                root.fleaWindow.boxOf(items[2])].join("|")
         }
+        // Where a click probe aims: the hit target's own middle, so the probe varies only x.
+        function networkMarkCentre(): string { return root.fleaWindow.centreOf(root.pane.sidebar.networkMarkItems()[1]) }
         // A protocol chip carries a label and no tree, so a test clicks its centre the way it does a row.
         function networkChipCentre(name: string): string { return root.fleaWindow.centreOf(root.networkDialog.formChip(name)) }
         function shareBrowserOpen(): bool { return root.shareBrowser.active }
