@@ -2591,12 +2591,13 @@ EOS
     sandbox_remove "$fixture_home"; sandbox_remove "$share1_dir"; sandbox_remove "$share2_dir"
 }
 
-# The deadline over "gio info" and the refusal that says the guard closed. ui/NetworkMounts.qml
-# "openShare" is single flight over two children, and only the mount one was bounded: a "gio info"
-# that never returns left infoProcess.running true and every later share opened in silence for the
-# life of the window. The stub hangs info on one share and answers for the other, so all three of
-# the new behaviours are driven: the busy refusal, the deadline's own sentence, and the second share
-# opening afterwards. Without the bound the first two never appear and the third waits out the stub.
+# The deadline over every leg of an open and the refusal that says the guard closed.
+# ui/NetworkMounts.qml "openShare" is single flight over three children and only the mount one was
+# bounded at first: a "gio info" that never returns left infoProcess.running true and every later
+# share opened in silence for the life of the window, and a "gio list" that never returns did the
+# same to the share browser. The stub hangs info on one share, answers for the other, and hangs list
+# on the bare root, so all four behaviours are driven: the busy refusal, the deadline's own sentence,
+# the second share opening afterwards, and the listing leg ending in that same sentence.
 case_hangshare() {
     local dir="$fixture_root/hangshare"
     sandbox_scratch "$dir"
