@@ -30,6 +30,8 @@ Item {
     // The picker's second difference: SendPicker.html's narrow date column and its compact form.
     property bool compactDate: false
     readonly property int dateWidth: root.compactDate ? Theme.column.pickerDate : Theme.column.date
+    // The picker's third: it hides the columns its own board does not draw, and the window's own set stays ViewState's.
+    property var hiddenCols: ViewState.hiddenCols
     // Non-empty while a search or filter is narrowing the listing: the run to paint, and the switch to the search column set.
     property string searchQuery: ""
     // Which of the two is narrowing. A filter keeps the ordinary columns, because its rows are this directory's own and their names are plain names, not paths.
@@ -49,7 +51,7 @@ Item {
     // The columns this row's width affords, and which of them this row is drawing. A column that
     // is not drawn takes neither its width nor its gap, so the chain collapses onto the one to its
     // right and the name takes back the whole of it.
-    readonly property var cols: Theme.columns(root.width, ViewState.hiddenCols, root.dateWidth)
+    readonly property var cols: Theme.columns(root.width, root.hiddenCols, root.dateWidth)
     readonly property bool modeShown: !root.searching && root.cols.mode
     // The search column set keeps Size and drops the other three, so only this one ignores searching.
     readonly property bool sizeShown: root.cols.size
@@ -374,7 +376,7 @@ Item {
     }
 
     // What this row is drawing right now, for the seam that reads it beside the header's.
-    function columnSet() { return Theme.columnNames(root.width, ViewState.hiddenCols, root.dateWidth) }
+    function columnSet() { return Theme.columnNames(root.width, root.hiddenCols, root.dateWidth) }
 
     // The same by-key idiom Header.cell uses, so the overflow reader can reach a specific cell.
     function cell(key) {
