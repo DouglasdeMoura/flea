@@ -298,6 +298,10 @@ lines and exactly one `transferitem`, then one `transferdone`.
 `rename(2)`; a cross-filesystem move is a copy followed by removing the source, and the source is only
 removed once the copy is complete, so a process killed mid-move leaves the source intact and a partial
 file at the destination, never the reverse. A symlink is copied as a symlink and never followed. A
+fifo or a socket is recreated at the destination with the source's own mode rather than opened,
+because neither holds contents to stream and an open of one would wait for a writer or fail. A device
+node takes the same path, but creating one needs `CAP_MKNOD`, so an unprivileged copy fails that item
+with `EPERM` instead of recreating it; either way nothing streams from a device that never ends. A
 destination that already exists is refused for that item rather than overwritten, because every write
 here creates its target exclusively. Directory recursion is invisible on this wire: the backend walks a
 tree to copy it and the client sees only the top-level item's lines, so the wire's shape does not depend
@@ -720,12 +724,20 @@ streamed and counting all of it costs no memory. `names` is capped at the first 
 entries, which is the only part that is bounded: the tile lists those and states the difference as
 its own "+ N more" line.
 
-`lfailed` is true when the file could not be opened for the line count at all, which on this box
-means permission denied or a row that vanished between the listing and the request. It is what tells
-`lines` 0 apart from an empty file, whose `lines` is also 0: zero is a real count, so unlike `mode`
-on an `error` line it cannot carry the failure itself. A row that never asked for a count sends
-`lines` 0 and `lfailed` false, the same as a row whose count really is zero, because nothing was
-attempted; the client knows which kind it asked about.
+`lfailed` is true when the row produced no count at all, which on this box
+means permission denied, a row that is not a regular file, or a row that vanished between the
+listing and the request. **Nothing but a regular file is ever read here or for `w` and `h`**: a
+`stat` refuses every other kind before any open, so a FIFO that `stat` sees is never opened at all
+and its waiting writer is left where it was, and the open behind that stat is `O_NONBLOCK` with a
+second `fstat` on the descriptor, so a row swapped for a FIFO inside that window is closed again
+instead of leaving the row waiting forever. That one open does wake a writer parked in `open(2)`, and
+closing it unread hands that writer an `EPIPE` on its next write if nothing else is reading: it is
+the cost of refusing a swap the `stat` cannot see, not a case the `stat` avoids. A FIFO, a socket, a
+device or a directory answers its `stat` facts with no dimensions and no count. It is what tells
+`lines` 0 apart from an empty file, whose `lines` is also 0: zero is a real count, so
+unlike `mode` on an `error` line it cannot carry the failure itself. A row that never asked for a
+count sends `lines` 0 and `lfailed` false, the same as a row whose count really is zero, because
+nothing was attempted; the client knows which kind it asked about.
 
 `afailed` is true when the listing was not completed, which covers a tool that could not read the
 archive and a read that outran its wall-clock budget. **A failed read sends `entries` 0, `unpacked` 0
