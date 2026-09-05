@@ -60,6 +60,7 @@ ListView {
             anchors.fill: parent
             leadingSlot: root.checkSize + Theme.spacing.gap
             compactDate: true
+            hiddenCols: Picker.HIDDEN_COLS
             row: cell.row
             cursor: cell.listingIndex === root.picker.cursorIndex
             hovered: hover.hovered

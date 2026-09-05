@@ -83,8 +83,8 @@ Singleton {
         readonly property int mode: Math.round(root.modeChars * glyphMetrics.advanceWidth)
         readonly property int size: Math.round(root.sizeChars * glyphMetrics.advanceWidth)
         readonly property int date: Math.round(root.dateChars * glyphMetrics.advanceWidth)
-        // The send picker's own, from the same advance: SendPicker.html's 80px slot, ten characters.
-        readonly property int pickerDate: Math.round(root.pickerDateChars * glyphMetrics.advanceWidth)
+        // The send picker's own, anchored the way kind below it is rather than counted in characters.
+        readonly property int pickerDate: Math.round(root.pickerDateBaseWidth * root.font.bodySmall / root.pickerDateBaseBodySmall)
         // Kind text varies too much for a character count, so its base is a pixel width scaled by the same ratio bodySmall already is.
         readonly property int kind: Math.round(root.kindBaseWidth * root.font.bodySmall / 12)
         // Not a column: the floor under the name, which the four above drop one by one to protect.
@@ -131,8 +131,9 @@ Singleton {
     readonly property int sizeChars: 9
     // "Yesterday, 23:16", the widest of Format.date's four forms.
     readonly property int dateChars: 16
-    // "21 Aug '25", the widest of Format.compactDate's three, and SendPicker.html's 80px column.
-    readonly property int pickerDateChars: 10
+    // SendPicker.html draws the chooser's date in an 80px slot, on a board whose base size is 14 and whose bodySmall is therefore 13.
+    readonly property int pickerDateBaseWidth: 80
+    readonly property int pickerDateBaseBodySmall: 13
     // 120px at the OEM's base font size of 12, the Kind column's own anchor, see column.kind above.
     readonly property int kindBaseWidth: 120
     // The name's floor, in the character unit the fixed columns are already written in. Twenty

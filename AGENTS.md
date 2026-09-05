@@ -644,7 +644,9 @@ gets the same chooser.
 - `ui/picker.qml` is the window. It instantiates the same `Backend`, draws the same `Row` behind a
   check box, reads the same `Theme` and the same `Places.favorites`, and carries none of the
   window's operations: a chooser that can rename or delete is a file manager wearing a dialog's
-  clothes.
+  clothes. `SendPicker.html` draws that row as the name, a 70 px size and an 80 px date, so
+  `ui/PickerList.qml` hands `Row` `Picker.HIDDEN_COLS` and the chooser never inherits Mode or Kind
+  from `ViewState`, whatever the header menu has switched on for the browser window.
 
 **Why the backend is Python.** It is the second non-Rust helper in this tree, after
 `tools/flea-gio-auth`. A portal backend has to own a bus name, export objects, answer calls out of
