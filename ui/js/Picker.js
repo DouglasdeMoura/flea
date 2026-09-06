@@ -12,6 +12,16 @@ var RESPONSE_CANCELLED = 1
 
 var ALL_FILES = "All files"
 
+// The rail's Recent row is a location and not a directory, so it is named by a token no listing
+// path can equal: every path this window holds is absolute, and this one does not start with "/".
+// SendPicker.html draws it first in the rail and draws this word where the path would be.
+var RECENT = "flea:recent"
+var RECENT_LABEL = "Recent"
+
+function isRecent(location) {
+    return location === RECENT
+}
+
 // SendPicker.html draws a chooser row as the name, a 70px size and an 80px date, so the two columns
 // the window's rows also carry are hidden here at every width rather than at some of them.
 var HIDDEN_COLS = ["mode", "kind"]
@@ -218,6 +228,13 @@ function paths(marks) {
 
 function join(dir, name) {
     return dir === "/" ? "/" + name : dir + "/" + name
+}
+
+// A row's own identity, which is what a mark holds and what the caller is answered with. A Recent
+// listing's base is "/" and its rows are named by their path under it, so the row's path is that
+// name and never a join onto the location token; see docs/protocol.md "listpaths".
+function rowPath(location, name) {
+    return isRecent(location) ? "/" + name : join(location, name)
 }
 
 function parentOf(path) {

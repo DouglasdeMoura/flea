@@ -196,8 +196,9 @@ Item {
 
             Framed {
                 glyph: "arrow-up"
-                name: "Parent folder"
-                available: Picker.parentOf(root.picker.path) !== root.picker.path
+                name: root.picker.recent ? "Parent folder unavailable in Recent" : "Parent folder"
+                // The board's own rule, drawn as its disabled Up: a history has no directory above it.
+                available: !root.picker.recent && Picker.parentOf(root.picker.path) !== root.picker.path
                 onPressed: root.upRequested()
             }
         }
@@ -208,7 +209,9 @@ Item {
             anchors.right: types.left
             anchors.rightMargin: Theme.spacing.gap
             anchors.verticalCenter: parent.verticalCenter
-            text: Format.tilde(root.picker.path, root.picker.home)
+            // Recent is a location and not a path, so the strip says the location's own name; a
+            // tilde form of the token would be a path the window is not standing in.
+            text: root.picker.recent ? Picker.RECENT_LABEL : Format.tilde(root.picker.path, root.picker.home)
             color: Theme.color.foreground
             font.family: Theme.font.family
             font.pixelSize: Theme.font.caption

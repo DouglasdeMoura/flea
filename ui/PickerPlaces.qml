@@ -2,6 +2,7 @@ import Quickshell.Io
 import QtQuick
 import "." as Flea
 import "js/Icons.js" as Icons
+import "js/Picker.js" as Picker
 import "js/Places.js" as Places
 
 // The picker's rail: the same favourites the browser window's sidebar draws, read from the same two
@@ -18,9 +19,19 @@ Item {
 
     signal chosen(string path)
 
+    // SendPicker.html draws Recent above Home, and a save has no history to write into, so the one
+    // mode that cannot use the location does not offer it.
+    property bool offerRecent: true
+
     property string dirsText: ""
     property string marksText: ""
-    readonly property var entries: Places.favorites(root.home, root.dirsText, root.marksText, Icons.sidebarGlyphFor)
+    // Recent is a location and not a path, so its row carries the token ui/js/Picker.js names; the
+    // rail's own cursor and activation then work on it exactly as they do on a favourite.
+    readonly property var recentRow: [{
+        path: Picker.RECENT, label: Picker.RECENT_LABEL, group: "favorite", kind: "favorite", glyph: "history"
+    }]
+    readonly property var entries: (root.offerRecent ? root.recentRow : [])
+        .concat(Places.favorites(root.home, root.dirsText, root.marksText, Icons.sidebarGlyphFor))
 
     implicitWidth: Theme.space(150)
 

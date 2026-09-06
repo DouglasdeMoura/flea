@@ -57,6 +57,10 @@ ShellRoot {
         // strips, so the picker takes the OEM's own resting border alpha, which lifts on both.
         readonly property color edge: Style.hoverBorderColor
 
+        // Recent is a location and not a directory: the rail's own row opens it and the listing it
+        // builds comes from the desktop's history rather than a scan; see AGENTS.md "Recent, and why".
+        readonly property bool recent: Picker.isRecent(win.path)
+
         readonly property bool saving: win.req.mode === "save"
         readonly property bool folderMode: win.req.directory || win.req.mode === "savefiles"
         readonly property int windowSize: list.visibleRows + 60
@@ -84,6 +88,10 @@ ShellRoot {
             win.rows = []
             win.cursorIndex = 0
             win.listingState = "loading"
+            if (Picker.isRecent(next)) {
+                recents.refresh()
+                return
+            }
             backend.list(next, win.windowSize, false)
         }
 
@@ -94,6 +102,10 @@ ShellRoot {
         }
 
         function goUp() {
+            // The board's own rule: Parent is unavailable in Recent, because a history has no parent.
+            if (win.recent) {
+                return
+            }
             var up = Picker.parentOf(win.path)
             if (up !== win.path)
                 win.open(up)
@@ -105,7 +117,7 @@ ShellRoot {
             var row = win.rowFor(index)
             if (!row || row.d !== win.folderMode)
                 return
-            win.marks = Picker.toggle(win.marks, Picker.join(win.path, row.n), row.s, win.req.multiple)
+            win.marks = Picker.toggle(win.marks, Picker.rowPath(win.path, row.n), row.s, win.req.multiple)
         }
 
         // Enter. A directory is always walked into, even in the folder request the board draws it
@@ -116,7 +128,7 @@ ShellRoot {
             if (!row)
                 return
             if (row.d) {
-                win.open(Picker.join(win.path, row.n))
+                win.open(Picker.rowPath(win.path, row.n))
                 return
             }
             win.accept()
@@ -134,6 +146,11 @@ ShellRoot {
             // A folder request with nothing checked takes the directory the window is standing in,
             // which is what the board's Choose folder button does with no row marked.
             if (win.marks.length === 0 && win.folderMode) {
+                // Recent is not a directory, so there is nothing here to hand back unasked.
+                if (win.recent) {
+                    win.say("Press Space to select a folder first")
+                    return
+                }
                 win.finish(Picker.RESPONSE_OK, [win.path])
                 return
             }
@@ -218,6 +235,13 @@ ShellRoot {
             }
         }
 
+        // The history the Recent location lists, read only when that location is opened. The listing
+        // is the client's own order, so the backend is asked for these paths and never to sort them.
+        Flea.PickerRecent {
+            id: recents
+            onRefreshed: if (win.recent) backend.listPaths(recents.paths, win.windowSize)
+        }
+
         Rectangle {
             anchors.fill: parent
             color: Theme.color.background
@@ -246,6 +270,7 @@ ShellRoot {
                 home: win.home
                 current: win.path
                 edge: win.edge
+                offerRecent: !win.saving
                 onChosen: function (path) { win.open(path); list.forceActiveFocus() }
             }
 
@@ -326,7 +351,9 @@ ShellRoot {
         }
 
         Component.onCompleted: {
-            var start = win.req.folder.length > 0 ? win.req.folder : win.home
+            // Only an absolute path is a folder, so a caller cannot name the Recent token, or any
+            // other text, as the directory this window opens on.
+            var start = win.req.folder.charAt(0) === "/" ? win.req.folder : win.home
             win.openWithoutHistory(start)
             // Measured on the box: without this the window has the keyboard but the list does not,
             // so Escape reached the surface below and every other key was dropped.
@@ -345,6 +372,7 @@ ShellRoot {
             function rowAt(index: int): string { var row = win.rowFor(index); return row ? row.n : "" }
             function cursorName(): string { return win.rowFor(win.cursorIndex) ? win.rowFor(win.cursorIndex).n : "" }
             function state(): string { return win.listingState }
+            function recent(): bool { return win.recent }
             function accept(): string { return Picker.acceptLabel(win.req, win.marks.length) }
             function chip(): int { return win.filterIndex }
             function saveName(): string { return win.saveName }

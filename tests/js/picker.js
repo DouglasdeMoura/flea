@@ -35,6 +35,15 @@ function run(check) {
     check("no accept label falls back to Open", Picker.acceptLabel(Picker.request("{}"), 0), "Open")
     check("a folder request falls back to Choose folder", Picker.acceptLabel(Picker.request('{"directory":true}'), 0), "Choose folder")
 
+    // Recent is a location and not a directory: no path this window ever holds can equal its token,
+    // and a row inside it is identified by its own path under the listing base "/".
+    check("Recent is not a path", Picker.RECENT.charAt(0) === "/", false)
+    check("the location is recognised", Picker.isRecent(Picker.RECENT), true)
+    check("a real directory is not Recent", Picker.isRecent("/home/gm"), false)
+    check("a row in a directory joins onto it", Picker.rowPath("/home/gm", "a.png"), "/home/gm/a.png")
+    check("a row in Recent is its own path", Picker.rowPath(Picker.RECENT, "home/gm/Pictures/a.png"), "/home/gm/Pictures/a.png")
+    check("a row at the root still joins once", Picker.rowPath("/", "etc"), "/etc")
+
     check("nothing checked says so", Picker.statusLine(0, 0), "0 selected")
     check("what is checked and what it weighs", Picker.statusLine(3, 2100000), "3 selected · 2.1 MB")
     check("the open hints name Space and Enter", Picker.hints(req), "Space select · Enter open/send · Esc cancel")

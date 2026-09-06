@@ -182,6 +182,7 @@ derive_sidebar_kinds() {
 # response named here that the doc does not list is reported too.
 declare -a REQUEST_DRIVERS=(
   'list|listed|'
+  'listpaths|rows|{"c":"listpaths","paths":["@SB@/a.txt"],"first":2}'
   'window|rows|{"c":"window","start":0,"count":2}'
   'sort|listed|{"c":"sort","by":"name","desc":true}'
   'search|searched|{"c":"search","path":"@SB@","query":"a","hidden":false}'
