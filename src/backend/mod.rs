@@ -57,3 +57,6 @@ pub mod testdir;
 // Test-only: the fifo, writer and bound every hang test shares.
 #[cfg(test)]
 pub mod fifotest;
+// Test-only: the one probe that says whether this box can actually run the bwrap jail.
+#[cfg(test)]
+pub mod sandboxprobe;
