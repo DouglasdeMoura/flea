@@ -224,6 +224,7 @@ function keyRows(state) {
     var out = [
         { kind: "group", label: "Preset" },
         { kind: "choice", id: "preset", label: "Keybinding preset", glyph: "keyboard",
+          options: PRESETS.map(function (p) { return PRESET_LABELS[p] }),
           value: PRESET_LABELS[state.preset] || state.preset },
         { kind: "hint", label: "Default, Vim, Mac and Windows, over the one key table. Every other "
                                + "binding is shared, and the change lands in this window at once." },

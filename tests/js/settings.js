@@ -190,6 +190,10 @@ function runRows(check) {
     var keys = Settings.rows("keys", { preset: "mac", presetKeys: Keymap.PRESET_KEYS })
     check("the Keys section leads with the preset choice", keys[1].kind, "choice")
     check("and shows the selected preset by name", keys[1].value, "Mac")
+    // The board draws all four on the control, and SettingsRow needs options.length > 1 to draw a
+    // segment at all, so a chevron here is the defect: it names one value and hides the other three.
+    check("the preset row draws all four as a segment, in the chooser's own order",
+          (keys[1].options || []).join("|"), "Default|Vim|Mac|Windows")
     check("the Windows preset is shown by name too",
           Settings.rows("keys", { preset: "windows", presetKeys: Keymap.PRESET_KEYS })[1].value,
           "Windows")

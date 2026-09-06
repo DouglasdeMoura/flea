@@ -183,7 +183,7 @@ Item {
             visible: root.hasSegment
             options: root.hasSegment ? root.row.options : []
             value: root.row.value || ""
-            onPicked: root.stepped(1)
+            onPicked: function (i) { root.stopPicked(i) }
         }
 
         Flea.Glyph {

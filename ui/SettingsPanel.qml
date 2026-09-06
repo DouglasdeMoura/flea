@@ -117,6 +117,16 @@ Item {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
             return
+        // A segment names the value it was clicked on where the ruler names a stop, so both arrive
+        // here addressed by index and the row decides which writer that index belongs to.
+        if (row.id === "textMode") {
+            ViewState.toggleTextFollow()
+            return
+        }
+        if (row.kind === "choice") {
+            ViewState.setKeysPreset(Settings.PRESETS[stop])
+            return
+        }
         ViewState.setTextSize({ mode: stop })
     }
 
