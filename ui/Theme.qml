@@ -158,6 +158,10 @@ Singleton {
         readonly property int paneWidth: root.space(350)
         readonly property int railWidth: root.settings.panelWidth - root.settings.paneWidth
                                          - 2 * root.spacing.hairline
+        // A row's continuation line, its hint and the Display ruler, indents 52 on five settings boards; those are resolved pixels at base-size 14, whose bodySmall is 13, so space() would scale them twice.
+        readonly property int indent: Math.round(52 * root.font.bodySmall / 13)
+        // Settings.dc.html insets the rail column by 10 above its first row and below its last, on that same board.
+        readonly property int railPaddingY: Math.round(10 * root.font.bodySmall / 13)
     }
 
     readonly property QtObject preview: QtObject {
@@ -229,7 +233,9 @@ Singleton {
             gridMinCellWidth: root.grid.minCellWidth,
             settingsPanelWidth: root.settings.panelWidth,
             settingsRailWidth: root.settings.railWidth,
-            settingsPaneWidth: root.settings.paneWidth
+            settingsPaneWidth: root.settings.paneWidth,
+            settingsIndent: root.settings.indent,
+            settingsRailPaddingY: root.settings.railPaddingY
         };
         var lines = [];
         for (var key in t)

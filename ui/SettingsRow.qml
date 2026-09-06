@@ -66,9 +66,9 @@ Item {
     Text {
         id: hint
         visible: root.isHint
-        x: Theme.spacing.rowPaddingX
+        x: Theme.settings.indent
         y: Theme.spacing.rowPaddingY
-        width: parent.width - 2 * Theme.spacing.rowPaddingX
+        width: parent.width - Theme.settings.indent - Theme.spacing.rowPaddingX
         text: root.row.label || ""
         color: Theme.color.muted
         font.family: Theme.font.family
@@ -111,10 +111,12 @@ Item {
         }
     }
 
+    // A ruler is the row above it continued, so it takes the boards' own continuation indent
+    // rather than the label column: five settings boards draw both it and a hint at that inset.
     Flea.SettingsRuler {
         visible: root.isRuler
-        anchors.left: markSlot.right
-        anchors.leftMargin: Theme.spacing.gap
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.settings.indent
         anchors.right: trailing.left
         anchors.rightMargin: Theme.spacing.gap
         anchors.verticalCenter: parent.verticalCenter

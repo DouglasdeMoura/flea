@@ -163,8 +163,11 @@ Item {
         id: card
         anchors.centerIn: parent
         width: root.panelWidth
-        height: Math.min(Theme.chromeHeight + Math.max(rail.implicitHeight, pane.implicitHeight)
-                         + 2 * Theme.spacing.rowPaddingY + 2 * Theme.spacing.hairline,
+        // Each side carries its own inset, above the first row and below the last, the way
+        // Settings.dc.html gives the rail column a 10 of its own and the pane the row padding.
+        height: Math.min(Theme.chromeHeight + 2 * Theme.spacing.hairline
+                         + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
+                                    pane.implicitHeight + 2 * Theme.spacing.rowPaddingY),
                          root.height - root.clampMargin)
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
@@ -254,7 +257,7 @@ Item {
                 id: rail
                 anchors.left: parent.left
                 anchors.top: chrome.bottom
-                anchors.topMargin: Theme.spacing.rowPaddingY
+                anchors.topMargin: Theme.settings.railPaddingY
                 width: root.railWidth
                 section: root.section
                 focused: root.side === "rail"

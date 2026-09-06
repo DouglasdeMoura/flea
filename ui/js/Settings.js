@@ -8,9 +8,10 @@
 // Three sections, in the boards' own rail order less the four they draw beside them. View, Places,
 // Preview and About have no working consumer in this release, and a rail row opening an empty pane
 // is the dead entry point the release ruling keeps out of the shipped UI.
+// Each glyph is the mark those boards draw on that rail row; "sliders" is the View row's, not Display's.
 var SECTIONS = [
     { id: "keys", label: "Keys", glyph: "keyboard" },
-    { id: "display", label: "Display", glyph: "sliders" },
+    { id: "display", label: "Display", glyph: "maximize" },
     { id: "menus", label: "Menus", glyph: "list" }
 ]
 
