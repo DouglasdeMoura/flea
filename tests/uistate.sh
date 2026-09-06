@@ -14,7 +14,7 @@ if [ ! -x "$BIN" ]; then
     printf 'uistate.sh: build it (cargo build); refusing to report on nothing\n' >&2
     exit 1
 fi
-SANDBOX=$FIXTURE_ROOT/uistate
+SANDBOX=$FIXTURE_ROOT/uistate-$$
 fail=0
 
 check() {
