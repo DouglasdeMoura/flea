@@ -61,7 +61,7 @@ function closed() {
 function chromePane(view) {
     return {
         focusView: view, viewMode: "list", searchMode: "", filterTyping: false,
-        inputAt: 0, rowsAt: 0, trashArmedAt: 0, asked: 0, said: "", shown: null,
+        inputAt: 0, rowsAt: 0, trashArmedAt: 0, asked: 0, copied: 0, said: "", shown: null,
         preview: closed(),
         message: function (text, isError) { this.said = text },
         shareBrowser: { active: false },
@@ -70,7 +70,8 @@ function chromePane(view) {
         // What ui/Pane.qml's own act() does with an action, so a route that reaches the pane's
         // dispatch instead of the interception is visible here rather than throwing.
         act: function (action) { Focus.act(action, this) },
-        openTerminal: function () { this.asked += 1 }
+        openTerminal: function () { this.asked += 1 },
+        copyDirPath: function () { this.copied += 1 }
     }
 }
 
@@ -260,4 +261,14 @@ function run(check) {
     var fromMenu = chromePane("list")
     Focus.act("openTerminal", fromMenu)
     check("the menu row reaches the same terminal through act", fromMenu.asked + "|" + fromMenu.said, "1|")
+
+    // Y copies root.path, the same thing Ctrl+T opens a terminal on, so it answers from the rail
+    // too; without the interception RailKeys.act ate it and the key did nothing and said nothing.
+    var copyKey = key(Qt.Key_Y, "Y", shift)
+    var copyList = chromePane("list")
+    check("Y is consumed in the list", Focus.handleKey(copyKey, copyList, copyList.sidebar), true)
+    check("and copies the folder path there", copyList.copied, 1)
+    var copyRail = chromePane("rail")
+    Focus.handleKey(copyKey, copyRail, copyRail.sidebar)
+    check("Y copies the folder path from the rail as well", copyRail.copied, 1)
 }

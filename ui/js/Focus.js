@@ -262,8 +262,8 @@ function handleKey(event, root, sidebar) {
         root.pathBarRequested()
         return true
     }
-    // Both answer from the rail as well as the list, so they are taken before the rail's own keys.
-    if (action === "openTerminal" || action === "settings") {
+    // These answer from the rail as well as the list, so they are taken before the rail's own keys.
+    if (action === "openTerminal" || action === "settings" || action === "copydirpath") {
         root.act(action)
         return true
     }

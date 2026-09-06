@@ -181,8 +181,10 @@ ShellRoot {
         function finish(response, list) {
             if (win.answered)
                 return
+            // Built before the flag is set, so a throw here leaves the window answerable rather than shut.
+            var text = Picker.reply(response, list)
             win.answered = true
-            replyFile.setText(Picker.reply(response, list))
+            replyFile.setText(text)
         }
 
         function say(text) {
