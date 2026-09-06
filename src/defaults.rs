@@ -2,7 +2,7 @@
 use crate::hyprkeys;
 use crate::userfile::{config_home, create_file, data_file, data_home, replace_file};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 // The entry packaging/ installs; the desktop resolves the id to that file, so a missing file is a claim on nothing.
@@ -93,7 +93,11 @@ fn release_mime() -> Result<String, String> {
 // system directory, so a file here outranks the four packaged rivals without touching any of them.
 fn claim_service() -> Result<String, String> {
     let path = service_path()?;
-    let want = service_text(&packaged_exec()?);
+    // No packaged registration is nothing to put in front, the picker step's shape of precondition rather than a failure.
+    let Some(packaged) = data_file(PACKAGED_SERVICE) else {
+        return Ok(format!("{}: skipped, {} is not installed in any data directory", BUS_NAME, PACKAGED_SERVICE));
+    };
+    let want = service_text(&packaged_exec(&packaged)?);
     match fs::read_to_string(&path) {
         Ok(held) if held == want => Ok(format!("{}: already Flea's, in {}", BUS_NAME, path.display())),
         Ok(held) if held.starts_with(MARK) => {
@@ -140,13 +144,9 @@ fn release_service() -> Result<String, String> {
     Ok(format!("{}: Flea's registration removed from {}{}", BUS_NAME, path.display(), tail))
 }
 
-// Whatever the installed registration names, never a path written down here: a box with none
-// installed has nothing to put in front of the others, the way the picker step has no backend.
-fn packaged_exec() -> Result<String, String> {
-    let packaged = data_file(PACKAGED_SERVICE).ok_or_else(|| {
-        format!("{} is not installed in any data directory, so there is no registration to put in front; install the package first", PACKAGED_SERVICE)
-    })?;
-    let text = fs::read_to_string(&packaged).map_err(|e| format!("{} could not be read ({:?})", packaged.display(), e.kind()))?;
+// Whatever the installed registration names, never a path written down here.
+fn packaged_exec(packaged: &Path) -> Result<String, String> {
+    let text = fs::read_to_string(packaged).map_err(|e| format!("{} could not be read ({:?})", packaged.display(), e.kind()))?;
     exec_line(&text)
         .map(str::to_string)
         .ok_or_else(|| format!("{} names no Exec, so there is nothing for {} to run", packaged.display(), BUS_NAME))

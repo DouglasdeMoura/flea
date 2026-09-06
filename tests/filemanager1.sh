@@ -412,20 +412,23 @@ case_default_off_removes_it() {
     fi
 }
 
-# A registration nobody installed is a claim on nothing, so the step refuses rather than writing an
-# Exec it made up. This is the case a source build on a box carrying an older package reaches.
-case_default_refuses_without_the_packaged_registration() {
+# A registration nobody installed is a claim on nothing, so the step writes no Exec it made up. It is
+# a precondition and not a failure, so the halves after it still run: this is the shape a source build
+# on a box carrying an older package reaches, and it must not cost that box its picker routing.
+case_default_skips_without_the_packaged_registration() {
     local out rc
     rm -f "$sysdata/dbus-1/services/com.thisisgm.flea.FileManager1.service"
     out=$(flea_default --default); rc=$?
     sed "s#^Exec=.*#Exec=$fixture/flea-stub#" "$service_file" \
         > "$sysdata/dbus-1/services/com.thisisgm.flea.FileManager1.service"
-    [[ -e "$userservices" ]] && { fail "refuse: a registration was written with none installed"; return; }
-    [[ "$rc" == 1 ]] || { fail "refuse: flea --default exited $rc with no packaged registration"; return; }
-    if printf '%s\n' "$out" | grep -Fq 'is not installed in any data directory'; then
-        pass "refuse: with no packaged registration installed, the step names what is missing and writes nothing"
+    [[ -e "$userservices" ]] && { fail "skip: a registration was written with none installed"; return; }
+    [[ "$rc" == 0 ]] || { fail "skip: flea --default exited $rc with no packaged registration: $out"; return; }
+    printf '%s\n' "$out" | grep -Fq 'is not installed in any data directory' \
+        || { fail "skip: the skip did not name the missing registration: $out"; return; }
+    if printf '%s\n' "$out" | grep -Fq 'undo both with:'; then
+        pass "skip: with no packaged registration installed, the step names what is missing, writes nothing and does not stop the run"
     else
-        fail "refuse: the refusal did not name the missing registration: $out"
+        fail "skip: the run stopped at the missing registration instead of finishing: $out"
     fi
 }
 
@@ -482,7 +485,7 @@ make_default_fixture
 case_default_writes_the_user_registration
 case_default_is_idempotent
 case_default_off_removes_it
-case_default_refuses_without_the_packaged_registration
+case_default_skips_without_the_packaged_registration
 case_the_user_registration_outranks_the_packaged_ones
 
 printf 'filemanager1: %d failure(s)\n' "$failed"
