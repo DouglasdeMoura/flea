@@ -65,7 +65,7 @@ FocusScope {
     property var shareBrowser: null
     // shell.qml's ui/KeymapSheet.qml, which ? opens from either the list or the rail.
     property var keymapSheet: null
-    // shell.qml's ui/SettingsPanel.qml, which the comma key opens from either view, see act() below.
+    // shell.qml's ui/SettingsPanel.qml, which the comma key opens from the list and the rail alike, see act() below.
     property var settingsPanel: null
 
     signal opened(string path)
@@ -205,10 +205,8 @@ FocusScope {
     // shell.qml's IPC thumbFile reader calls this; the lookup lives with the thumbnail machinery in ui/List.qml.
     function thumbFor(index) { return list.thumbFor(index) }
 
-    // Lifted to Focus.act and Focus.railAct, see ui/js/Focus.js; each just names its own target.
-    // "settings" is caught here so both views answer the comma key and the background menu's own row.
+    // Lifted to Focus.act, see ui/js/Focus.js, which routes "settings" here from the list and the rail alike.
     function act(action) { if (action === "settings") { root.settingsPanel.open(root); return } Focus.act(action, root) }
-    function railAct(action) { if (action === "settings") { root.settingsPanel.open(root); return } Focus.railAct(action, root, sidebar) }
 
     // index is a listing row, which is what every caller outside ui/js/Filter.js holds; the clamp
     // and the scroll both happen in view space, because a filter can be narrowing what is drawn.
