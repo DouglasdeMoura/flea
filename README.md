@@ -597,7 +597,7 @@ chord.
 ## Testing
 
 ```bash
-./tests/run-all.sh            # every suite that needs only a shell, and both cargo profiles
+./tests/run-all.sh            # every suite that needs only a shell; it builds nothing
 cargo test                    # unit tests
 ./tests/js.sh                 # pure QML JavaScript helpers
 ./tests/protocol.sh           # drives the built binary over real stdin
@@ -624,11 +624,16 @@ FLEA_PACKAGE_FILE=/path/to/flea.pkg.tar.zst ./tests/package.sh # real makepkg ar
 
 `./tests/run-all.sh` is the main headless command. It builds nothing, so the two cargo profiles are
 the caller's job: `protocol.sh` drives the debug binary and `thumbs.sh` the release one, and each
-suite that cannot find its binary says so rather than reporting on nothing. It runs every suite that
-needs nothing but a shell, and reads each suite's own exit code rather than a pipeline's. It then
-names `ui.sh`, `drag.sh`, `bench.sh` and `package.sh` and says what each needs: a display, a real
-pointer, an idle box, or a real makepkg archive. There is no CI, and `PKGBUILD`'s `check()` runs
-`cargo test` alone.
+suite that cannot find its binary says so and stops rather than reporting on nothing. That check
+asks whether a binary is there and not whether it is this commit's, so build before you run. It runs
+every suite that needs nothing but a shell, and reads each suite's own exit code, not a pipeline's.
+It then names the suites it cannot run and says what each needs: `ui.sh` the display, `drag.sh` the
+display and a real pointer through uinput, `picker.sh` the display, a session bus and Flea
+activatable as the chooser backend, `bench.sh` its own benchmark contract, `package.sh` a real
+makepkg archive in `FLEA_PACKAGE_FILE`, and `network-live.sh` live share credentials and the
+approved runtime bundle. A suite in neither of the two lists fails the runner, so one cannot go
+uninvoked again. There is no CI, and `PKGBUILD`'s `check()` runs `cargo test --release --locked`,
+`tests/js.sh` and `tests/keymap-gen.sh`, which are the two that need no built binary.
 
 `tools/flea-acceptance` derives its checklist at run time from the protocol document, the
 key table, the context menu, the design canvas and the sidebar, so it cannot be smaller

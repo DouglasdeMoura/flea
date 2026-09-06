@@ -5,8 +5,10 @@ plain Arch box.
 
 Flea installs as an Arch package, so pacman owns both ends: `makepkg -si` puts it on, `pacman -Rns`
 takes it off, and pacman's own file list is what makes the second claim provable. There is no
-install script here because there is nothing for one to do. The one step pacman cannot own, making
-Flea your default file manager, is a subcommand of the binary, `flea --default`, described below.
+install script here because there is nothing for one to do. The steps pacman cannot own are
+per-user preferences, and they are subcommands of the binary: `flea --default` makes Flea your
+default file manager and routes the desktop's file chooser to it, and `flea --picker` does that
+second half alone. Both are described below.
 
 ## Build and install
 
@@ -71,9 +73,11 @@ flea --default
 ```
 
 It does three things, each reported on its own line, and it is honest about state: run it twice and
-the second run says every part is already Flea's and rewrites nothing. It needs no root, because
-both files are yours, and it takes no argument, because Omarchy's `default` verbs take one rather
-than asking questions and this one has only one thing to set.
+the second run says every step it ran is already Flea's and rewrites nothing. It needs no root,
+because every file it writes is yours, and it takes no argument, because Omarchy's `default` verbs
+take one to name which program and here the program is Flea. The three files are
+`~/.config/mimeapps.list`, `~/.config/hypr/bindings.lua` and
+`~/.config/xdg-desktop-portal/portals.conf`.
 
 1. **The `inode/directory` handler.** `xdg-mime default com.thisisgm.flea.desktop inode/directory`,
    the stock tool, which writes one line to `~/.config/mimeapps.list`. The line printed names the
@@ -107,6 +111,15 @@ than asking questions and this one has only one thing to set.
 
 3. **The file chooser.** Everything `flea --picker` does, described in the next section. A box
    updating from 0.1.3 has a Flea with no chooser routing, and one command should finish the job.
+
+   **This step is the conditional one, and the other two are not.** It needs
+   `flea.portal`, which only the package installs. Run a binary you built with `cargo build` on a
+   box whose installed package predates the chooser, which is every box updating from 0.1.3, and
+   the command prints `flea: no portal backend is installed, so the file chooser step was skipped`
+   and returns having done the first two. On such a box the honest-about-state line above is a
+   claim about those two alone: the chooser was never claimed, so a second run cannot say it is
+   already Flea's. With no Flea package installed at all, step 1 refuses first and nothing is
+   written, because `com.thisisgm.flea.desktop` is the proof the package landed.
 
 Run it from a terminal inside the session, so the keys take effect at once.
 
