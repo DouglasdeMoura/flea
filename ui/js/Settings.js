@@ -230,17 +230,10 @@ function keyRows(state) {
         { kind: "group", label: "This preset" }
     ]
     var table = state.presetKeys || []
-    var listed = 0
     for (var i = 0; i < table.length; i++) {
-        if (table[i].preset === state.preset) {
+        if (table[i].preset === state.preset)
             out.push({ kind: "fact", label: table[i].label, value: table[i].keys })
-            listed += 1
-        }
     }
-    // Default and Vim claim no chord, so the group says so rather than drawing a heading over nothing.
-    if (listed === 0)
-        out.push({ kind: "hint", label: "This preset claims no chord of its own, so the shared key "
-                                        + "table stands exactly as it is written." })
     out.push({ kind: "hint", label: "Press ? for the keyboard sheet." })
     return out
 }

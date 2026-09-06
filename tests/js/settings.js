@@ -223,7 +223,7 @@ function runCursor(check) {
 
 // SettingsKeys.html's four-value chooser over the one key table. Each row the Keys section lists is
 // resolved back through the generated overlay, so a listed chord cannot advertise a binding the
-// preset lacks, and a preset that overlays nothing has to say so rather than draw an empty group.
+// preset lacks, and every one of the four claims a chord rather than drawing a heading over nothing.
 function runPresets(check) {
     check("the chooser offers the board's four presets, in its own order",
           Settings.PRESETS.join(","), "default,vim,mac,windows")
@@ -237,8 +237,9 @@ function runPresets(check) {
     var claiming = {}
     for (var c = 0; c < Keymap.PRESET_KEYS.length; c++)
         claiming[Keymap.PRESET_KEYS[c].preset] = true
-    check("Default and Vim claim no chord of their own, which is the board's dash on the view rows",
-          [claiming["default"] === true, claiming["vim"] === true].join(","), "false,false")
+    check("every preset in the chooser claims a chord of its own, which is GM's ruling of 2026-09-06",
+          Settings.PRESETS.map(function (id) { return claiming[id] === true }).join(","),
+          "true,true,true,true")
     var listed = 0
     for (var i = 0; i < Keymap.PRESET_KEYS.length; i++) {
         var row = Keymap.PRESET_KEYS[i]
@@ -252,23 +253,38 @@ function runPresets(check) {
           Keymap.lookupPreset("windows", Qt.Key_1, "", Qt.ControlModifier), "")
     check("and a Windows chord is dead under Mac",
           Keymap.lookupPreset("mac", Qt.Key_H, "", Qt.ControlModifier), "")
-    check("and every one of them is dead under Default",
+    check("Default and Vim spell view switching the way Mac does, and claim nothing else",
           [Keymap.lookupPreset("default", Qt.Key_1, "", Qt.ControlModifier),
            Keymap.lookupPreset("default", Qt.Key_H, "", Qt.ControlModifier),
-           Keymap.lookupPreset("vim", Qt.Key_1, "", Qt.ControlModifier)].join("|"), "||")
+           Keymap.lookupPreset("vim", Qt.Key_1, "", Qt.ControlModifier)].join("|"),
+          "viewList||viewList")
+
+    // The five actions the overlay governs that no preset needs a chord for, asked under every one
+    // of the four: an overlay row can shadow a shared key, so "the shared table carries it" is a
+    // claim to check per preset rather than once. The three views have no shared key at all and are
+    // checked in tests/js/keymap.js, where every preset's own spelling of them is resolved.
+    var reach = []
+    var opened = Keymap.preset
+    for (var q = 0; q < Settings.PRESETS.length; q++) {
+        Keymap.setPreset(Settings.PRESETS[q])
+        reach.push([Keymap.lookup(Qt.Key_Backspace, "", Qt.NoModifier),
+                    Keymap.lookup(Qt.Key_Return, "", Qt.NoModifier),
+                    Keymap.lookup(Qt.Key_Delete, "", Qt.NoModifier),
+                    Keymap.lookup(Qt.Key_Period, ".", Qt.NoModifier),
+                    Keymap.lookup(Qt.Key_A, "a", Qt.NoModifier)].join("|"))
+    }
+    Keymap.setPreset(opened)
+    check("every preset reaches the overlay's other five actions on a shared key",
+          reach.join(" / "),
+          "parent|open|trash|toggleHidden|addNetwork / parent|open|trash|toggleHidden|addNetwork / "
+          + "parent|open|trash|toggleHidden|addNetwork / parent|open|trash|toggleHidden|addNetwork")
 
     var section = function (id) { return Settings.rows("keys", { preset: id, presetKeys: Keymap.PRESET_KEYS }) }
     var chords = function (rows) { return rows.filter(function (r) { return r.kind === "fact" }).length }
     check("the Keys section names each preset the way the chooser does",
           [section("default")[1].value, section("vim")[1].value, section("mac")[1].value,
            section("windows")[1].value].join(","), "Default,Vim,Mac,Windows")
-    check("Mac and Windows list every chord they claim, and nothing else does",
+    check("each preset lists every chord it claims, and none of them lists an empty group",
           [chords(section("default")), chords(section("vim")), chords(section("mac")),
-           chords(section("windows"))].join(","), "0,0,7,4")
-    check("a preset that claims none says so rather than drawing an empty group",
-          [section("default"), section("vim"), section("mac")].map(function (rows) {
-              return rows.filter(function (r) {
-                  return r.kind === "hint" && r.label.indexOf("claims no chord") >= 0
-              }).length
-          }).join(","), "1,1,0")
+           chords(section("windows"))].join(","), "3,3,7,4")
 }

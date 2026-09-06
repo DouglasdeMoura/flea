@@ -108,8 +108,8 @@ pub const SCHEMA: &[(&str, Rule)] = &[
     ("keyHints", Rule::Bool),
     ("places", Rule::Group(PLACES)),
     ("preview", Rule::Group(PREVIEW)),
-    // SettingsKeys.html's four-value chooser. Default and Vim overlay nothing on ui/js/Keymap.js's
-    // shared tables, so a stored name this build cannot honour falls back to default and reads alike.
+    // SettingsKeys.html's four-value chooser over ui/js/Keymap.js's shared tables. A stored name
+    // this build cannot honour falls back to default, which is also what a fresh ui.json holds.
     ("keys", Rule::Word(&["default", "vim", "mac", "windows"])),
     ("display", Rule::Group(DISPLAY)),
     ("menu", Rule::Group(MENU)),

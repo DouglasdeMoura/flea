@@ -399,10 +399,12 @@ row:
   is the one row here that is not an action: off, which is how it ships, no menu prints the key
   beside a row and an empty folder offers no tip; on, both appear. Every chord is bound either way.
 - **Keys.** Default, Vim, Mac or Windows, over the one `keys.toml` table. Almost everything is
-  shared and answers under all four: Default and Vim claim no chord of their own, so each is that
-  shared map exactly as written, and Mac and Windows add only the chords where the two platforms
-  differ. It ships on Default, an unrecognised stored name reads as Default, and a change rebinds
-  in the window at once. Press `?` for the whole map.
+  shared and answers under all four; each preset adds only the chords for the actions the shared
+  map does not carry. List, columns and grid are bound nowhere else, so every preset spells them:
+  `Ctrl+1`, `Ctrl+2` and `Ctrl+3` under Default, Vim and Mac, and `Ctrl+Shift` with those digits
+  under Windows. Mac adds Finder's own four beside them and Windows adds `Ctrl+H`. It ships on
+  Default, an unrecognised stored name reads as Default, and a change rebinds in the window at
+  once. Press `?` for the whole map.
 
 The choices live in `~/.local/state/flea/ui.json`, the one file Flea keeps for itself, beside the
 column set and everything else that outlives a window. The text size is stored as `{"mode":"system"}`
@@ -570,7 +572,7 @@ and the application cannot disagree.
 | `a`, Ctrl-k | Add a network mount; `a` from the rail, Ctrl-k from either view under the Mac preset |
 | Ctrl-e | Eject the rail's device, or the removable volume the listing is inside |
 | Ctrl-t | Open the configured terminal in the directory being shown; the topbar's terminal button is the same action |
-| Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid, under the Mac preset |
+| Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid, under the Default, Vim and Mac presets |
 | Ctrl-Shift-1, Ctrl-Shift-2, Ctrl-Shift-3 | The same three, under the Windows preset |
 | Ctrl-h | Show hidden files, under the Windows preset |
 | Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Text size up a stop, down a stop, back to following Omarchy |

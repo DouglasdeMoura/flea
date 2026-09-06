@@ -1514,11 +1514,23 @@ the binding as a literal `Qt.Key_*` is what keeps it inside the `qml6` probe abo
 The live preset is a module-level `var preset` in the generated file, set by `ui/ViewState.qml`'s
 `onKeysPresetChanged`. A `.pragma library` holds one copy per QML engine, so that one assignment
 reaches every caller of `lookup()` with no second wire and no plumbing through `ui/js/Focus.js`
-or `ui/Pane.qml`, both of which sit against their file budget. `default` and `vim` own no row in
-that table, because SettingsKeys.html's inventory gives them a dash on the three view rows and a
-bare shared key on every other row a preset governs, so a name this build does not have reaches no
-overlay row and lands on exactly the map Default draws. `ui/ViewState.qml` is the validator: it
-resolves a stored name that is not in `Settings.PRESETS` to the first of them, `default`.
+or `ui/Pane.qml`, both of which sit against their file budget. Every one of the four presets owns a
+row in that table. SettingsKeys.html's inventory gives `default` and `vim` a dash on the three view
+rows, but view switching is bound in no shared table, so a Default that overlaid nothing shipped
+with no keyboard route to the views at all; GM ruled on 2026-09-06 that both carry the Mac spelling,
+`ctrl-1`, `ctrl-2` and `ctrl-3`, which is safe because only one preset is ever live. Every other row
+a preset governs is already a bare shared key. `ui/ViewState.qml` is the validator: it resolves a
+stored name that is not in `Settings.PRESETS` to the first of them, `default`, so an unknown name,
+which would match no overlay row, never reaches the generated module.
+
+**A chord claimed twice inside one preset fails the build.** That is SettingsKeys.html's "Conflicts
+fail the build", and until this change it was not true: a second `mac` `ctrl-1` claiming `viewGrid`
+emitted two rows into `lookupPreset`'s if-chain, exited 0, and let the first silently win.
+`preset_conflict` keys on the preset with the modifier state and the Qt key, never the printed
+chord, because that is what the if-chain matches, and it names the preset, the chord and both
+actions. Two presets may hold the same chord, because only one is ever live. The tool takes the
+table to read as its second argument, so `tests/keymap-gen.sh` proves the refusal against a broken
+copy in its own probe directory rather than by editing the table this repo ships.
 
 **A preset overlay must never hold a chord the `[[sheet]]` table draws.** The sheet is one static
 array with no preset of its own, so a cap it draws for a Mac-only chord would be wrong for half
