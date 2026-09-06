@@ -88,6 +88,24 @@ function run(check) {
     check("single mode replaces the prior check", Picker.paths(single).join(","), "/x/b.png")
     check("single mode unmarks its own", Picker.paths(Picker.toggle(single, "/x/b.png", 20, false)).length, 0)
 
+    // The save name is a client string, and the answer it builds must stay inside the folder the
+    // user was shown. Same cases as src/backend/ops.rs's own valid_name test, so a drift shows here.
+    check("an ordinary name is a name", Picker.validName("ordinary.txt"), true)
+    check("a dotfile is a name", Picker.validName(".bashrc"), true)
+    check("spaces are a name", Picker.validName("a name with spaces"), true)
+    check("an empty name would answer with the directory", Picker.validName(""), false)
+    check("a single dot is the directory itself", Picker.validName("."), false)
+    check("two dots climb out of the directory", Picker.validName(".."), false)
+    check("a separator moves the answer out of the folder", Picker.validName("../escape"), false)
+    check("a leading separator is an absolute path", Picker.validName("/etc/passwd"), false)
+    check("a subdirectory is still a separator", Picker.validName("sub/child"), false)
+    check("the reviewer's own exploit is refused", Picker.validName("../../.config/autostart/pwn.desktop"), false)
+    check("an interior NUL truncates the path at the syscall", Picker.validName("nul\0byte"), false)
+    // tools/flea-portal reads current_name verbatim, so a traversal reaches Picker.request() intact
+    // and the window has to be the thing that refuses it.
+    check("a traversal survives the request unchanged", Picker.request('{"name":"../../pwn"}').name, "../../pwn")
+    check("and the request's own name is then refused", Picker.validName(Picker.request('{"name":"../../pwn"}').name), false)
+
     check("a path joins under its directory", Picker.join("/home/gm", "a.txt"), "/home/gm/a.txt")
     check("the root does not double its slash", Picker.join("/", "etc"), "/etc")
     check("the parent of a path is its directory", Picker.parentOf("/home/gm/a.txt"), "/home/gm")

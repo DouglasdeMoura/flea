@@ -49,8 +49,10 @@ ShellRoot {
 
         // Where Back goes, and it only ever goes back: Parent is its own button and pushes here too.
         property var history: []
-        // The save mode's own name, which starts as the caller's suggestion.
-        property string saveName: win.req.name
+        // The save mode's own name, which starts as the caller's suggestion only when that
+        // suggestion is a filename: tools/flea-portal passes current_name through verbatim, so a
+        // separator in it would put a path outside this folder in the field before anyone typed.
+        property string saveName: Picker.validName(win.req.name) ? win.req.name : ""
 
         // SendPicker.html draws every rule and control frame in one ink, a lift over whatever plane
         // it sits on. Theme.color.surface is a drop on these palettes and vanishes against the chrome
@@ -138,6 +140,12 @@ ShellRoot {
             if (win.saving) {
                 if (win.saveName.length === 0) {
                     win.say("Name the file before saving it")
+                    return
+                }
+                // The answer has to name the folder the user was shown, so a typed separator is
+                // refused here rather than rewritten: a rewrite would send a path nobody approved.
+                if (!Picker.validName(win.saveName)) {
+                    win.say(Picker.NAME_REFUSED)
                     return
                 }
                 win.finish(Picker.RESPONSE_OK, [Picker.join(win.path, win.saveName)])

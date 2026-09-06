@@ -3,7 +3,9 @@
 #
 # This repo had twelve suites and no runner: seven were invoked by no file at all, including
 # js.sh, the largest. A suite nobody runs reads as coverage in a directory listing and provides
-# none.
+# none. It happened again in 0.1.4: picker.sh, capability-ownership.sh and network-live.sh were
+# named by no file at all, so the release's largest new surface had no automated coverage. The
+# audit at the bottom is what makes that a failure here rather than a review finding later.
 #
 # Each suite's OWN exit code is read, never a pipeline's. `./tests/js.sh | tail -1` hands you
 # tail's status and reports success over a red suite, which is how a wrong green survived here
@@ -11,7 +13,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-headless="js keymap-gen charts budget empty-state sandbox gio-auth gvfs ops modes protocol archive thumbs network-open-share uistate uiwriter media"
+headless="js keymap-gen charts budget empty-state sandbox capability-ownership gio-auth gvfs ops modes protocol archive thumbs network-open-share uistate uiwriter media"
 failed=0
 ran=0
 
@@ -32,13 +34,47 @@ for name in $headless; do
     fi
 done
 
-printf '\nrun-all: %d suite(s) run, %d failed\n' "$ran" "$failed"
+# Named, not run: each needs something this script cannot assume it has. One list, read twice: it
+# is printed here and it is what the audit below checks, so a suite cannot be quietly excluded.
+not_run="
+ui|needs the display, and refuses beside a Flea it did not start
+drag|needs the display and a real pointer through uinput
+bench|is a separate headless benchmark-contract suite
+package|needs a real makepkg archive in FLEA_PACKAGE_FILE
+picker|needs the display, a session bus, and Flea activatable as the FileChooser backend
+network-live|needs live share credentials and the approved runtime bundle, controller only
+"
 
-# Named, not run: each needs something this script cannot assume it has.
 printf '\nNot run here, and why:\n'
-printf '  ui.sh     needs the display, and refuses beside a Flea it did not start\n'
-printf '  drag.sh   needs the display and a real pointer through uinput\n'
-printf '  bench.sh  is a separate headless benchmark-contract suite\n'
-printf '  package.sh needs a real makepkg archive in FLEA_PACKAGE_FILE\n'
+named=""
+while IFS='|' read -r name reason; do
+    [ -n "$name" ] || continue
+    named="$named $name"
+    printf '  %-16s %s\n' "$name.sh" "$reason"
+done <<EOF
+$not_run
+EOF
+
+# Every suite in tests/ is in one of the two lists. A new one in neither is invoked by no file and
+# mentioned by none, which is the state picker.sh shipped in, so it fails this runner rather than
+# waiting for somebody to notice the directory listing is longer than the report.
+orphans=""
+for suite in tests/*.sh; do
+    name=${suite#tests/}
+    name=${name%.sh}
+    [ "$name" = run-all ] && continue
+    case " $headless $named " in
+        *" $name "*) continue ;;
+    esac
+    orphans="$orphans $name"
+done
+if [ -n "$orphans" ]; then
+    printf '\nrun-all: FAIL suite(s) that no list runs and no line names:%s\n' "$orphans"
+    failed=$((failed + 1))
+fi
+
+# Last, so it counts the audit above as well as the suites: a tally printed before the last check
+# ran is the same wrong green this runner was written to stop.
+printf '\nrun-all: %d suite(s) run, %d failed\n' "$ran" "$failed"
 
 exit "$failed"
