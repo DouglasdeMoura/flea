@@ -129,7 +129,9 @@ Item {
         anchors.rightMargin: root.isSubmenu ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         text: root.hint
-        color: Theme.color.muted
+        // Menus.html paints an enabled row's hint in its label's own ink and keeps muted for the
+        // disabled row's; no menu entry in this tree can be disabled, so every hint follows the label.
+        color: root.labelColor
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         textFormat: Text.PlainText
