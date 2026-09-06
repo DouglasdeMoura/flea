@@ -144,15 +144,24 @@ fn main() {
             }
         }
     }
+    if args.get(1).map(String::as_str) == Some("--prewarm") {
+        usage("--prewarm takes a path, a first index and a destination");
+    }
 
     // flea --open <path>
     if args.len() == 3 && args[1] == "--open" {
         exit(open::open(&args[2]));
     }
+    if args.get(1).map(String::as_str) == Some("--open") {
+        usage("--open takes one path");
+    }
 
     // flea --terminal <dir>
     if args.len() == 3 && args[1] == "--terminal" {
         exit(terminal::open_terminal(&args[2]));
+    }
+    if args.get(1).map(String::as_str) == Some("--terminal") {
+        usage("--terminal takes one directory");
     }
 
     // flea --default [off]: both per-user steps pacman cannot own, see docs/install.md.
@@ -170,6 +179,9 @@ fn main() {
     if args.len() == 2 && args[1] == "--youleftmeforstrata" {
         exit(release_both());
     }
+    if args.get(1).map(String::as_str) == Some("--youleftmeforstrata") {
+        usage("--youleftmeforstrata takes nothing");
+    }
 
     // flea --picker [off]: the chooser routing, the other per-user step, see docs/install.md.
     if args.len() == 2 && args[1] == "--picker" {
@@ -185,6 +197,9 @@ fn main() {
     // flea --pick <reply>: one portal request's picker window, opened by tools/flea-portal.
     if args.len() == 3 && args[1] == "--pick" {
         exit(gui::pick(&args[2]));
+    }
+    if args.get(1).map(String::as_str) == Some("--pick") {
+        usage("--pick takes one reply file");
     }
 
     // flea --ui-state [<json patch>]: the shared ui.json read and update path, see AGENTS.md "The state file".
