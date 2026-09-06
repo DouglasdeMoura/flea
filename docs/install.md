@@ -70,8 +70,8 @@ kind of thing without a package's help. There is no `omarchy default filemanager
 flea --default
 ```
 
-It does two things, each reported on its own line, and it is honest about state: run it twice and
-the second run says both halves are already Flea's and rewrites nothing. It needs no root, because
+It does three things, each reported on its own line, and it is honest about state: run it twice and
+the second run says every part is already Flea's and rewrites nothing. It needs no root, because
 both files are yours, and it takes no argument, because Omarchy's `default` verbs take one rather
 than asking questions and this one has only one thing to set.
 
@@ -105,6 +105,9 @@ than asking questions and this one has only one thing to set.
    where `hyprctl` cannot be reached, the block is still written and the output says to run
    `hyprctl reload` yourself.
 
+3. **The file chooser.** Everything `flea --picker` does, described in the next section. A box
+   updating from 0.1.3 has a Flea with no chooser routing, and one command should finish the job.
+
 Run it from a terminal inside the session, so the keys take effect at once.
 
 ### Undo
@@ -115,14 +118,16 @@ flea --default off
 
 Removes Flea's `inode/directory` line from `~/.config/mimeapps.list`, so the handler falls back to
 whatever the system default is (Nautilus on stock Omarchy), and removes the marked block from
-`~/.config/hypr/bindings.lua` byte for byte, then reloads. If you had pinned another handler in
+`~/.config/hypr/bindings.lua` byte for byte, then reloads, and undoes the file-chooser step exactly
+as `flea --picker off` does. If you had pinned another handler in
 `~/.config/mimeapps.list` before running `flea --default`, the first run printed its id as
 `was <id>`; `xdg-mime default <id> inode/directory` puts that pin back.
 
 ### What `pacman -Rns flea` leaves behind
 
-Everything the package installed goes, as above. The two edits `flea --default` made are per-user
-state, and pacman neither knows nor should know about them, so they stay:
+Everything the package installed goes, as above. The edits `flea --default` made are per-user state,
+and pacman neither knows nor should know about them, so they stay. Its chooser edits are covered by
+the next section:
 
 - `inode/directory=com.thisisgm.flea.desktop` in `~/.config/mimeapps.list`. Inert once the binary
   is gone: `xdg-mime query default` skips an entry whose `Exec` is not on `PATH`, and answered
