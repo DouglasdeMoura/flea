@@ -89,23 +89,17 @@ function runMenu(check) {
     check("and its label flips with the state",
           Menu.hiddenRow(false).label + "|" + Menu.hiddenRow(true).label,
           "Show hidden files|Hide hidden files")
-    // The board's background menu is not reachable in this product: hasRow has no writer anywhere in
-    // ui/, and the listing's only right-click route is a row delegate's own TapHandler, so this
-    // branch is what a background menu WOULD hold. The settings panel therefore takes the two doors
-    // that do exist, the comma key and the toolbar's sliders button, and no row here.
-    check("an empty listing offers New folder and the hidden toggle",
-          labels(Menu.listingEntries({ showHidden: false, hasRow: false, rowInDropbox: false,
-                                       dropboxPath: "", taildropPeers: [], archiveFormats: [],
-                                       rowIsArchive: false, rowIsImage: false, canConvert: false })),
-          "Open in terminal|New folder|Show hidden files")
     // SettingsMenus.html carries Open in terminal in all three menus. It acts on the directory being
     // shown, not the row, so it sits with New folder and appears with no row under the cursor too.
     check("Open in terminal is a menu row in its own right",
           findEntry(full, "openTerminal").label + "|" + findEntry(full, "openTerminal").glyph,
           "Open in terminal|terminal")
-    check("and no menu offers a Settings row, because no menu can reach one",
+    // Settings is a background row and only a background row: SettingsMenus.html's table marks it
+    // shown in that column alone, so a row menu offering it would be a fourth door the board denies.
+    check("no row menu offers a Settings row, because the board gives it to the background alone",
           findEntry(full, "settings").label, undefined)
 
+    runBackground(check)
     runHidden(check, full)
 
     // ui/Header.qml's own rows, on a right click over the column titles. Four toggles, flipping
@@ -139,6 +133,48 @@ function runMenu(check) {
     check("and with no delegate under the cursor it opens nothing and answers false",
           Menu.openAtCursor(withoutRow, { openAt: function (point) { placed.push(point) } }, 8)
               + "|" + placed.length, "false|1")
+}
+
+// Menus.html's background column, on a right click that landed on no row. Its rows, its order and
+// its three rules are the board's; New File is the one row it draws that this release does not
+// build, because the backend has mkdir and no create-empty-file command of any kind.
+function runBackground(check) {
+    function background(hiddenActions) {
+        return Menu.listingEntries({ showHidden: false, hasRow: false, rowInDropbox: false,
+                                     dropboxPath: "", taildropPeers: [], archiveFormats: [],
+                                     rowIsArchive: false, rowIsImage: false, canConvert: false,
+                                     hiddenActions: hiddenActions })
+    }
+    // src/uischema.rs ships Open in terminal switched off, which is the state the board draws.
+    check("the background menu at the shipped defaults is the board's own column",
+          labels(background(["delete", "openwith", "openTerminal", "moveto", "copyto",
+                             "properties", "permissions", "copypath"])),
+          "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings")
+    check("and switching Open in terminal on puts it back beside the hidden toggle",
+          labels(background([])),
+          "New folder|-|Paste|Select all|-|Sort by|Open in terminal|Show hidden files|-|Settings")
+    // Every row is marked, the rule ui/MenuRow.qml enforces for the row menu; a background row that
+    // drew no mark would be the one unmarked row in the product.
+    var marks = []
+    var rows = background([])
+    for (var i = 0; i < rows.length; i++)
+        marks.push(rows[i].separator === true ? "-" : (rows[i].mark || rows[i].glyph || ""))
+    check("and every background row carries its own mark",
+          marks.join("|"),
+          "folder-plus|-|clipboard|check|-|sort|terminal|eye|-|sliders")
+    // The flyout can only offer an order ui/js/Sort.js will really ask the backend for.
+    check("Sort by is a submenu row over the three orders the backend can produce",
+          Menu.hasSubmenu(findEntry(rows, "sort")) + "|"
+          + findEntry(rows, "sort").submenu.map(function (e) { return e.id + "=" + e.label }).join("|"),
+          "true|name=Name|size=Size|mtime=Date Modified")
+    check("and its flyout takes the sort mark, not the archive one the other flyouts default to",
+          Menu.submenuGlyph("sort") + "|" + Menu.submenuGlyph("taildrop") + "|"
+          + Menu.submenuGlyph("compress"), "sort|server|archive")
+    // The hidden toggle is locked in both menus, so the background column can never be emptied of it.
+    check("the locked hidden toggle survives a hidden set that names it",
+          labels(background(["newFolder", "paste", "selectAll", "sort", "openTerminal",
+                             "toggleHidden", "settings"])),
+          "Show hidden files")
 }
 
 // The Menus section's consumer. menu.hidden stores what is HIDDEN, so a row named there leaves the

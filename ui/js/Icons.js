@@ -143,6 +143,9 @@ var PATHS = {
     "maximize": "M8 3H3v5 M16 3h5v5 M8 21H3v-5 M16 21h5v-5",
     "x": "M6 6l12 12 M18 6 6 18",
     "sliders": "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M2 14h4 M10 8h4 M18 16h4",
+    // The background menu's Sort by row, Menus.html's own geometry: three rules shortening to the
+    // right of a bare down arrow. IconSets.html names this mark when it caps the corner radius.
+    "sort": "M11 5h10 M11 9h7 M11 13h4 M7 5v14 M7 19l-3-3 M7 19l3-3",
     // The three basic clipboard rows the context menu grew with its visibility settings. Lucide's
     // scissors and clipboard both carry arcs; these are the cut's own square handles and square tray.
     "scissors": "M5 3l14 14 M19 3L5 17 M2 17h5v5H2z M17 17h5v5h-5z",

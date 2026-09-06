@@ -98,6 +98,12 @@ function run(check) {
     check("eject is the recut lucide geometry, not the canvas's own hand variant",
           Icons.pathFor("eject"), "M12 2 22 13H2z M3 17h18v4H3z")
 
+    // The background menu's Sort by row. IconSets.html names this mark and Menus.html draws it, and
+    // its short segments are the reason that board caps the optional corner radius at 0.8.
+    drawsItsOwnMark("sort")
+    check("sort is the board's own geometry, three rules over a bare down arrow",
+          Icons.pathFor("sort"), "M11 5h10 M11 9h7 M11 13h4 M7 5v14 M7 19l-3-3 M7 19l3-3")
+
     // ui/ContextMenu.qml's New Folder row. The mark is drawn on Main.dc.html's specimen sheet with
     // no consumer, and GM's ruling is that recut lucide geometry wins over the board's hand drawing.
     drawsItsOwnMark("folder-plus")

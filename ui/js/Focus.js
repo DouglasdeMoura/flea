@@ -140,6 +140,12 @@ function act(action, root) {
         Ops.compress(root, action.substring("compress:".length))
         return
     }
+    // The background menu's Sort by flyout, routed to the header click's own function so an aimed
+    // click and an aimed menu row cannot come to mean different things.
+    if (action.indexOf("sort:") === 0) {
+        Sort.column(root, action.substring("sort:".length))
+        return
+    }
     // Both keys the Tui board drew ahead of their features are built now, so neither answers with
     // a sentence any more: tabs run here, and handleKey opens the path bar before the views see it.
     if (action.indexOf("tab") === 0) { Tabs.act(action, root); return }

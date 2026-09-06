@@ -183,6 +183,17 @@ ListView {
         }
     }
 
+    // Empty space under the last row belongs to the directory, not to a row, so it raises the
+    // background menu. indexAt says the point missed every delegate, which is what leaves a right
+    // click on a row to that row's own handler above.
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: function (eventPoint) {
+            if (root.indexAt(root.contentX + eventPoint.position.x, root.contentY + eventPoint.position.y) < 0)
+                root.menu.openBackground(eventPoint.scenePosition)
+        }
+    }
+
     onContentYChanged: {
         // The wheel moves the view and not the cursor, so the cursor follows the viewport here.
         var first = Math.floor(root.contentY / Theme.rowHeight)

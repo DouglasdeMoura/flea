@@ -88,8 +88,8 @@ QtObject {
         // A peer row names a machine and an archive row a file, so the flyout's mark is its own.
         function contextMenuSubmenuGlyphs(): string { return root.pane.contextMenu().submenuGlyphs() }
         // A peer is named by whoever is on the tailnet, so a test reads the name here rather than
-        // knowing it. No separator branch: a flyout holds only Archive.formatEntries or Taildrop
-        // peers, and both build {id, label} rows only.
+        // knowing it. No separator branch: every flyout in the tree builds {id, label} rows only,
+        // whether it came from Archive.formatEntries, Menu.sortEntries or the Taildrop peer list.
         function contextMenuSubmenuEntries(): string {
             return root.pane.contextMenu().submenuEntries.map(function (e) { return e.label }).join("|")
         }
@@ -104,6 +104,15 @@ QtObject {
         // A menu row's own centre, so a driven click lands on the row a test named rather than on a
         // pixel derived from a row count the Menus settings section can change under it.
         function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
+        // Where a driven right click reaches the background menu: the centre of the surface that
+        // answers for the directory being shown, which in the columns view is the pane's own column
+        // and not the peek beside it. An empty directory has no row to aim from, and it is the case
+        // that menu matters most in, so no reader here may derive the point from a row.
+        function listingBackgroundCentre(): string {
+            var area = root.pane.viewMode === "columns" ? root.pane.columnsArea.activeColumn()
+                                                        : root.pane.listArea
+            return root.fleaWindow.centreOf(area)
+        }
         // The row that is its own rename editor, or -1; drives the States artboard's inline rename.
         function renamingIndex(): int { return root.pane.renamingIndex }
         function renameEditorLive(): bool { return root.pane.renameEditor() !== null }
