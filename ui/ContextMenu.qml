@@ -282,7 +282,6 @@ Item {
                     entry: row.modelData
                     compact: root.forRail
                     current: !root.submenuOpen && root.cursor === row.index
-                    onHoverEntered: root.cursor = row.index
                     onActivated: {
                         if (Menu.hasSubmenu(row.modelData))
                             root.openSubmenu(row.index)
@@ -325,7 +324,6 @@ Item {
                     entry: ({ label: subRow.modelData.label, action: "",
                               glyph: Menu.submenuGlyph(root.entries[root.openSubmenuRow].action) })
                     current: root.submenuCursor === subRow.index
-                    onHoverEntered: root.submenuCursor = subRow.index
                     onActivated: root.chooseSub(subRow.modelData.id)
                 }
             }

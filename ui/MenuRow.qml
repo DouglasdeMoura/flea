@@ -21,7 +21,6 @@ Item {
 
     signal activated()
     // The parent owns the cursor, so hover asks for it to move rather than writing over the binding.
-    signal hoverEntered()
     // For a parent that lights the pointer's row without moving its own cursor, as ui/ShareBrowser.qml does.
     readonly property bool hovered: pointer.hovered
 
@@ -160,7 +159,6 @@ Item {
         id: pointer
         enabled: !root.isSeparator
         // pointer.hovered spelt out: root now carries a hovered of its own and would shadow here.
-        onHoveredChanged: if (pointer.hovered) root.hoverEntered()
     }
 
     TapHandler {
