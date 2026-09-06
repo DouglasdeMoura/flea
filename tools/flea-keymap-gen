@@ -169,11 +169,12 @@ fi
   echo ".pragma library"
   echo
   echo "// Generated from keys.toml by tools/flea-keymap-gen. Do not edit."
-  echo "// The selected Mac/Windows preset. A .pragma library holds one copy per QML engine, so"
+  echo "// The selected keybinding preset. A .pragma library holds one copy per QML engine, so"
   echo "// ui/ViewState.qml sets it once and every caller of lookup() below follows without a"
-  echo "// second wire; an unknown name falls back to mac rather than leaving the map empty."
-  echo "var preset = \"mac\""
-  echo "function setPreset(name) { preset = name === \"windows\" ? \"windows\" : \"mac\" }"
+  echo "// second wire; default and vim claim no row below, so a name this build does not have"
+  echo "// reaches no overlay row and lands on exactly the map Default draws."
+  echo "var preset = \"default\""
+  echo "function setPreset(name) { preset = name }"
   echo
   echo "// The [[preset]] rows of keys.toml, for ui/SettingsPanel.qml's Keys section. code is the Qt"
   echo "// name the overlay below matches on, so a row here and the binding are the same keys.toml row."

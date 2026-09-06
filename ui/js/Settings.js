@@ -40,10 +40,10 @@ var LABELS = {
     sharelink: "Copy share link", open: "Open", toggleHidden: "Show hidden files"
 }
 
-// The two values of the Keys row. SettingsKeys.html draws four; this release ships the toggle the
-// public list named, Mac against Windows, over the one key table rather than a preset system.
-var PRESETS = ["mac", "windows"]
-var PRESET_LABELS = { mac: "Mac", windows: "Windows" }
+// The four values of the Keys row, in SettingsKeys.html's own chooser order. The first is what a
+// missing or unrecognised stored name resolves to, which that board says is Default.
+var PRESETS = ["default", "vim", "mac", "windows"]
+var PRESET_LABELS = { "default": "Default", vim: "Vim", mac: "Mac", windows: "Windows" }
 
 // Every board row carries a left mark, and a switch wears the mark of the row it governs: these are
 // ui/js/Menu.js's own glyphs by action id, which tests/js/settings.js asserts the two agree on.
@@ -225,15 +225,22 @@ function keyRows(state) {
         { kind: "group", label: "Preset" },
         { kind: "choice", id: "preset", label: "Keybinding preset", glyph: "keyboard",
           value: PRESET_LABELS[state.preset] || state.preset },
-        { kind: "hint", label: "Mac and Windows, over the one key table. Every other binding is "
-                               + "shared, and the change lands in this window at once." },
+        { kind: "hint", label: "Default, Vim, Mac and Windows, over the one key table. Every other "
+                               + "binding is shared, and the change lands in this window at once." },
         { kind: "group", label: "This preset" }
     ]
     var table = state.presetKeys || []
+    var listed = 0
     for (var i = 0; i < table.length; i++) {
-        if (table[i].preset === state.preset)
+        if (table[i].preset === state.preset) {
             out.push({ kind: "fact", label: table[i].label, value: table[i].keys })
+            listed += 1
+        }
     }
+    // Default and Vim claim no chord, so the group says so rather than drawing a heading over nothing.
+    if (listed === 0)
+        out.push({ kind: "hint", label: "This preset claims no chord of its own, so the shared key "
+                                        + "table stands exactly as it is written." })
     out.push({ kind: "hint", label: "Press ? for the keyboard sheet." })
     return out
 }

@@ -221,13 +221,24 @@ function runCursor(check) {
           Settings.stepRow(pinned, 2, 1), 2)
 }
 
-// The two-value toggle over the one key table. Each row the Keys section lists is resolved back
-// through the generated overlay, so a listed chord cannot advertise a binding the preset lacks.
+// SettingsKeys.html's four-value chooser over the one key table. Each row the Keys section lists is
+// resolved back through the generated overlay, so a listed chord cannot advertise a binding the
+// preset lacks, and a preset that overlays nothing has to say so rather than draw an empty group.
 function runPresets(check) {
-    check("there are exactly two presets, which is what the public list named",
-          Settings.PRESETS.join(","), "mac,windows")
-    check("both are named for the panel", Settings.PRESET_LABELS.mac + "," + Settings.PRESET_LABELS.windows,
-          "Mac,Windows")
+    check("the chooser offers the board's four presets, in its own order",
+          Settings.PRESETS.join(","), "default,vim,mac,windows")
+    check("each is named for the panel",
+          Settings.PRESETS.map(function (id) { return Settings.PRESET_LABELS[id] }).join(","),
+          "Default,Vim,Mac,Windows")
+    // ui/ViewState.qml resolves an unrecognised stored name to PRESETS[0], so the order carries the
+    // board's rule that a missing or unknown value falls back to Default and not to Mac.
+    check("and the first is Default, which is what an unrecognised stored name falls back to",
+          Settings.PRESETS[0], "default")
+    var claiming = {}
+    for (var c = 0; c < Keymap.PRESET_KEYS.length; c++)
+        claiming[Keymap.PRESET_KEYS[c].preset] = true
+    check("Default and Vim claim no chord of their own, which is the board's dash on the view rows",
+          [claiming["default"] === true, claiming["vim"] === true].join(","), "false,false")
     var listed = 0
     for (var i = 0; i < Keymap.PRESET_KEYS.length; i++) {
         var row = Keymap.PRESET_KEYS[i]
@@ -241,4 +252,23 @@ function runPresets(check) {
           Keymap.lookupPreset("windows", Qt.Key_1, "", Qt.ControlModifier), "")
     check("and a Windows chord is dead under Mac",
           Keymap.lookupPreset("mac", Qt.Key_H, "", Qt.ControlModifier), "")
+    check("and every one of them is dead under Default",
+          [Keymap.lookupPreset("default", Qt.Key_1, "", Qt.ControlModifier),
+           Keymap.lookupPreset("default", Qt.Key_H, "", Qt.ControlModifier),
+           Keymap.lookupPreset("vim", Qt.Key_1, "", Qt.ControlModifier)].join("|"), "||")
+
+    var section = function (id) { return Settings.rows("keys", { preset: id, presetKeys: Keymap.PRESET_KEYS }) }
+    var chords = function (rows) { return rows.filter(function (r) { return r.kind === "fact" }).length }
+    check("the Keys section names each preset the way the chooser does",
+          [section("default")[1].value, section("vim")[1].value, section("mac")[1].value,
+           section("windows")[1].value].join(","), "Default,Vim,Mac,Windows")
+    check("Mac and Windows list every chord they claim, and nothing else does",
+          [chords(section("default")), chords(section("vim")), chords(section("mac")),
+           chords(section("windows"))].join(","), "0,0,7,4")
+    check("a preset that claims none says so rather than drawing an empty group",
+          [section("default"), section("vim"), section("mac")].map(function (rows) {
+              return rows.filter(function (r) {
+                  return r.kind === "hint" && r.label.indexOf("claims no chord") >= 0
+              }).length
+          }).join(","), "1,1,0")
 }

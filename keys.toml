@@ -102,11 +102,12 @@ action = "toggleHidden"
 
 # Shift falls through instead of returning, because shift-modified letters already carry their
 # own capital text (see G below); this table only covers the arrow keys, which carry no text.
-# The Mac and Windows preset overlay, the two-value toggle the Keys settings section switches. It is
-# consulted before every table above, so a preset can claim a chord the shared tables also bind, and
-# a chord listed here is live only while its own preset is selected. Default is mac, which is what
-# the shared tables were already written to (Finder's, with Cmd read as Ctrl), so a box that never
-# opens Settings keeps exactly the map v0.1.3 shipped.
+# The preset overlay, the four-value chooser the Keys settings section walks: default, vim, mac and
+# windows, in SettingsKeys.html's own order. It is consulted before every table above, so a preset
+# can claim a chord the shared tables also bind, and a chord listed here is live only while its own
+# preset is selected. default and vim own no row here on purpose: SettingsKeys.html's inventory gives
+# them a dash on the three view rows and a bare key the shared tables already bind on every other,
+# so each is the shared map exactly as written, and Default is what a missing or unknown name means.
 # mods is "ctrl" for a chord with Control and no Shift, "ctrlshift" for both. keys is what the Keys
 # section prints beside the label, and it is spelled the way SettingsKeys.html spells a chord. Each
 # block writes name, mods, key, keys, action, then label, in that order.

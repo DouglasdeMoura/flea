@@ -374,8 +374,8 @@ the name is one typed word away.
   the same one setting.
 - **A settings panel** on `,` and on the toolbar's sliders button, with three working groups: a text
   size that follows Omarchy or pins one of its stops; per-action context-menu visibility with one
-  tri-state master over the six basic actions; and a Mac/Windows keyboard preset over that one key
-  table. Nothing else is in it yet.
+  tri-state master over the six basic actions; and a keyboard preset, Default, Vim, Mac or Windows,
+  over that one key table. Nothing else is in it yet.
 - **It looks like Omarchy** because it reads the live palette, the same tokens the shell
   bar uses, and every mark is drawn in the Omarchy cut, which is its own section below.
 
@@ -398,9 +398,11 @@ row:
   the change lands on the menu's next open. Hiding a row never touches its key. Show keyboard hints
   is the one row here that is not an action: off, which is how it ships, no menu prints the key
   beside a row and an empty folder offers no tip; on, both appear. Every chord is bound either way.
-- **Keys.** Mac or Windows, over the one `keys.toml` table. Everything the two platforms agree on
-  is shared and answers under both; the preset carries only the chords where they differ, and it
-  rebinds in the window at once. Press `?` for the whole map.
+- **Keys.** Default, Vim, Mac or Windows, over the one `keys.toml` table. Almost everything is
+  shared and answers under all four: Default and Vim claim no chord of their own, so each is that
+  shared map exactly as written, and Mac and Windows add only the chords where the two platforms
+  differ. It ships on Default, an unrecognised stored name reads as Default, and a change rebinds
+  in the window at once. Press `?` for the whole map.
 
 The choices live in `~/.local/state/flea/ui.json`, the one file Flea keeps for itself, beside the
 column set and everything else that outlives a window. The text size is stored as `{"mode":"system"}`

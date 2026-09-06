@@ -1504,7 +1504,7 @@ reason `[digits]` is expanded by hand in that battery: a checklist derived from 
 passes by having nothing in it.
 
 A `[[preset]]` table joined this with the settings panel's Keys section, and it is the whole of
-the Mac/Windows toggle. Each row names the preset it belongs to, the modifier state, the Qt key,
+the four-value chooser SettingsKeys.html draws. Each row names the preset it belongs to, the modifier state, the Qt key,
 the chord as the Keys section prints it, the action and a label. The generator emits it twice
 from that one row: as `Keymap.PRESET_KEYS`, which the settings panel lists, and as the if-chain
 inside `Keymap.lookupPreset`, which `lookup()` consults before every shared table. Emitting both
@@ -1514,8 +1514,11 @@ the binding as a literal `Qt.Key_*` is what keeps it inside the `qml6` probe abo
 The live preset is a module-level `var preset` in the generated file, set by `ui/ViewState.qml`'s
 `onKeysPresetChanged`. A `.pragma library` holds one copy per QML engine, so that one assignment
 reaches every caller of `lookup()` with no second wire and no plumbing through `ui/js/Focus.js`
-or `ui/Pane.qml`, both of which sit against their file budget. An unrecognised name clamps to
-`mac`, which is what the shared tables were already written as: Finder's, with Cmd read as Ctrl.
+or `ui/Pane.qml`, both of which sit against their file budget. `default` and `vim` own no row in
+that table, because SettingsKeys.html's inventory gives them a dash on the three view rows and a
+bare shared key on every other row a preset governs, so a name this build does not have reaches no
+overlay row and lands on exactly the map Default draws. `ui/ViewState.qml` is the validator: it
+resolves a stored name that is not in `Settings.PRESETS` to the first of them, `default`.
 
 **A preset overlay must never hold a chord the `[[sheet]]` table draws.** The sheet is one static
 array with no preset of its own, so a cap it draws for a Mac-only chord would be wrong for half

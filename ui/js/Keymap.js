@@ -1,11 +1,12 @@
 .pragma library
 
 // Generated from keys.toml by tools/flea-keymap-gen. Do not edit.
-// The selected Mac/Windows preset. A .pragma library holds one copy per QML engine, so
+// The selected keybinding preset. A .pragma library holds one copy per QML engine, so
 // ui/ViewState.qml sets it once and every caller of lookup() below follows without a
-// second wire; an unknown name falls back to mac rather than leaving the map empty.
-var preset = "mac"
-function setPreset(name) { preset = name === "windows" ? "windows" : "mac" }
+// second wire; default and vim claim no row below, so a name this build does not have
+// reaches no overlay row and lands on exactly the map Default draws.
+var preset = "default"
+function setPreset(name) { preset = name }
 
 // The [[preset]] rows of keys.toml, for ui/SettingsPanel.qml's Keys section. code is the Qt
 // name the overlay below matches on, so a row here and the binding are the same keys.toml row.
