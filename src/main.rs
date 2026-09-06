@@ -124,9 +124,13 @@ fn main() {
 
     // Bare, so a script can read it without parsing. Checked before every other mode: the only
     // way to tell which Flea is installed is to ask it, and updates here are a manual git pull.
-    if args.iter().any(|a| a == "--version") {
+    if args.len() == 2 && args[1] == "--version" {
         println!("{}", env!("CARGO_PKG_VERSION"));
         exit(0);
+    }
+    // Anywhere in argv, because this mode is read before the others and must refuse rather than win over one.
+    if args.iter().any(|a| a == "--version") {
+        usage("--version takes nothing");
     }
 
     if args.iter().any(|a| a == "--backend") {
