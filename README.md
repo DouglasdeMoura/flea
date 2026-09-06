@@ -510,7 +510,7 @@ that pin back by hand. See [`docs/install.md`](docs/install.md).
 The usage above lists the modes meant to be typed. It deliberately leaves out the ones Flea's own
 parts drive: `--backend`, `--prewarm`, `--open`, `--terminal`, `--pick` and `--print-target` are
 all real and all absent from it, so being unlisted says nothing about whether a mode exists.
-`flea --open <path>` is what Enter on a file runs, and it hands the file to `gio open` and waits
+`flea --open <path>` is what Enter on a file other than an archive runs, and it hands the file to `gio open` and waits
 for it, while `flea --terminal <dir>` is what the topbar's terminal button and `Ctrl+T` run, and
 it hands the directory to `xdg-terminal-exec --dir=`. **Both print nothing whatever when they
 succeed**, and exit 0, so silence from one of them is the success case and not a missing mode.
@@ -554,7 +554,7 @@ and the application cannot disagree.
 | Ctrl-d, Ctrl-u | Half a viewport |
 | `h`, Backspace, Ctrl-Up | Parent directory; Ctrl-Up under the Mac preset |
 | `l` | Browse forward: enter a directory, preview a file, page a PDF, or activate a rail/share row; unused in media |
-| Return, Enter, Ctrl-Down | Open a directory, or open a file with the desktop's handler; Ctrl-Down under the Mac preset |
+| Return, Enter, Ctrl-Down | Open a directory, open an archive in Flea's own view, or open any other file with the desktop's handler; Ctrl-Down under the Mac preset |
 | Space | Quick Look, and close it |
 | Left, Right | Page a PDF, or seek in media |
 | `v` | Toggle selection on the row |
