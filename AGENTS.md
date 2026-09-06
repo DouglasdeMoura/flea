@@ -766,6 +766,73 @@ travels in a JSON file inside a `mkdtemp` the backend owns and removes. `ui/pick
 with `FileView` and only kills its own process on `saved()`: the backend reads the file after the
 child exits, and a write still in flight would be a lost answer read as a fault.
 
+## Show in folder
+
+`org.freedesktop.FileManager1` is the interface a desktop's "Show in folder" goes through, and issue
+54 is what happens with nothing of Flea's owning it: Chromium reveals a download and Nautilus opens.
+Measured with `strings` against Chromium 151.0.7922.173 on this box, the binary carries exactly
+`org.freedesktop.FileManager1`, `/org/freedesktop/FileManager1` and `ShowItems`, so that one call is
+the whole of what has to be answered for the reported symptom.
+
+`tools/flea-filemanager1` answers it, and it is the third non-Rust helper in this tree for the same
+reason as the second: a D-Bus service has to own a name, export an object and answer method calls,
+and this crate has no dependencies at all. It copies `tools/flea-portal`'s shape, its `FLEA_BIN`
+seam, its `say()` elision and its release-then-quit idle exit.
+
+**Every window it opens is `flea --select` or `flea <dir>`**, which is why the service is small.
+`--select` already resolves a `file://` URI to its parent and puts the cursor on the entry, so
+`ShowItems` is that flag and nothing more; `ShowFolders` wants the folder itself open, which is the
+positional argument. Two items in one directory are one window, because a window can only put the
+cursor on one row, and the first URI named under a directory is the one its window selects.
+
+**`ShowItemProperties` answers `org.freedesktop.DBus.Error.NotSupported`.** Flea has no properties
+dialog. Falling back to `ShowItems` would answer a different question than the caller asked and
+would look, to the caller, exactly like success; a reply that did nothing at all would be worse.
+The signature returns no values, so the error reply is the only channel a refusal has.
+
+**The URIs come from another application, so the boundary is the whole of the rest of the file.**
+The decoder is `GLib.filename_from_uri`, glib's own, rather than a second one: measured here with
+PyGObject 3.56.3 on Python 3.14.7 it refuses a foreign scheme, a bare path, `file:`, `file://` and
+a `%00`, and it hands back the authority separately. The two rules it does not carry are the two the
+service adds: an authority that is neither empty nor `localhost` is refused, and a decoded path
+holding a control character is refused, because `%0A` decodes to a newline without complaint. A path
+that is not there and a target with no parent are refused too. Each refusal is per URI and elided to
+one sentence on stderr, so one bad URI beside a good one does not take the call down; a call left
+with nothing to open answers `org.freedesktop.DBus.Error.InvalidArgs`.
+
+**The shape was verified with a real round trip, not assumed.** `tools/flea-portal` had shipped an
+`isinstance(value, bytes)` test where PyGObject 3.56.3 delivers a list of ints for a D-Bus `ay`. A
+`GLib.Variant("(ass)", ...)` unpacked on this box gives a `list` of `str`, so `isinstance(uri, str)`
+is the right test here, and it is there because the check costs nothing and the last guess was wrong.
+
+**Registration is `packaging/com.thisisgm.flea.FileManager1.service`, named for Flea and not for the
+interface.** Nautilus owns `/usr/share/dbus-1/services/org.freedesktop.FileManager1.service` on this
+box, so a file of that name is a pacman conflict; dolphin, thunar and nemo each ship their own
+vendor-named file carrying `Name=org.freedesktop.FileManager1`, which makes a vendor name the
+measured convention rather than a workaround.
+
+**With several installed the choice is not ours, and this is the honest limit of the feature.**
+Measured on a private bus given all five files with every `Exec` rewritten to a marker: D-Bus keeps
+the FIRST registration the directory hands back. Writing Flea's file last, nautilus's won; writing
+it first, Flea's won. So the rule is readdir order, not alphabetical and not newest-wins, and readdir
+order is the filesystem's. Omarchy ships nautilus in `omarchy-base.packages`, so a stock box always
+has a second claimant and on this box today nautilus's file is the first of the four in `ls -U`.
+The README gives the one-liner that asks the box which one answers, and says to remove the other
+file manager, because the only mechanism that would outrank a package file is a user-level service
+file in `$XDG_DATA_HOME/dbus-1/services` and this tree does not write one: that directory is scanned
+first and shadows `/usr/share/dbus-1/services` silently, which is how a development portal backend
+shipped to the operator as a bug.
+Nothing is ever written to `~/.local/share/dbus-1/services`: a user-level service file outranks
+`/usr/share/dbus-1/services` and silently shadows it, which is how a development portal backend
+shipped to the operator as a bug.
+
+**`tests/filemanager1.sh` drives the real interface on a private session bus** it starts inside its
+own fixture, with a service directory of its own and `FLEA_BIN` pointing at a stub that records its
+argv. That makes D-Bus activation itself part of the test rather than a manual step, and the first
+case is the negative control: on a bus with an empty service directory the same call fails
+`ServiceUnknown`. The registration under test is the shipped file with only its `Exec` repointed at
+the checkout, so a broken `Name=` in `packaging/` reddens the suite.
+
 ## Module map
 
 - `main.rs` dispatches on argv, and this is every flag it matches: `--backend` runs the command

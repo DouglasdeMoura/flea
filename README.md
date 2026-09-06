@@ -55,6 +55,28 @@ portal caller on the box at once. It writes one interface key to
 other portal keep the backend they already had. It also adds one Hyprland rule that gives the chooser
 the same floating treatment Omarchy already gives the GTK one. `flea --picker off` puts both back.
 
+"Show in folder" needs neither of those and no configuration at all. Chromium, Firefox, Steam and
+every other application that reveals a downloaded file call `org.freedesktop.FileManager1` on the
+session bus, and installing Flea registers it for that name, so the reveal opens Flea on the file's
+own directory with the file selected. Nothing is claimed while Flea is not running: D-Bus starts the
+service on the call and it exits again half a minute later.
+
+**One caveat, and it is the whole of it.** Nautilus, Dolphin, Thunar and Nemo each register for that
+same name, and Omarchy ships Nautilus in `omarchy-base.packages`, so on a stock box there are at
+least two claimants. D-Bus keeps the FIRST registration the services directory hands back, which is
+readdir order and is neither alphabetical nor newest-wins: measured on this box by giving a private
+bus all five files and moving Flea's to the front, the front one won both times. Which one is in
+front after installing Flea is therefore not something Flea can decide. Ask the box:
+
+```bash
+for f in $(ls -U /usr/share/dbus-1/services); do
+  grep -Fqs 'Name=org.freedesktop.FileManager1' "/usr/share/dbus-1/services/$f" && { echo "$f answers"; break; }
+done
+```
+
+If that names something other than `com.thisisgm.flea.FileManager1.service`, remove the file manager
+you are not using and it will name Flea's.
+
 To track `main` instead of releases, use the AUR package:
 
 ```bash
@@ -490,7 +512,9 @@ one portal request rather than by a person. See `AGENTS.md` for their contract.
 parent directory, and puts the cursor and the selection on that one entry once the
 directory's first page of rows arrives. A target that does not exist still opens its
 parent, with nothing selected: this is the one nautilus call site the Dropbox panel needs
-(`Service.qml` reveals a synced file with `nautilus --select`). `--print-target` is a
+(`Service.qml` reveals a synced file with `nautilus --select`), and it is also the whole of
+what `org.freedesktop.FileManager1.ShowItems` means, so `tools/flea-filemanager1` answers
+that call by running this. `--print-target` is a
 test-only flag that resolves `--select`'s pair and prints `<parent> <target>` instead of
 opening a window; it exists so the resolution is testable without a display.
 

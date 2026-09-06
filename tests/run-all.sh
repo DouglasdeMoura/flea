@@ -19,7 +19,7 @@ cargo build -q || { printf 'run-all: cargo build failed, nothing else was run\n'
 printf 'run-all: building target/release/flea, thumbs.sh needs it\n'
 cargo build -q --release || { printf 'run-all: release build failed, nothing else was run\n' >&2; exit 1; }
 
-headless="js keymap-gen charts budget empty-state sandbox capability-ownership gio-auth gvfs ops modes protocol archive thumbs network-open-share mount-listing uistate uiwriter media"
+headless="js keymap-gen charts budget empty-state sandbox capability-ownership gio-auth gvfs ops modes protocol archive thumbs network-open-share mount-listing uistate uiwriter media filemanager1"
 failed=0
 ran=0
 
