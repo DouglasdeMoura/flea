@@ -518,6 +518,19 @@ list_row_at_y() {
     (( best_gap <= $(ipc metrics | cut -d' ' -f4) / 2 )) && printf '%s' "$best"
 }
 
+# A right click on the listing's empty space, the background menu's own entrance. The point is
+# proved to lie off every drawn row and inside the view before the click, so a case can never pass
+# on a row's own menu and can never fail because it clicked the status bar instead.
+click_background() {
+    local cx cy wx wy ww wh landed
+    read -r cx cy <<< "$(ipc listingBackgroundCentre)"
+    [[ -n "$cy" ]] || fail "click_background: the listing area has no centre of its own"
+    landed=$(list_row_at_y "$cy")
+    [[ -z "$landed" ]] || fail "click_background: the listing area's centre lands on row $landed"
+    read -r wx wy ww wh < <(window_box)
+    omarchy-drive click "$((cx + wx))" "$((cy + wy))" right >/dev/null
+}
+
 # "Kind=PNG image|Size=346 B" becomes "Kind|Size": the labels are the canvas's contract, and the
 # values move with the fixture.
 fact_labels() {
@@ -1587,6 +1600,171 @@ case_menu() {
     shot menu-chosen
     [[ "$(ipc path)" == "$dir/subdir" ]] || fail "the Open action did not open the directory"
     [[ "$(ipc contextMenuVisible)" == "false" ]] || fail "the menu stayed open after its action ran"
+}
+
+# Menus.html's background column, on a right click that landed on no row. Every row it draws is
+# exercised here except Settings, which is the board's third door and is driven where the other two
+# are, in settings_doors. New File is the one row on the board this release has no backend command
+# for at all: the backend has mkdir and nothing that creates an empty file, so the row is not built.
+case_background() {
+    local dir="$fixture_root/background"
+    sandbox_scratch "$dir"
+    mkdir -p "$dir/dest"
+    : > "$dir/a.txt"
+    : > "$dir/b.txt"
+    : > "$dir/c.txt"
+    launch "$dir"
+    wait_listing 4
+
+    click_background
+    settle
+    printf 'BACKGROUND visible=%s entries=%s glyphs=%s hints=%q\n' \
+        "$(ipc contextMenuVisible)" "$(ipc contextMenuEntries)" \
+        "$(ipc contextMenuGlyphs)" "$(ipc contextMenuHints)"
+    shot background-menu
+    printf 'BACKGROUND_OCR_BEGIN\n'
+    omarchy-drive ocr flea || true
+    printf 'BACKGROUND_OCR_END\n'
+    [[ "$(ipc contextMenuVisible)" == "true" ]] \
+        || fail "background: a right click on empty space opened no menu"
+    [[ "$(ipc contextMenuEntries)" == "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings" ]] \
+        || fail "background: the menu is not the board's column, it is $(ipc contextMenuEntries)"
+    [[ "$(ipc contextMenuGlyphs)" == "folder-plus|-|clipboard|check|-|sort|eye|-|sliders" ]] \
+        || fail "background: a row lost its mark, the set is $(ipc contextMenuGlyphs)"
+    # A right click ON a row still gets that row's own menu: the two entrances share one instance,
+    # so a hasRow left standing from the last open would be the defect this asserts against.
+    key -k Escape >/dev/null
+    settle
+    click_row 1 right
+    settle
+    [[ "$(ipc contextMenuEntries)" == Open\|* ]] \
+        || fail "background: a row's own menu came back as $(ipc contextMenuEntries)"
+    key -k Escape >/dev/null
+    settle
+
+    # Sort by, the one submenu row. Its flyout is the three orders the backend can produce, and the
+    # order the listing lands in is read off the header's own mark, not off a row's contents.
+    click_background
+    settle
+    menu_seek "Sort by"
+    key -k Return >/dev/null
+    settle
+    printf 'BACKGROUND sort from=%s flyout=%s glyphs=%s\n' \
+        "$(ipc sortMark)" "$(ipc contextMenuSubmenuEntries)" "$(ipc contextMenuSubmenuGlyphs)"
+    shot background-sort
+    [[ "$(ipc contextMenuSubmenuEntries)" == "Name|Size|Date Modified" ]] \
+        || fail "background: the Sort by flyout is $(ipc contextMenuSubmenuEntries)"
+    [[ "$(ipc contextMenuSubmenuGlyphs)" == "sort|sort|sort" ]] \
+        || fail "background: the sort flyout drew $(ipc contextMenuSubmenuGlyphs)"
+    key -k Down >/dev/null
+    key -k Return >/dev/null
+    settle
+    printf 'BACKGROUND sorted to=%s\n' "$(ipc sortMark)"
+    [[ "$(ipc contextMenuVisible)" == "false" ]] || fail "background: choosing an order left the menu open"
+    [[ "$(ipc sortMark)" == "size:asc" ]] \
+        || fail "background: Sort by Size left the listing in $(ipc sortMark)"
+    # And back to the board's own default order, which the steps below read row numbers against.
+    menu_click "Sort by" name
+    [[ "$(ipc sortMark)" == "name:asc" ]] \
+        || fail "background: Sort by Name left the listing in $(ipc sortMark)"
+
+    # Select all, clicked rather than keyed: a row only the keyboard can reach is not the row the
+    # board drew. Escape then hands the listing back the empty selection the steps below want.
+    menu_click "Select all"
+    printf 'BACKGROUND selectall count=%s total=%s\n' "$(ipc selectionCount)" "$(ipc total)"
+    [[ "$(ipc selectionCount)" == "$(ipc total)" ]] \
+        || fail "background: Select all selected $(ipc selectionCount) of $(ipc total)"
+    key -k Escape >/dev/null
+    settle
+
+    # Paste, with something really on the clipboard and a destination of its own, so the row is
+    # exercised doing work rather than only answering the empty-clipboard sentence. Directories sort
+    # first, so under name ascending row 0 is dest and row 1 is a.txt.
+    click_row 1 left
+    settle
+    key y >/dev/null
+    settle
+    click_row 0 left
+    settle
+    key -k Return >/dev/null
+    wait_listing 0
+    [[ "$(ipc path)" == "$dir/dest" ]] || fail "background: the case is in $(ipc path), not $dir/dest"
+    # The empty listing is also the strongest case for this menu, and it has no row to aim from.
+    click_background
+    settle
+    [[ "$(ipc contextMenuEntries)" == "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings" ]] \
+        || fail "background: an empty directory drew $(ipc contextMenuEntries)"
+    shot background-empty
+    key -k Escape >/dev/null
+    settle
+    menu_click "Paste"
+    settle
+    printf 'BACKGROUND paste landed=%s message=%q\n' \
+        "$([[ -f "$dir/dest/a.txt" ]] && echo yes || echo no)" "$(ipc lastMessage)"
+    [[ -f "$dir/dest/a.txt" ]] || fail "background: Paste put nothing in $dir/dest"
+
+    # New folder, the only background row that writes on its own, so the directory is the proof.
+    [[ ! -e "$dir/dest/New Folder" ]] || fail "background: New Folder existed before the row ran"
+    menu_click "New folder"
+    settle
+    printf 'BACKGROUND newfolder made=%s message=%q\n' \
+        "$([[ -d "$dir/dest/New Folder" ]] && echo yes || echo no)" "$(ipc lastMessage)"
+    [[ -d "$dir/dest/New Folder" ]] || fail "background: New folder created nothing in $dir/dest"
+
+    # Show hidden files, the row the Menus board locks, read off the state it flips and flipped back
+    # through its own changed label so the case leaves the listing as it found it.
+    local was
+    was=$(ipc showHidden)
+    menu_click "Show hidden files"
+    printf 'BACKGROUND hidden %s -> %s\n' "$was" "$(ipc showHidden)"
+    [[ "$(ipc showHidden)" != "$was" ]] || fail "background: the hidden toggle stayed $was"
+    menu_click "Hide hidden files"
+    [[ "$(ipc showHidden)" == "$was" ]] || fail "background: the hidden toggle did not flip back"
+
+    # The grid and the columns view carry the same entrance, because the board draws one menu and
+    # not a list-view menu: a right click on empty space means the same thing in all three.
+    local view
+    for view in grid columns; do
+        key -M ctrl -k "$([[ "$view" == grid ]] && echo 3 || echo 2)" -m ctrl >/dev/null
+        settle
+        [[ "$(ipc viewMode)" == "$view" ]] || fail "background: the $view view did not come up"
+        click_background
+        settle
+        printf 'BACKGROUND %s entries=%s\n' "$view" "$(ipc contextMenuEntries)"
+        shot "background-$view"
+        [[ "$(ipc contextMenuEntries)" == "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings" ]] \
+            || fail "background: the $view view drew $(ipc contextMenuEntries)"
+        key -k Escape >/dev/null
+        settle
+    done
+}
+
+# Opens the background menu and clicks one of its rows by label, optionally stepping into that row's
+# flyout and choosing the entry named second. The row's own centre is read off the drawn frame, so
+# no case derives a pixel from a row count the Menus section can change under it.
+menu_click() {
+    local want="$1" sub="${2-}" index cx cy wx wy ww wh
+    click_background
+    settle
+    index=$(menu_row_index "$want") || fail "menu_click: the background menu has no $want row"
+    read -r cx cy <<< "$(ipc contextMenuRowCentre "$index")"
+    [[ -n "$cy" ]] || fail "menu_click: the $want row has no on-screen centre"
+    read -r wx wy ww wh < <(window_box)
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    settle
+    [[ -z "$sub" ]] && return 0
+    local i=0 entry found=no entries
+    entries=$(ipc contextMenuSubmenuEntries)
+    local IFS='|'
+    for entry in $entries; do
+        [[ "${entry,,}" == "${sub,,}" ]] && { found=yes; break; }
+        i=$((i + 1))
+    done
+    unset IFS
+    [[ "$found" == yes ]] || fail "menu_click: the $want flyout has no $sub entry, it holds $entries"
+    for _ in $(seq 1 "$i"); do key -k Down >/dev/null; done
+    key -k Return >/dev/null
+    settle
 }
 
 # Task 18: dotfiles off by default, the "." key and the context menu entry both flip one state
@@ -5350,8 +5528,8 @@ settings_write_refused() {
     settle
 }
 
-# Two of the three doors the Settings board draws: the comma key from either view and the toolbar's
-# sliders button. The third is a background-menu row this product has no background menu for.
+# All three doors the Settings board draws: the comma key from either view, the toolbar's sliders
+# button, and the Settings row on the background menu.
 settings_doors() {
     key , >/dev/null
     settle
@@ -5373,16 +5551,21 @@ settings_doors() {
     key -k Escape >/dev/null
     settle
 
-    # The board draws a third door on the background menu, and this product has no background menu to
-    # put it on: ui/ContextMenu.qml's hasRow has no writer anywhere in ui/, and the listing's only
-    # right-click route is a row delegate's own TapHandler. So no menu offers a Settings row, and
-    # this asserts that rather than shipping one nothing can reach.
+    # The third door: the background menu's own Settings row. SettingsMenus.html's table gives it to
+    # that column alone, so a row's menu offering one would be a fourth door the board denies.
     click_row 0 right
     settle
     [[ "|$(ipc contextMenuEntries)|" != *"|Settings|"* ]] \
-        || fail "settings: a menu offered a Settings row, and no menu in this product can reach one"
+        || fail "settings: a row's own menu offered a Settings row, which the board gives the background alone"
     key -k Escape >/dev/null
     settle
+    menu_click "Settings"
+    [[ "$(ipc settingsOpen)" == "true" ]] \
+        || fail "settings: the background menu's Settings row did not open the panel"
+    shot settings-from-background
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "false" ]] || fail "settings: Escape did not close the panel again"
 }
 
 # The Display section, whose consumer is ui/Theme.qml. The board rules that Omarchy owns the size
@@ -5687,7 +5870,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu background hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
 
 : > "$run_log"
 : > "$flea_log"
