@@ -1,6 +1,6 @@
 // flea --default: the one per-user step pacman cannot own, see docs/install.md "Make Flea the default".
 use crate::hyprkeys;
-use crate::userfile::{config_home, env_dir, home, replace_file};
+use crate::userfile::{config_home, data_file, replace_file};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -113,21 +113,9 @@ fn mimeapps_path() -> Result<PathBuf, String> {
     Ok(config_home()?.join("mimeapps.list"))
 }
 
-// The lookup xdg-mime makes when it resolves an id: the data home first, then every data dir.
+// Proof the package landed, the same search chooser::installed_portal() makes for its own file.
 fn installed_entry() -> Option<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    match env_dir("XDG_DATA_HOME") {
-        Some(p) => dirs.push(p),
-        None => {
-            if let Ok(h) = home() {
-                dirs.push(h.join(".local/share"));
-            }
-        }
-    }
-    let system = std::env::var("XDG_DATA_DIRS").ok().filter(|v| !v.is_empty());
-    let system = system.unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
-    dirs.extend(system.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
-    dirs.into_iter().map(|d| d.join("applications").join(DESKTOP_ID)).find(|p| p.is_file())
+    data_file(&format!("applications/{}", DESKTOP_ID))
 }
 
 // The per-user file xdg-mime writes, of which only the [Default Applications] section is ours to touch:
