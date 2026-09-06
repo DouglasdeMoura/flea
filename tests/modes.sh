@@ -6,6 +6,8 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 BIN=./target/debug/flea
+# Without this every case below drives a missing binary and reports the result as a product failure.
+[ -x "$BIN" ] || { echo "modes.sh: $BIN is missing, run cargo build" >&2; exit 1; }
 # current_exe() answers with the kernel's own resolved path, so the expectation is resolved the same way.
 BIN_REAL=$(readlink -f "$BIN")
 # An operator exporting any of these would answer for src/gui.rs, which is the thing under test here.

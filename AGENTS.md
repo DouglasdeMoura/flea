@@ -595,25 +595,50 @@ one merges that JSON object through the shared update path, and anything more is
 "The state file".
 
 `--default` and `--default off` are matched the same way, in their own exact shape
-(`args.len() == 2`, and `args.len() == 3` with `args[2] == "off"`), dispatching to
-`defaults::claim()` and `defaults::release()`. Unlike `--prewarm` and `--open`, a malformed
-`--default` does not fall through to the unknown-flag branch: a third check catches any argv
-with `args[1] == "--default"` that matched neither shape and names its own usage error,
-`--default takes nothing, or off`, before exiting 2. `claim()` refuses and writes nothing when
-Flea's own desktop entry, `com.thisisgm.flea.desktop` (`defaults::DESKTOP_ID`), is not installed
-under `$XDG_DATA_HOME` (or `~/.local/share`) or any of `$XDG_DATA_DIRS` (default
+(`args.len() == 2`, and `args.len() == 3` with `args[2] == "off"`), dispatching to `main.rs`'s own
+`claim_both()` and `release_both()` rather than straight into `defaults`: a box updating from 0.1.3
+carries a Flea with no chooser routing at all, so one command finishes the job. Unlike `--prewarm`
+and `--open`, a malformed `--default` does not fall through to the unknown-flag branch: a third
+check catches any argv with `args[1] == "--default"` that matched neither shape and names its own
+usage error, `--default takes nothing, or off`, before exiting 2. `defaults::claim()` refuses and
+writes nothing when Flea's own desktop entry, `com.thisisgm.flea.desktop` (`defaults::DESKTOP_ID`),
+is not installed under `$XDG_DATA_HOME` (or `~/.local/share`) or any of `$XDG_DATA_DIRS` (default
 `/usr/local/share:/usr/share`): the packaged entry is the proof the pacman package landed, and
 pointing `xdg-mime` or Hyprland's bindings at an uninstalled binary would be a claim on nothing.
-Past that check it rewrites two independent per-user files through `userfile::replace_file` (see
+Past that check `defaults::claim()` rewrites two independent per-user files through
+`userfile::replace_file` (see
 "Predictable path writes"): the `inode/directory` MIME default via `xdg-mime`, and the
 additive, markered block `hyprkeys::claim()` adds to Omarchy's `~/.config/hypr/bindings.lua` for
-the two file-manager chords. `--default off` reverses both, each half a no-op when it was never
-claimed; either half's failure is reported without blocking the other, see `defaults::report`.
+the two file-manager chords.
+
+**The chooser step is the conditional one and the other two are not.** Past the handler half,
+`claim_both()` asks `chooser::backend_installed()`, and with no `flea.portal` in any portal
+directory it says `no portal backend is installed, so the file chooser step was skipped` on stderr
+and counts that as no failure: that is what a source build gets, because only the pacman package
+installs that file. With one installed it runs `chooser::claim()` too, which writes
+`~/.config/xdg-desktop-portal/portals.conf` and a second markered block in the same
+`~/.config/hypr/bindings.lua`. So a full `--default` touches three files, not two:
+`~/.config/mimeapps.list`, `~/.config/hypr/bindings.lua` and
+`~/.config/xdg-desktop-portal/portals.conf`. **A refused handler claim stops the command there**, so
+the chooser half never writes behind a step that wrote nothing. `release_both()` is
+unconditional and reverses every step, each half a no-op when it was never claimed; no half's
+failure blocks another, see `defaults::report` and `chooser::report`. The `undo both with:` line
+belongs to the invocation and not to a step, so `main.rs` prints it once, after the steps it ran,
+and `--default off` prints none at all.
+
+`--youleftmeforstrata` is a second, undocumented spelling of `--default off`, matched in its own
+exact shape and dispatching to the same `release_both()`. It is deliberately kept out of `usage()`,
+`README.md` and `docs/install.md`, and it is written down here because this file is the internal
+contract: it is state-changing, so anything auditing the mode list has to know it exists.
 
 `--picker` and `--picker off` are matched in the same two exact shapes as `--default`, with the
-same third check naming `--picker takes nothing, or off`, and dispatch to `chooser::claim()` and
-`chooser::release()`. `--pick <reply>` is matched in its own exact shape and is not for people: it
-is how `tools/flea-portal` opens one chooser window. See "The file chooser portal".
+same third check naming `--picker takes nothing, or off`, and dispatch to `main.rs`'s
+`claim_picker()` and to `chooser::release()`. `claim_picker()` is `chooser::claim()` plus the
+`undo both with: flea --picker off` line, printed only when there was a backend to claim, and it
+lives there rather than in `chooser` so that `--default` cannot print a second undo line naming a
+command the operator did not run.
+`--pick <reply>` is matched in its own exact shape and is not for people: it is how
+`tools/flea-portal` opens one chooser window. See "The file chooser portal".
 
 What remains chooses between the terminal interface and the window with two
 booleans, `want_tui` and `want_gui`, not an enum: there are four modes total, each dispatched
@@ -737,8 +762,9 @@ child exits, and a write still in flight would be a lost answer read as a fault.
 - `main.rs` dispatches on argv: `--backend` runs the command loop, `--prewarm <path>
   <first> <dest>` writes the prewarm file, `--open <path>` hands one file to the desktop's
   handler, `--terminal <dir>` opens the configured terminal there, `--default [off]` claims or
-  releases the OS-level default, `--picker [off]` claims or releases the desktop's file chooser,
-  `--pick <reply>` opens one chooser window for `tools/flea-portal`, and anything else
+  releases the OS-level default and the chooser routing together, `--picker [off]` claims or
+  releases the desktop's file chooser alone, `--pick <reply>` opens one chooser window for
+  `tools/flea-portal`, and anything else
   opens the window unless explicit `--tui` requests the terminal interface, see "Modes".
 - `paths.rs` resolves the UI directory and whether a display is available.
 - `gui.rs` execs `qs` against the resolved UI directory.
@@ -1402,17 +1428,28 @@ waits for its consumer.
 - **`./tests/run-all.sh` is the one command, and it exists because nothing executed any suite
   at all.** Before `96186ff` this tree carried twelve suites, no runner and no CI: every
   cross-reference to a suite, here and in `README.md` and in tool and source comments, was
-  prose naming it rather than a line running it, and `PKGBUILD`'s `check()` runs
-  `cargo test --release` alone, which it still does. **`96186ff`'s own message is wrong about
-  this and cannot be rewritten, because the branch is shared:** its subject says nine suites
-  were uninvoked and its body says seven, and the derived answer is zero of the twelve there were
-  then. The runner builds both cargo profiles, since `protocol.sh` drives the debug binary and
-  `thumbs.sh` the release one and a guard on either path leaves a STALE binary in place and
-  certifies code nobody compiled, runs every suite that needs nothing but a shell, and reads each
-  suite's OWN exit code, never a pipeline's. Its own `headless=` list is the inventory of those,
-  so this paragraph carries no count for the list to outgrow. It then names `ui.sh`, `drag.sh` and
-  `bench.sh` with what each needs, so a suite it cannot run stays visible instead of being
-  forgotten a second time.
+  prose naming it rather than a line running it, and `PKGBUILD`'s `check()` ran
+  `cargo test --release --locked` alone; it now also runs `tests/js.sh` and `tests/keymap-gen.sh`,
+  the only two that need no built binary and locate themselves under makepkg's moved
+  `CARGO_TARGET_DIR`. **`96186ff`'s own message is wrong about this and cannot be rewritten,
+  because the branch is shared:** its subject says nine suites were uninvoked and its body says
+  seven, and the derived answer is zero of the twelve there were
+  then. **The runner builds nothing, and the way it stopped is worth knowing.** It built both
+  profiles from `324f321` until `e3bf8c0`, a merge whose own message lists `tests/run-all.sh` as a
+  conflict: the resolution kept the union of the two `headless=` lists and dropped the `cargo build`
+  pair that BOTH sides carried. `grep cargo tests/run-all.sh` is empty from that commit on,
+  `a485200` and `7a5c9a3` included, so both cargo profiles are the caller's job now. `protocol.sh`
+  drives the debug binary and `thumbs.sh` the release one, and each suite that cannot find its own
+  binary says so and exits rather than reporting every case as a product failure. **That guard
+  answers "is there a binary", never "is it this commit's binary"**, which is the very defect
+  `39e1737` was written to close, so a stale `target/debug/flea` still certifies code nobody
+  compiled. Whether the build belongs back in the runner is the runner owner's call and not a
+  documentation question; what is recorded here is what the file does. It runs every suite that
+  needs nothing but a shell, and reads each suite's OWN exit code, never a pipeline's.
+  Its own `headless=` list is the inventory of those and its own `not_run` list is the inventory of
+  the rest with what each needs, so this paragraph carries neither a count nor a membership for
+  either list to outgrow. A suite in neither list fails the runner's own audit, so one cannot go
+  uninvoked a second time.
 - **`./tests/drag.sh` is the internal drag's characterisation suite, 9 checks**, and it has to
   be run by hand: no runner invokes it. It was written against the drag's behaviour BEFORE the
   platform-drag rewrite, so it is the net that catches what the rewrite changes, and it earned
@@ -3452,12 +3489,15 @@ database's, `gio open` is how it is asked, and there is no desktop-entry parsing
 `Ctrl+T` are its only callers. `src/terminal.rs` canonicalizes the directory the same way, refuses
 anything that is not one, and hands the result to `xdg-terminal-exec` as a single `--dir=` argument
 built as an `OsString`, because `Path::display` would substitute U+FFFD for a byte that is not
-UTF-8. **No argv reaches that line with such a byte today**, and the reason is not this file:
-`main()` collects `std::env::args()`, which panics on an argument that is not valid Unicode, so
-`flea --terminal`, `flea --open` and a bare path argument all abort at `env.rs` with a Rust panic
-and status 101 before any mode of their own runs, measured on this box. The `OsString` is the
-lossless form and not a behaviour change; the panic is a separate defect of its own shape. It
-carries the same three guards the opener does: `/dev/null` on all three descriptors,
+UTF-8. **That `OsString` is load-bearing, and argv is not where the byte comes from.** `main()`
+converts `std::env::args_os()` once above every mode and refuses a non-UTF-8 argument there with one
+sentence and status 2, so no such byte reaches this mode through argv at all. It arrives from the
+filesystem instead: `resolved()` calls `std::fs::canonicalize`, so a UTF-8 argument naming a symlink
+whose target carries a byte that is not UTF-8, and a relative UTF-8 argument resolved against a
+directory that does, both answer a `PathBuf` that is not valid UTF-8. Measured on this box against a
+`target-\377` directory reached through an all-ASCII symlink: the canonical path's last byte is
+`0xFF`, `Path::display` renders it as U+FFFD, and the `OsString` keeps it. It carries the same three
+guards the opener does: `/dev/null` on all three descriptors,
 `process_group(0)`, and `thp::enable()` before the spawn. Unlike `--open` it does not wait, because
 the terminal it starts lives as long as the user keeps it open: it returned with the stub's log
 still empty, against a stub that slept half a second before its first write. `xdg-terminal-exec` is
@@ -3623,11 +3663,13 @@ names have twins carrying the same MIME type.
   two rows, the dedupe swallows the second and that row is answered only when the listing is
   replaced or the process drains. Not fixed here, because the fix is the same byte arena and
   it is a whole plan's worth of change through `Listing`, `stat_range` and the wire.
-- `main.rs`: `std::env::args()` panics with exit 101 on a non-UTF8 argv byte, so `flea --open`
-  inherits it and answers none of 0, 2 or 3, but only a shell or a `.desktop` file can produce
-  it and the window cannot, because `scan.rs` goes lossy in phase 1 and `Pane`'s `join` only
-  ever sees that lossy name; same family as the entry above, pre-dating every mode, and the
-  fix is `args_os` across all four modes.
+- `main.rs`: a non-UTF-8 argv byte is refused rather than carried, and that refusal is the corner.
+  `std::env::args_os()` is converted once above every mode, and a byte that is not valid UTF-8
+  answers `flea: <name> is not valid UTF-8, and Flea takes text paths` on stderr with status 2, so
+  `--open`, `--terminal` and a bare path all answer 2 where `std::env::args()` used to panic with
+  101. Only a shell or a `.desktop` file can produce such an argv and the window cannot, because
+  `scan.rs` goes lossy in phase 1 and `Pane`'s `join` only ever sees that lossy name. Opening such a
+  path at all needs the byte arena in the entry above, so this stays a refusal until that lands.
 - `open.rs`: between `canonicalize`, `is_dir` and `spawn` a path that vanishes or is swapped
   for a directory changes the answer, which a concurrent `rm` in the user's own session on
   this single-user machine can produce and which is not exploitable, since no shell and no

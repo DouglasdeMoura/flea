@@ -267,22 +267,17 @@ case_save() {
     printf 'save: SaveFile answers 0 with the reviewed URI, and writes nothing\n'
 }
 
-# The directory the demonstrated exploit named. Read, never written: the chooser answers a URI and
-# the caller owns the write, so a regression shows up as a changed listing rather than as a new file
-# this suite put there. ls -A, because a suite that counts with plain ls is blind to what it seeded.
-autostart_state() {
-    { ls -A "$HOME/.config/autostart" 2>/dev/null
-      find "$HOME/.config/autostart" -type f -exec sha256sum {} + 2>/dev/null; } | sort | sha256sum
-}
-
 # The save name is a client string and the answer built from it must stay inside the folder the
 # window showed. Both ways one arrives: the current_name tools/flea-portal passes through verbatim,
 # and whatever somebody types into the field afterwards. Neither may be rewritten into a safe name;
 # a rewrite answers the caller with a path nobody approved.
+# What carries this case is three readings and no filesystem guard: ipc saveName is empty, so the
+# name was never adopted; Enter on it says "Name the file"; and the request answers 1 with no URI.
+# A guard hashing $HOME/.config/autostart stood here and could not redden: nothing in the chooser
+# writes a file at all, it answers a URI the caller owns the write for, and two levels up from either
+# folder this window can stand in is /home/.config/autostart or /.config/autostart, never that one.
 case_savename() {
     make_fixture
-    local before after
-    before=$(autostart_state)
 
     # The exact string the review demonstrated, arriving the way it did: as the caller's own name.
     portal_ask SaveFile '../../.config/autostart/pwn.desktop' > "$fixture/escaped.txt" &
@@ -332,8 +327,6 @@ case_savename() {
     wait "$asker"; asker=0
     [[ "$(cat "$reply")" == '{"response":1}' ]] || fail "the NUL request replied $(cat "$reply")"
 
-    after=$(autostart_state)
-    [[ "$before" == "$after" ]] || fail "$HOME/.config/autostart changed during this run"
     printf 'savename: a name that would leave the folder is refused from the caller and with a NUL in it, and nothing was answered\n'
 }
 

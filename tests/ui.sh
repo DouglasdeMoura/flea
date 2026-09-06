@@ -342,6 +342,9 @@ seed_ui_state() {
 # The shipped menu.hidden set less Open in terminal, so a case can drive that row without changing
 # any other row of the menu; src/uischema.rs DEFAULTS is where the eight come from.
 terminal_shown='["delete","openwith","moveto","copyto","properties","permissions","copypath"]'
+# The shipped set whole, from the same DEFAULTS. A case asserting a menu's exact row list seeds this
+# rather than reading whatever the operator has switched off in the Menus section.
+menu_shipped='["delete","openwith","openTerminal","moveto","copyto","properties","permissions","copypath"]'
 
 launch() {
     local start_path="$1"
@@ -1613,6 +1616,11 @@ case_background() {
     : > "$dir/a.txt"
     : > "$dir/b.txt"
     : > "$dir/c.txt"
+    # Every row list below is the shipped column, and ui/js/Menu.js applyHidden builds it from
+    # menu.hidden, which is operator state: without this seed the assertions read the operator's own
+    # Menus section and fail on a box that has switched any of the eight back on.
+    local real_state="${XDG_STATE_HOME-}"
+    seed_ui_state "$fixture_root/background-state" "{\"menu\":{\"hidden\":$menu_shipped}}"
     launch "$dir"
     wait_listing 4
 
@@ -1663,7 +1671,10 @@ case_background() {
     [[ "$(ipc contextMenuVisible)" == "false" ]] || fail "background: choosing an order left the menu open"
     [[ "$(ipc sortMark)" == "size:asc" ]] \
         || fail "background: Sort by Size left the listing in $(ipc sortMark)"
-    # And back to the board's own default order, which the steps below read row numbers against.
+    # And back to the order this case found, which the steps below read row numbers against. It is a
+    # literal and not a saved reading because ui/Backend.qml sets sortBy to name and sortDesc to
+    # false on every list and nothing writes the order to ui.json, so name ascending is what every
+    # window starts in; the flip above lives and dies with this window.
     menu_click "Sort by" name
     [[ "$(ipc sortMark)" == "name:asc" ]] \
         || fail "background: Sort by Name left the listing in $(ipc sortMark)"
@@ -1743,6 +1754,7 @@ case_background() {
         key -k Escape >/dev/null
         settle
     done
+    if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
 }
 
 # Opens the background menu and clicks one of its rows by label, optionally stepping into that row's
