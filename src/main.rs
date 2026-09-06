@@ -9,6 +9,7 @@ mod json;
 mod jsondoc;
 mod jsonstring;
 mod launcher;
+mod oflags;
 mod open;
 mod paths;
 mod terminal;
