@@ -20,6 +20,8 @@ Item {
     readonly property real restOpacity: 0.4
     readonly property real tickWidth: root.stops.length > 0
         ? (root.width - root.tickGap * (root.stops.length - 1)) / root.stops.length : 0
+    // WCAG 2.5.8's floor whatever height the caller gives the ruler, which is Theme.markSize and 19 px at base size 14.
+    readonly property int hitHeight: Math.max(Theme.hitMin, root.height)
 
     Repeater {
         model: root.stops
@@ -29,10 +31,11 @@ Item {
             required property var modelData
             required property int index
 
-            // The whole row height is the hit box, so a stop clears the 24 px pointer target on its own.
+            // The hit box is taller than the drawn tick and centred on the ruler, so it moves nothing.
             x: tick.index * (root.tickWidth + root.tickGap)
+            y: Math.round((root.height - tick.height) / 2)
             width: root.tickWidth
-            height: root.height
+            height: root.hitHeight
 
             Rectangle {
                 anchors.centerIn: parent

@@ -256,8 +256,8 @@ function handleKey(event, root, sidebar) {
         root.pathBarRequested()
         return true
     }
-    // The chord answers from the rail as well as the list, so it is taken before the rail's own keys.
-    if (action === "openTerminal") {
+    // Both answer from the rail as well as the list, so they are taken before the rail's own keys.
+    if (action === "openTerminal" || action === "settings") {
         root.act(action)
         return true
     }

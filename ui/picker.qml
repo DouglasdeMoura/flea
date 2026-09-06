@@ -77,7 +77,7 @@ ShellRoot {
             if (next === win.path)
                 return
             if (win.path.length > 0)
-                win.history.push(win.path)
+                win.history = win.history.concat([win.path])
             win.openWithoutHistory(next)
         }
 
@@ -95,10 +95,13 @@ ShellRoot {
             backend.list(next, win.windowSize, false)
         }
 
+        // A property var does not notify on an in-place mutation, so history is reassigned, never popped.
         function goBack() {
             if (win.history.length === 0)
                 return
-            win.openWithoutHistory(win.history.pop())
+            var target = win.history[win.history.length - 1]
+            win.history = win.history.slice(0, win.history.length - 1)
+            win.openWithoutHistory(target)
         }
 
         function goUp() {
