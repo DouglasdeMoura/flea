@@ -9,7 +9,7 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 BIN=$PWD/target/debug/flea
-SANDBOX=$FIXTURE_ROOT/uiwriter
+SANDBOX=$FIXTURE_ROOT/uiwriter-$$
 QMLDIR=$SANDBOX/flea
 fail=0
 
