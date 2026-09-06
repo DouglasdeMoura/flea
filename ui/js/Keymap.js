@@ -111,6 +111,7 @@ function lookup(key, text, modifiers) {
     case "t": return "tabNew"
     case "w": return "tabClose"
     case "y": return "copy"
+    case "Y": return "copydirpath"
     case "x": return "cut"
     case "p": return "paste"
     case "d": return "trashArm"
@@ -142,6 +143,7 @@ function lookup(key, text, modifiers) {
 var HINTS = {
     "addNetwork": "a",
     "copy": "y",
+    "copydirpath": "Y",
     "cursorDown": "j",
     "cursorFirst": "g",
     "cursorLast": "G",
@@ -199,6 +201,7 @@ var SHEET = [
     { keys: "tab", action: "focusNext", label: "search scope, or focus" },
     { keys: ": ^l", action: "pathBar", label: "go to path" },
     { keys: "y ^c", action: "copy", label: "copy" },
+    { keys: "Y", action: "copydirpath", label: "copy folder path" },
     { keys: "x ^x", action: "cut", label: "cut" },
     { keys: "p ^v", action: "paste", label: "paste" },
     { keys: "r", action: "rename", label: "rename" },

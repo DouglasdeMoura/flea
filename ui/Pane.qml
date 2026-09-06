@@ -230,6 +230,8 @@ FocusScope {
     // A terminal in the directory being shown, through ui/Opener.qml's flea --terminal.
     function openTerminal() { wire.opener.openTerminal(root.path) }
 
+    function copyDirPath() { wire.opener.copyText(root.path) }
+
     function openParent() { Nav.parent(root) }
 
     function join(base, name) {
