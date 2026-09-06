@@ -97,7 +97,12 @@ function runMenu(check) {
           labels(Menu.listingEntries({ showHidden: false, hasRow: false, rowInDropbox: false,
                                        dropboxPath: "", taildropPeers: [], archiveFormats: [],
                                        rowIsArchive: false, rowIsImage: false, canConvert: false })),
-          "New folder|Show hidden files")
+          "Open in terminal|New folder|Show hidden files")
+    // SettingsMenus.html carries Open in terminal in all three menus. It acts on the directory being
+    // shown, not the row, so it sits with New folder and appears with no row under the cursor too.
+    check("Open in terminal is a menu row in its own right",
+          findEntry(full, "openTerminal").label + "|" + findEntry(full, "openTerminal").glyph,
+          "Open in terminal|terminal")
     check("and no menu offers a Settings row, because no menu can reach one",
           findEntry(full, "settings").label, undefined)
 
@@ -152,16 +157,16 @@ function runHidden(check, full) {
     check("one hidden action loses its row and nothing else",
           menu(["paste"]),
           "Open|Copy path|-|Cut|Copy|Duplicate|Rename|-|Compress|-|Send with Taildrop|"
-          + "Move to Dropbox|-|Move to Trash|-|New folder|Show hidden files")
+          + "Move to Dropbox|-|Move to Trash|-|Open in terminal|New folder|Show hidden files")
     // A group that loses every member loses its separator too, which is the board's own rule and
     // the reason the answer below has three rules and not six.
     check("a group emptied by the settings takes its rule with it",
           menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath"]),
-          "Open|-|Compress|-|Send with Taildrop|Move to Dropbox|-|New folder|Show hidden files")
+          "Open|-|Compress|-|Send with Taildrop|Move to Dropbox|-|Open in terminal|New folder|Show hidden files")
     check("hiding everything hideable still leaves the two locked rows and New folder",
           menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath",
                 "compress", "taildrop", "dropbox", "open", "toggleHidden"]),
-          "Open|-|New folder|Show hidden files")
+          "Open|-|Open in terminal|New folder|Show hidden files")
     check("Open and the hidden toggle are refused by the filter itself, not only by the panel",
           Menu.isHidden(["open", "toggleHidden"], "open") + "|"
           + Menu.isHidden(["open", "toggleHidden"], "toggleHidden"), "false|false")

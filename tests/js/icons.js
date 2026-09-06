@@ -14,6 +14,18 @@ function run(check) {
     check("plain text is still a document", Icons.glyphFor("text-plain"), "file-text")
     check("an office document", Icons.glyphFor("x-office-document"), "file-text")
 
+    // FleaWindow.html and GridView.html both draw a symlink row with the link mark, and the backend
+    // resolves a link's icon to its target's, so the mode is what decides and the icon name cannot.
+    var LNK = 0o120777
+    var REG = 0o100644
+    check("a symlink to a directory draws the link mark, not the folder its icon names",
+          Icons.glyphForRow("folder", LNK), "symlink")
+    check("a symlink to a file draws it too", Icons.glyphForRow("text-x-generic", LNK), "symlink")
+    check("a real directory is untouched", Icons.glyphForRow("folder", REG), "folder")
+    check("and so is every other row", Icons.glyphForRow("image-x-generic", REG), "image")
+    check("a row with no mode at all falls back to the icon name",
+          Icons.glyphForRow("text-x-generic", 0), "file-text")
+
     // GM ruled the brand marks are reproduced from the official artwork, not recut, so neither is a
     // cut glyph and neither belongs in PATHS. The recut strings must not come back.
     check("tailscale is not a cut glyph", Icons.PATHS["tailscale"] === undefined, true)

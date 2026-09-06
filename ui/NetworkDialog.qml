@@ -364,9 +364,12 @@ Item {
                     text: "DROPBOX"
                 }
 
+                // Nothing left to install is an unavailable action, not a live control that answers
+                // nothing: the label states the fact and the ink says the press will not be taken.
                 Flea.DialogButton {
                     label: root.dropboxInstalled ? "Dropbox is already installed" : "Install Dropbox"
-                    onActivated: if (!root.dropboxInstalled) root.installDropbox()
+                    available: !root.dropboxInstalled
+                    onActivated: root.installDropbox()
                 }
             }
         }

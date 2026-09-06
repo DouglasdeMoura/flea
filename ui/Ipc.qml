@@ -62,6 +62,17 @@ QtObject {
             }
             return out.join("|")
         }
+        // The key each row prints beside its label, in the same order and read off the drawn rows,
+        // so an unbound row's empty slot is assertable and not only the map behind it.
+        function contextMenuHints(): string {
+            var menu = root.pane.contextMenu()
+            var out = []
+            for (var i = 0; i < menu.entries.length; i++) {
+                var item = menu.itemFor(i)
+                out.push(item ? String(item.hint) : "")
+            }
+            return out.join("|")
+        }
         // The glyph each row draws, in the same order, so the "every row is marked" rule is assertable.
         function contextMenuGlyphs(): string {
             var entries = root.pane.contextMenu().entries
@@ -161,6 +172,12 @@ QtObject {
         function rowIconStatus(i: int): int {
             var item = root.pane.itemFor(i)
             return item ? item.iconStatus : -1
+        }
+        // The name cell's drawn text: the row name plus the surface's own decorations, where
+        // describe() keeps the raw n so every existing rowAt assertion keeps its meaning.
+        function rowNameText(i: int): string {
+            var item = root.pane.itemFor(i)
+            return item ? item.decoratedName : ""
         }
         function rowGlyph(i: int): string {
             var item = root.pane.itemFor(i)
