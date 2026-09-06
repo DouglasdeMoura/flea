@@ -77,4 +77,18 @@ function run(check) {
         many.push({ href: "file:///home/gm/f" + i + ".txt", stamp: "2026-08-30T11:32:04Z" })
     }
     check("an enormous history stops at the cap", Recent.paths(many).length, Recent.LIMIT)
+
+    // The cap keeps the newest LIMIT and never the first LIMIT handed in, which is why
+    // ui/PickerRecent.qml reads the whole model: this history is oldest first, an order XBEL allows.
+    var oldestFirst = []
+    for (var k = 0; k < Recent.LIMIT + 50; k++) {
+        var minute = 32 + Math.floor(k / 60)
+        var second = k % 60
+        oldestFirst.push({ href: "file:///home/gm/g" + k + ".txt",
+                           stamp: "2026-08-30T11:" + minute + ":" + (second < 10 ? "0" + second : second) + "Z" })
+    }
+    var newest = Recent.paths(oldestFirst)
+    check("an oldest-first history still stops at the cap", newest.length, Recent.LIMIT)
+    check("and the row at the top is the newest bookmark in the file", newest[0], "/home/gm/g549.txt")
+    check("and the last row kept is the oldest of the newest LIMIT", newest[Recent.LIMIT - 1], "/home/gm/g50.txt")
 }

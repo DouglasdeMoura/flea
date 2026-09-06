@@ -26,9 +26,7 @@ pub fn claim() -> i32 {
         );
         return 1;
     }
-    let status = report(claim_chooser(), hyprkeys::float_claim());
-    println!("undo both with: flea --picker off");
-    status
+    report(claim_chooser(), hyprkeys::float_claim())
 }
 
 // flea --picker off

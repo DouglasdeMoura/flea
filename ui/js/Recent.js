@@ -9,11 +9,11 @@
 var HISTORY_LEAF = "recently-used.xbel"
 var DEFAULT_DATA_HOME = "/.local/share"
 
-// A hostile or merely enormous history is still a listing this window has to build, so the read
-// stops here: ui/PickerRecent.qml takes the file's first LIMIT bookmarks off the model and no more,
-// and the output loop below is bounded by the same number. GTK's own RecentManager keeps the file
-// to the same order of size, so on a real history that first LIMIT is all of it and the sort below
-// is over the whole file.
+// A hostile or merely enormous history is still a listing this window has to build, so the output
+// loop below stops here and hands the rail the newest LIMIT paths. It bounds that loop and nothing
+// else: ui/PickerRecent.qml reads the whole model, because bounding the read in file order sorts
+// an arbitrary LIMIT of a file XBEL never promised an order for, and a 5,000 bookmark history in
+// oldest-first order then answered with its 500 oldest.
 var LIMIT = 500
 
 // Sample input: ("/home/gm/.local/share", "/home/gm") and ("", "/home/gm"); an XDG_DATA_HOME that

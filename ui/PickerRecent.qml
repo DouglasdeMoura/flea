@@ -47,13 +47,15 @@ QtObject {
     readonly property int modifiedRole: Qt.UserRole + 2
     readonly property int addedRole: Qt.UserRole + 3
 
-    // ui/js/Recent.js LIMIT bounds the read and not just the rail: an Instantiator over the whole
-    // model built one QObject per bookmark, and a 50,000 bookmark history cost seconds against a
-    // fraction of one here, a magnitude and not a number to cite. The bound is the file's own
-    // order, which is the whole file on any history the desktop actually keeps.
+    // Every bookmark is read, because ui/js/Recent.js LIMIT bounds the rail and not the read: XBEL
+    // promises no order, so a bound in file order hands the sort an arbitrary slice and lists the
+    // newest of that. Measured on oldest-first fixtures, six batches whole against two capped: a
+    // rebuild costs about 3 ms at 500 bookmarks whichever way, tens of ms against 3 at 5,000, and
+    // hundreds of ms against 4 at 50,000, over an XmlListModel parse both pay that is itself a
+    // sixth of a second there. The Instantiator this replaced cost seconds at 50,000.
     function rebuild() {
         var found = []
-        var wanted = Math.min(history.count, Recent.LIMIT)
+        var wanted = history.count
         for (var i = 0; i < wanted; i++) {
             var at = history.index(i, 0)
             // visited is when the file itself was last opened, which is what Recent means; the
