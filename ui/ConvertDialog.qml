@@ -119,11 +119,11 @@ Item {
                     required property int index
                     width: body.width
                     entry: ({ label: root.formatLabel(modelData), action: modelData, glyph: "image" })
-                    // The pick takes the canvas's accent treatment; the pointer keeps the plain
-                    // lift every other menu row uses, so the two facts stay separately readable.
+                    // The pick takes the canvas's accent treatment and the cursor keeps the plain
+                    // lift, so the two facts stay separately readable. The pointer moves neither: j and k
+                    // step cursor and format together, so hover moving one on its own desyncs them.
                     picked: root.format === modelData
                     current: root.cursor === index
-                    onHoverEntered: root.cursor = index
                     onActivated: { root.format = modelData; root.cursor = index; root.commit() }
                 }
             }
