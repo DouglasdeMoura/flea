@@ -1687,8 +1687,14 @@ case_background() {
     click_row 0 left
     settle
     key -k Return >/dev/null
-    wait_listing 0
+    # wait_listing cannot answer for an empty directory: rowAt 0 has no delegate to describe and
+    # says "loading" forever, so the empty state's own flag is what says the listing arrived.
+    for _attempt in $(seq 1 300); do
+        [[ "$(ipc emptyShown)" == "true" && "$(ipc path)" == "$dir/dest" ]] && break
+        sleep 0.05
+    done
     [[ "$(ipc path)" == "$dir/dest" ]] || fail "background: the case is in $(ipc path), not $dir/dest"
+    [[ "$(ipc total)" == "0" ]] || fail "background: $dir/dest listed $(ipc total) rows, not 0"
     # The empty listing is also the strongest case for this menu, and it has no row to aim from.
     click_background
     settle
