@@ -1,6 +1,6 @@
-// flea --default: the one per-user step pacman cannot own, see docs/install.md "Make Flea the default".
+// flea --default: the per-user steps pacman cannot own, see docs/install.md "Make Flea the default".
 use crate::hyprkeys;
-use crate::userfile::{config_home, data_file, replace_file};
+use crate::userfile::{config_home, create_file, data_file, data_home, replace_file};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -9,6 +9,12 @@ use std::process::{Command, Stdio};
 pub const DESKTOP_ID: &str = "com.thisisgm.flea.desktop";
 // Directories only: the entry registers nothing else, and a file manager that takes image or archive types is a bad citizen.
 const MIME: &str = "inode/directory";
+// The bus name a desktop's "Show in folder" calls, which nautilus, dolphin, thunar and nemo each register for too.
+const BUS_NAME: &str = "org.freedesktop.FileManager1";
+// Flea's own packaged registration, read for its Exec so this never invents an install path.
+const PACKAGED_SERVICE: &str = "dbus-1/services/com.thisisgm.flea.FileManager1.service";
+// The provenance line, and the test for whether a file already there is Flea's to rewrite or remove.
+const MARK: &str = "# Written by `flea --default`; `flea --default off` removes it.";
 
 // flea --default
 pub fn claim() -> i32 {
@@ -19,18 +25,18 @@ pub fn claim() -> i32 {
         );
         return 1;
     }
-    report(claim_mime(), hyprkeys::claim())
+    report(claim_mime(), claim_service(), hyprkeys::claim())
 }
 
 // flea --default off
 pub fn release() -> i32 {
-    report(release_mime(), hyprkeys::release())
+    report(release_mime(), release_service(), hyprkeys::release())
 }
 
-// Each half stands on its own, so a failure in one still leaves the other's line on screen.
-fn report(mime: Result<String, String>, keys: Result<String, String>) -> i32 {
+// Each half stands on its own, so a failure in one still leaves the others' lines on screen.
+fn report(mime: Result<String, String>, reveal: Result<String, String>, keys: Result<String, String>) -> i32 {
     let mut status = 0;
-    for half in [mime, keys] {
+    for half in [mime, reveal, keys] {
         match half {
             Ok(line) => println!("{}", line),
             Err(why) => {
@@ -81,6 +87,94 @@ fn release_mime() -> Result<String, String> {
     replace_file(&path, &without)?;
     let now = query_default()?;
     Ok(format!("{}: now {}, Flea's line removed from {}", MIME, handler_name(&now), path.display()))
+}
+
+// D-Bus keeps the FIRST registration for a name it reads, and it reads the data home before every
+// system directory, so a file here outranks the four packaged rivals without touching any of them.
+fn claim_service() -> Result<String, String> {
+    let path = service_path()?;
+    let want = service_text(&packaged_exec()?);
+    match fs::read_to_string(&path) {
+        Ok(held) if held == want => Ok(format!("{}: already Flea's, in {}", BUS_NAME, path.display())),
+        Ok(held) if held.starts_with(MARK) => {
+            replace_file(&path, &want)?;
+            Ok(format!("{}: Flea's, {} rewritten because the packaged registration changed", BUS_NAME, path.display()))
+        }
+        Ok(_) => Err(format!(
+            "{} is already there and Flea did not write it, so it was left alone; remove it yourself to let Flea answer {}",
+            path.display(),
+            BUS_NAME
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let dir = service_dir()?;
+            fs::create_dir_all(&dir).map_err(|e| format!("{} could not be created ({:?})", dir.display(), e.kind()))?;
+            create_file(&path, &want)?;
+            Ok(format!(
+                "{}: Flea, written to {}; the data home is read before every system directory, so this outranks nautilus, dolphin, thunar and nemo",
+                BUS_NAME,
+                path.display()
+            ))
+        }
+        Err(e) => Err(format!("{} could not be read ({:?})", path.display(), e.kind())),
+    }
+}
+
+fn release_service() -> Result<String, String> {
+    let path = service_path()?;
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(format!("{}: nothing to undo, {} does not exist", BUS_NAME, path.display()));
+        }
+        Err(e) => return Err(format!("{} could not be read ({:?})", path.display(), e.kind())),
+    };
+    if !text.starts_with(MARK) {
+        return Ok(format!("{}: nothing to undo, Flea did not write {}", BUS_NAME, path.display()));
+    }
+    fs::remove_file(&path).map_err(|e| format!("{} could not be removed ({:?})", path.display(), e.kind()))?;
+    // Only the two directories the claim itself may have created: remove_dir refuses a directory
+    // that still holds anything, so another application's service file keeps both of them.
+    let dir = service_dir()?;
+    let pruned = fs::remove_dir(&dir).is_ok() && dir.parent().is_some_and(|up| fs::remove_dir(up).is_ok());
+    let tail = if pruned { ", and the directories it created went with it" } else { "" };
+    Ok(format!("{}: Flea's registration removed from {}{}", BUS_NAME, path.display(), tail))
+}
+
+// Whatever the installed registration names, never a path written down here: a box with none
+// installed has nothing to put in front of the others, the way the picker step has no backend.
+fn packaged_exec() -> Result<String, String> {
+    let packaged = data_file(PACKAGED_SERVICE).ok_or_else(|| {
+        format!("{} is not installed in any data directory, so there is no registration to put in front; install the package first", PACKAGED_SERVICE)
+    })?;
+    let text = fs::read_to_string(&packaged).map_err(|e| format!("{} could not be read ({:?})", packaged.display(), e.kind()))?;
+    exec_line(&text)
+        .map(str::to_string)
+        .ok_or_else(|| format!("{} names no Exec, so there is nothing for {} to run", packaged.display(), BUS_NAME))
+}
+
+// The packaged registration, of which only the Exec is copied:
+//   [D-BUS Service]
+//   Name=org.freedesktop.FileManager1
+//   Exec=/usr/lib/flea/flea-filemanager1
+fn exec_line(text: &str) -> Option<&str> {
+    text.lines()
+        .find_map(|line| line.strip_prefix("Exec="))
+        .map(str::trim)
+        .filter(|exec| !exec.is_empty())
+}
+
+// dbus-broker 37 and dbus-daemon 1.16.2 both take a comment here, measured on this box, and today's
+// bug was a user-level service file nobody could trace, so the first line says who wrote it.
+fn service_text(exec: &str) -> String {
+    format!("{}\n[D-BUS Service]\nName={}\nExec={}\n", MARK, BUS_NAME, exec)
+}
+
+fn service_dir() -> Result<PathBuf, String> {
+    Ok(data_home()?.join("dbus-1").join("services"))
+}
+
+fn service_path() -> Result<PathBuf, String> {
+    Ok(service_dir()?.join(format!("{}.service", BUS_NAME)))
 }
 
 fn handler_name(id: &str) -> &str {
@@ -163,6 +257,29 @@ mod tests {
     use super::*;
 
     const OMARCHY_SHAPE: &str = "[Default Applications]\ninode/directory=com.thisisgm.flea.desktop\nimage/png=imv.desktop\n\n[Added Associations]\ninode/directory=com.thisisgm.flea.desktop;\n";
+
+    const PACKAGED: &str = "[D-BUS Service]\nName=org.freedesktop.FileManager1\nExec=/usr/lib/flea/flea-filemanager1\n";
+
+    #[test]
+    fn the_exec_is_copied_from_the_packaged_registration_and_never_written_down_here() {
+        assert_eq!(exec_line(PACKAGED), Some("/usr/lib/flea/flea-filemanager1"));
+        // A registration this cannot read an Exec out of is refused rather than guessed at.
+        assert_eq!(exec_line("[D-BUS Service]\nName=org.freedesktop.FileManager1\n"), None);
+        assert_eq!(exec_line("[D-BUS Service]\nExec=\n"), None);
+        assert_eq!(exec_line(""), None);
+    }
+
+    #[test]
+    fn the_written_file_leads_with_its_provenance_and_carries_the_packaged_exec() {
+        let text = service_text(exec_line(PACKAGED).expect("the packaged Exec"));
+        assert_eq!(
+            text,
+            "# Written by `flea --default`; `flea --default off` removes it.\n[D-BUS Service]\nName=org.freedesktop.FileManager1\nExec=/usr/lib/flea/flea-filemanager1\n"
+        );
+        // The first line is what tells Flea's file from somebody else's, so release reads it too.
+        assert!(text.starts_with(MARK));
+        assert!(!PACKAGED.starts_with(MARK));
+    }
 
     #[test]
     fn drop_default_removes_only_fleas_line_in_the_default_section() {

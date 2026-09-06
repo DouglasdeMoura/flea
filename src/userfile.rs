@@ -20,17 +20,21 @@ pub fn config_home() -> Result<PathBuf, String> {
     }
 }
 
+// The one directory D-Bus, xdg-mime and the desktop all read before any system one, which is what
+// makes a file written here outrank a packaged one.
+pub fn data_home() -> Result<PathBuf, String> {
+    match env_dir("XDG_DATA_HOME") {
+        Some(p) => Ok(p),
+        None => Ok(home()?.join(".local/share")),
+    }
+}
+
 // The XDG lookup both install proofs read: the data home first, then every data dir, whose own
 // default already names /usr/share, where pacman puts a package's files.
 fn data_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    match env_dir("XDG_DATA_HOME") {
-        Some(p) => dirs.push(p),
-        None => {
-            if let Ok(h) = home() {
-                dirs.push(h.join(".local/share"));
-            }
-        }
+    if let Ok(h) = data_home() {
+        dirs.push(h);
     }
     let system = std::env::var("XDG_DATA_DIRS").ok().filter(|v| !v.is_empty());
     let system = system.unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
@@ -130,6 +134,13 @@ mod tests {
             data_dirs(),
             vec![PathBuf::from("/flea-test/data-home"), PathBuf::from("/flea-test/only")]
         );
+        // The first rung is its own function, because the D-Bus claim writes into exactly that one.
+        assert_eq!(data_home().expect("set"), PathBuf::from("/flea-test/data-home"));
+        std::env::set_var("XDG_DATA_HOME", "");
+        let home = std::env::var("HOME").expect("HOME");
+        assert_eq!(data_home().expect("fallback"), PathBuf::from(&home).join(".local/share"));
+        assert_eq!(data_dirs()[0], PathBuf::from(&home).join(".local/share"));
+        std::env::set_var("XDG_DATA_HOME", "/flea-test/data-home");
         // An empty variable is unset, and the default is where pacman puts the package's files.
         std::env::set_var("XDG_DATA_DIRS", "");
         assert_eq!(
