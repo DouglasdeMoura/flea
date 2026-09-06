@@ -226,6 +226,18 @@ function paths(marks) {
     return out
 }
 
+// The save name is the one filename a client hands this window, so it is a trust boundary and it
+// gets the rule the rest of the product already applies. Mirrored from src/backend/ops.rs
+// valid_name() and kept identical to it, character for character, so the two cannot drift.
+function validName(name) {
+    var text = String(name)
+    return text.length > 0 && text !== "." && text !== ".."
+        && text.indexOf("/") < 0 && text.indexOf("\0") < 0
+}
+
+// What both the strip and the status line say about a name validName() refuses, in ops.rs's words.
+var NAME_REFUSED = "a name cannot be empty, . or .. , or contain a separator"
+
 function join(dir, name) {
     return dir === "/" ? "/" + name : dir + "/" + name
 }

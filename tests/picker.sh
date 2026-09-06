@@ -3,7 +3,7 @@
 # xdg-desktop-portal routes org.freedesktop.impl.portal.FileChooser to whichever backend the
 # configuration names, and this asserts what comes back AT THE CALLER. It proves nothing about Flea
 # unless Flea is the backend, so it checks that first.
-# Usage: ./tests/picker.sh [pick|save|cancel|withdrawn|died|fault|taildrop]; taildrop is opt-in.
+# Usage: ./tests/picker.sh [pick|save|savename|cancel|withdrawn|died|fault|taildrop]; taildrop is opt-in.
 # FLEA_PICKER_CONFIG names the running picker's qs config path, which is the packaged one by default.
 # FLEA_PICKER_EVIDENCE names a directory the caller owns for the taildrop case's screenshot.
 set -u
@@ -30,6 +30,10 @@ fixture="$FIXTURE_ROOT/flea-picker-$$"
 # The taildrop case takes the title the real caller gives its window, so this is not readonly.
 title="Flea picker test $$"
 client=0
+# The background portal client a case starts, tracked the same way the omarchy-file-select one is.
+# A case that fails partway must not leave its window standing: the next case's ipc reaches the
+# oldest instance on the same config path, so a leaked window answers for the one under test.
+asker=0
 
 ipc() {
     timeout 5 omarchy-drive ipc -p "$picker_config" fleapicker "$@" 2>/dev/null
@@ -46,7 +50,18 @@ cleanup() {
         sleep 1
         kill "$client" 2>/dev/null
     fi
+    if [[ "$asker" != 0 ]] && kill -0 "$asker" 2>/dev/null; then
+        omarchy-drive key --window "$title" -k Escape >/dev/null 2>&1
+        sleep 1
+        kill "$asker" 2>/dev/null
+    fi
     sandbox_remove "$fixture"
+}
+
+# The ipc seam answers empty for a window it cannot reach, and empty is also what a refused save
+# name looks like, so every case that reads emptiness as a result proves the seam first.
+ipc_is_live() {
+    [[ "$(ipc ready)" == "true" ]] || fail "the ipc seam at $picker_config answered nothing, so no reading below means anything"
 }
 trap cleanup EXIT
 
@@ -226,10 +241,10 @@ case_withdrawn() {
 case_died() {
     make_fixture
     portal_ask OpenFile > "$fixture/died.txt" &
-    local asker=$!
+    asker=$!
     omarchy-drive wait window "$title" --timeout 25 >/dev/null || fail "no picker window named $title appeared"
     omarchy-drive window kill "$title" >/dev/null || fail "could not kill the picker window"
-    wait "$asker"
+    wait "$asker"; asker=0
     [[ "$(cat "$fixture/died.txt")" == "2" ]] || fail "a picker that died answered $(cat "$fixture/died.txt"), not 2"
     printf 'died: a picker killed mid request answers 2, and the caller is answered rather than left waiting\n'
 }
@@ -239,17 +254,87 @@ case_died() {
 case_save() {
     make_fixture
     portal_ask SaveFile notes.md > "$fixture/saved.txt" &
-    local asker=$!
+    asker=$!
     omarchy-drive wait window "$title" --timeout 25 >/dev/null || fail "SaveFile raised no picker window"
     omarchy-drive focus "$title" >/dev/null || fail "the picker window would not take focus"
     [[ "$(ipc saveName)" == "notes.md" ]] || fail "the save field holds $(ipc saveName), not the caller's name"
     walk_to_fixture
     press -k Return
-    wait "$asker"
+    wait "$asker"; asker=0
     [[ "$(cat "$fixture/saved.txt")" == "0 file://$fixture/notes.md" ]] \
         || fail "SaveFile answered $(cat "$fixture/saved.txt")"
     [[ ! -e "$fixture/notes.md" ]] || fail "the chooser wrote the file itself, which is the caller's to do"
     printf 'save: SaveFile answers 0 with the reviewed URI, and writes nothing\n'
+}
+
+# The directory the demonstrated exploit named. Read, never written: the chooser answers a URI and
+# the caller owns the write, so a regression shows up as a changed listing rather than as a new file
+# this suite put there. ls -A, because a suite that counts with plain ls is blind to what it seeded.
+autostart_state() {
+    { ls -A "$HOME/.config/autostart" 2>/dev/null
+      find "$HOME/.config/autostart" -type f -exec sha256sum {} + 2>/dev/null; } | sort | sha256sum
+}
+
+# The save name is a client string and the answer built from it must stay inside the folder the
+# window showed. Both ways one arrives: the current_name tools/flea-portal passes through verbatim,
+# and whatever somebody types into the field afterwards. Neither may be rewritten into a safe name;
+# a rewrite answers the caller with a path nobody approved.
+case_savename() {
+    make_fixture
+    local before after
+    before=$(autostart_state)
+
+    # The exact string the review demonstrated, arriving the way it did: as the caller's own name.
+    portal_ask SaveFile '../../.config/autostart/pwn.desktop' > "$fixture/escaped.txt" &
+    asker=$!
+    omarchy-drive wait window "$title" --timeout 25 >/dev/null || fail "SaveFile raised no picker window"
+    omarchy-drive focus "$title" >/dev/null || fail "the picker window would not take focus"
+    ipc_is_live
+    [[ -z "$(ipc saveName)" ]] || fail "the caller's traversal was adopted into the field as $(ipc saveName)"
+    # Enter reaches accept() only from a file row: on a directory it walks in, which is the board's
+    # own rule and is why case_save walks here too before pressing it.
+    walk_to_fixture
+    press -k Return
+    [[ "$(ipc message)" == *"Name the file"* ]] || fail "Enter on the refused name said $(ipc message)"
+    kill -0 "$asker" 2>/dev/null || fail "the request was answered while the field held no name"
+    press -k Escape
+    wait "$asker"; asker=0
+    [[ "$(cat "$fixture/escaped.txt")" == "1" ]] \
+        || fail "the traversal request answered $(cat "$fixture/escaped.txt"), and 1 is the only answer with no URI"
+
+    # A name typed into the field goes through the same predicate at accept(), and the exhaustive
+    # case list for it is tests/js/picker.js. It is not driven here: the field publishes no
+    # accessibility tree, so a click on it has to be aimed by reading the screen, and the name it
+    # would aim at is also drawn in the URI line directly below the box. Aiming a committed test at
+    # whichever of the two OCR happens to return first buys a flake, not coverage.
+
+    # An interior NUL cannot cross D-Bus, whose strings end at the first one, so this arm goes in
+    # through FLEA_PICKER: JSON's \u0000 is six characters in the environment and one after parsing,
+    # which is where the NUL that truncates a path at the syscall comes from.
+    local flea reply
+    flea="$(cd "$(dirname "$0")/.." && pwd)/target/release/flea"
+    [[ -x "$flea" ]] || fail "no built flea at $flea"
+    reply="$fixture/nul-reply.json"
+    # FLEA_UI names the same picker the ipc above talks to. Without it paths::ui_dir() prefers the
+    # packaged /usr/share/flea/ui, and this arm would drive a window the rest of the suite is not
+    # reading, or none at all when that install predates the picker.
+    FLEA_UI="$(dirname "$picker_config")" \
+        FLEA_PICKER="{\"mode\":\"save\",\"title\":\"$title\",\"folder\":\"$fixture\",\"name\":\"pwn\\u0000.desktop\"}" \
+        "$flea" --pick "$reply" &
+    asker=$!
+    omarchy-drive wait window "$title" --timeout 25 >/dev/null || fail "the NUL request raised no picker window"
+    omarchy-drive focus "$title" >/dev/null || fail "the picker window would not take focus"
+    ipc_is_live
+    [[ -z "$(ipc saveName)" ]] || fail "a name carrying a NUL was adopted into the field as $(ipc saveName)"
+    press -k Return
+    [[ "$(ipc message)" == *"Name the file"* ]] || fail "Enter on the NUL name said $(ipc message)"
+    press -k Escape
+    wait "$asker"; asker=0
+    [[ "$(cat "$reply")" == '{"response":1}' ]] || fail "the NUL request replied $(cat "$reply")"
+
+    after=$(autostart_state)
+    [[ "$before" == "$after" ]] || fail "$HOME/.config/autostart changed during this run"
+    printf 'savename: a name that would leave the folder is refused from the caller and with a NUL in it, and nothing was answered\n'
 }
 
 # A chooser that cannot open at all refuses before any window and writes no reply file, which is what
@@ -315,11 +400,12 @@ case_taildrop() {
 }
 
 backend_is_flea
-[[ "$#" -gt 0 ]] || set -- pick save cancel withdrawn died fault
+[[ "$#" -gt 0 ]] || set -- pick save savename cancel withdrawn died fault
 for name in "$@"; do
     case "$name" in
         pick) case_pick ;;
         save) case_save ;;
+        savename) case_savename ;;
         cancel) case_cancel ;;
         withdrawn) case_withdrawn ;;
         died) case_died ;;
