@@ -31,6 +31,7 @@ Item {
     readonly property var rows: Settings.rows(root.section, {
         textSize: ViewState.textSize,
         hidden: ViewState.menuHidden,
+        keyHints: ViewState.keyHints,
         preset: ViewState.keysPreset,
         baseSize: Theme.baseSize,
         monitorScale: Theme.monitorScale,
@@ -77,7 +78,10 @@ Item {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
             return
-        if (row.kind === "check")
+        // The hints row is the one check that is not a menu action, so it has a writer of its own.
+        if (row.id === "keyHints")
+            ViewState.toggleKeyHints()
+        else if (row.kind === "check")
             ViewState.toggleMenuAction(row.id)
         else if (row.kind === "master")
             ViewState.toggleMenuBasic()

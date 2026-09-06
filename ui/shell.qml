@@ -229,9 +229,11 @@ ShellRoot {
                 // The design's no-match answer: the search mark over the query it could not find.
                 caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery : ""
                 mark: "search"
-                hint: pane.searchMode === "results"
-                      ? "Press Escape to clear."
-                      : ""
+                // A search that found nothing keeps its own way out, because that sentence is the
+                // state's answer and not an advertisement. The empty directory's next move is a
+                // shortcut, so it draws only with the Menus section's hints row on.
+                hint: pane.searchMode === "results" ? "Press Escape to clear."
+                    : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""
             }
 
             // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.

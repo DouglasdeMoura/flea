@@ -518,8 +518,19 @@ that same jump past the top as a bug.
 
 **`menu.hidden` stores what is hidden**, and its rule is deliberately open, an action id rather than
 a closed list, because a closed list would make this Flea drop an id a newer one hid. It is the
-Menus section's whole state: the panel's master row over the six basic actions is derived from the
-set every time it is drawn, so there is no second value for a hand edit to leave it disagreeing with.
+Menus section's whole visibility state: the panel's master row over the six basic actions is derived
+from the set every time it is drawn, so there is no second value for a hand edit to leave it
+disagreeing with. **An id here is the action id `ui/js/Menu.js` gives the row and never a second
+name for it.** The shipped set named Open in terminal `terminal` while the menu built the row as
+`openTerminal`, so `applyHidden` matched nothing, the row drew in every menu whatever the setting
+said, and the panel carried no switch to say otherwise; both sides now read `openTerminal`.
+
+**`keyHints` is the Menus section's one row that is not an action.** It governs presentation across
+two surfaces: `ui/MenuRow.qml`'s key column, whose width goes with its text so a menu with hints off
+reads exactly as it did before that slot existed, and the tip `ui/shell.qml` draws under an empty
+directory. It ships off. A hint is only ever `ui/js/Keymap.js` `hintFor`, which is generated from
+`keys.toml`, so no surface can advertise a key nothing is bound to, and no chord depends on the
+setting: the keymap is read by `Focus.handleKey` and this value is read by nobody in that path.
 
 **`display.textSize.mode` is `"system"` or one Omarchy stop**, one of 9, 10, 11, 12, 14, 16 and 20.
 It is one key and not two, so there is nowhere for a free number to be stored.
@@ -834,8 +845,9 @@ child exits, and a write still in flight would be a lost answer read as a fault.
   shows it read-only, because the board rules that Flea does not step or cycle it.
 - `ui/js/Settings.js` is the settings panel's whole model: the three sections, the context-menu
   action inventory and its groups, the tri-state master over the six basic actions, which
-  `masterState` derives from `menu.hidden` rather than storing beside it, and the row list
-  each section draws. Pure, so `tests/js/settings.js` drives every control without a window.
+  `masterState` derives from `menu.hidden` rather than storing beside it, the Shortcuts group's
+  single `keyHints` row, which is the one check that is not a menu action and so is never in
+  `MENU_GROUPS`, and the row list each section draws. Pure, so `tests/js/settings.js` drives every control without a window.
   `ui/SettingsPanel.qml` paints what `rows()` returns and owns the panel's two-sided keyboard,
   `ui/SettingsRail.qml` the section rail and `ui/SettingsRow.qml` one row of the pane.
 - `ui/js/Menu.js` `applyHidden` is the only consumer of the stored hidden set, and it runs at the

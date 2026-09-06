@@ -51,10 +51,9 @@ function runInventory(check) {
               var mine = Settings.GLYPHS[id] !== undefined ? Settings.GLYPHS[id] : Settings.MARKS[id]
               return mine === undefined || mine !== builtMark[id]
           }).join(","), "")
-    // New folder and Open in terminal are rows this release's panel gives no switch, and the two
-    // locked ones are drawn locked; anything else without a switch would be a row it cannot reach.
-    // SettingsMenus.html does draw a switch for Open in terminal, so that switch is still owed.
-    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder", "openTerminal"])
+    // New folder is the one row this release's panel gives no switch, and the two locked ones are
+    // drawn locked; anything else without a switch would be a row the section cannot reach.
+    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
     check("and no row the menu builds is left without one",
           Object.keys(built).filter(function (id) { return reachable.indexOf(id) < 0 }).join(","), "")
 }
@@ -169,8 +168,19 @@ function runRows(check) {
     check("a hidden action's row is drawn unchecked, not dropped",
           find(menus, "paste").on, false)
     check("and an enabled one is checked", find(menus, "copy").on, true)
-    check("every toggleable action the listing menu can build has a row",
-          menus.filter(function (r) { return r.kind === "check" }).length, 13)
+    check("every toggleable action the listing menu can build has a row, plus the hints row",
+          menus.filter(function (r) { return r.kind === "check" }).length, 15)
+    // The one check that is not a menu action: it says how every row is drawn, not whether it is.
+    check("the hints row is a check of its own, off until it is switched on",
+          find(menus, "keyHints").label + "|" + find(menus, "keyHints").on,
+          "Show keyboard hints|false")
+    check("and it reads the value it is given",
+          find(Settings.rows("menus", { hidden: [], keyHints: true }), "keyHints").on, true)
+    // Open in terminal was drawn by every menu with no way to switch it off, because the shipped
+    // hidden set named it "terminal" and ui/js/Menu.js builds the row as "openTerminal".
+    check("Open in terminal is a switch like any other action row",
+          find(menus, "openTerminal").label + "|" + find(menus, "openTerminal").glyph,
+          "Open in terminal|terminal")
     // The board shows the two locked rows so the section is a complete list of what a menu can hold.
     check("Open and Show hidden files are listed, locked rather than omitted",
           menus.filter(function (r) { return r.kind === "lock" })

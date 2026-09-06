@@ -32,7 +32,9 @@ Item {
     readonly property bool danger: root.entry.danger === true
     // The key this row's action answers to, right-aligned per Menus.html. Derived from keys.toml
     // through the generated map, so an unbound action leaves the slot empty rather than guessing.
-    readonly property string hint: root.isSeparator ? "" : Keymap.hintFor(root.entry.action)
+    // Empty with the Menus section's hints row off, which takes the slot's width with it.
+    readonly property string hint: root.isSeparator || !ViewState.keyHints
+                                 ? "" : Keymap.hintFor(root.entry.action)
     readonly property color markColor: root.danger ? Theme.color.error
                                      : root.picked ? Theme.color.accent : Theme.color.muted
     readonly property color labelColor: root.danger ? Theme.color.error
