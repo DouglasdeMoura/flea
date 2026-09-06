@@ -3293,9 +3293,9 @@ case_netmark() {
     [[ "$largest" -gt "$smallest" ]] \
         || fail "netmark: caption stayed at $smallest across every text size, so no stop took effect"
 
-    # The interface multiplier is a second live lever on this base, keys.toml scaleUp/scaleDown, and
-    # its top stop is the only place the caption grows past Theme.hitMin, where the hit target and the
-    # caption slot become the same box. Its stops are read back the same way the text sizes are.
+    # The text-size chords are the second live lever on this base, keys.toml textSizeUp/textSizeDown,
+    # and their top stop is the only place the caption grows past Theme.hitMin, where the hit target
+    # and the caption slot become the same box. Those stops are read back the way the base sizes are.
     local step zoom_small zoom_large
     for step in 1 2; do
         key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
@@ -5240,14 +5240,29 @@ settings_backend_holds() {
 # draw the shipped defaults over the operator's own settings, which is the unchecked-read defect
 # ui/NetworkDialog.qml carried once. It has to say so rather than look like a first launch.
 settings_read_refused() {
-    local stored="$1" dir="$2"
+    local stored="$1" dir="$2" before_sha before_ino
+    # Before the reading, because the window this case has been driving still owns a writer, and a
+    # patch that landed between the sha below and the chmod would read as this block's own damage.
+    kill_flea
+    before_sha=$(sha256sum "$stored" | cut -d' ' -f1)
+    before_ino=$(stat -c '%i' "$stored")
     chmod 000 "$stored" || fail "settings: the state file could not be made unreadable"
     launch "$dir"
     wait_listing 2
     [[ "$(ipc lastMessage)" == "Your saved settings could not be read, so these are the defaults." ]] \
         || fail "settings: an unreadable state file was not reported, the status bar says $(ipc lastMessage)"
+    # And the write half of that same file, one keystroke away: the window is holding the shipped
+    # defaults, so a patch that went ahead would rename a full default document over every key in it.
+    key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
+    settle
+    [[ "$(ipc lastMessage)" == "That setting could not be saved." ]] \
+        || fail "settings: a save onto an unreadable state file was not reported, the status bar says $(ipc lastMessage)"
     kill_flea
     chmod 600 "$stored" || fail "settings: the state file could not be made readable again"
+    [[ "$(sha256sum "$stored" | cut -d' ' -f1)" == "$before_sha" ]] \
+        || fail "settings: a save onto an unreadable state file spent the operator's bytes"
+    [[ "$(stat -c '%i' "$stored")" == "$before_ino" ]] \
+        || fail "settings: a save onto an unreadable state file renamed a new file over it"
 }
 
 # A failed write is reported, never swallowed. The state directory is made unwritable, so the temp

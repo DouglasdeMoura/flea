@@ -116,7 +116,7 @@ impl Store {
 
     // AGENTS.md "Predictable path writes": unlink this pid's own leftover, create exclusively, rename last.
     fn write(&self, value: &Json) -> Result<(), String> {
-        refuse_a_link(&self.file)?;
+        refuse_a_bad_target(&self.file)?;
         let tmp = PathBuf::from(format!("{}.{}.tmp", self.file.display(), std::process::id()));
         let _ = fs::remove_file(&tmp);
         let written = write_new(&tmp, &jsondoc::render(value)).and_then(|()| {
@@ -164,8 +164,9 @@ fn take_lock(path: &Path) -> Result<fs::File, String> {
     Ok(file)
 }
 
-// The state file's path is predictable, so a link planted at it is refused rather than written through.
-fn refuse_a_link(path: &Path) -> Result<(), String> {
+// The state file's path is predictable and its bytes are the operator's only copy, so a link, a
+// device and a file this cannot read are all refused rather than renamed over.
+fn refuse_a_bad_target(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_symlink() => {
             Err(format!("{} is a symbolic link, so the state file was not written", path.display()))
@@ -173,6 +174,8 @@ fn refuse_a_link(path: &Path) -> Result<(), String> {
         Ok(meta) if !meta.file_type().is_file() => {
             Err(format!("{} is not a regular file, so the state file was not written", path.display()))
         }
+        // read() answers the shipped defaults for bytes it cannot read, so this rename would put a default document over whatever the operator wrote.
+        Ok(_) if fs::read_to_string(path).is_err() => Err(format!("{} could not be read, so the state file was not written", path.display())),
         _ => Ok(()),
     }
 }

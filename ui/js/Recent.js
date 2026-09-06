@@ -10,7 +10,10 @@ var HISTORY_LEAF = "recently-used.xbel"
 var DEFAULT_DATA_HOME = "/.local/share"
 
 // A hostile or merely enormous history is still a listing this window has to build, so the read
-// stops here. GTK's own RecentManager keeps the file to the same order of size.
+// stops here: ui/PickerRecent.qml takes the file's first LIMIT bookmarks off the model and no more,
+// and the output loop below is bounded by the same number. GTK's own RecentManager keeps the file
+// to the same order of size, so on a real history that first LIMIT is all of it and the sort below
+// is over the whole file.
 var LIMIT = 500
 
 // Sample input: ("/home/gm/.local/share", "/home/gm") and ("", "/home/gm"); an XDG_DATA_HOME that
@@ -28,9 +31,10 @@ function historyPath(dataHome, home) {
 // become a path this window never meant to open:
 // a scheme that is not file is not a local file, so smb:// and trash:// are refused whole;
 // an authority that is neither empty nor localhost names another machine and is refused with it;
-// a percent sequence that does not decode is left undecoded by decodeURIComponent, so the decoded
-// form is re-checked rather than trusted; and a decoded path must still be one absolute path, so a
-// NUL, a newline or any other control character refuses it.
+// a malformed percent sequence makes decodeURIComponent throw and is refused there, while a
+// well-formed one decodes to whatever it names, so the decoded form is re-checked rather than
+// trusted; and a decoded path must still be one absolute path, so a NUL, a newline or any other
+// control character refuses it.
 function pathOf(href) {
     var raw = String(href || "")
     if (raw.substring(0, 7).toLowerCase() !== "file://") {

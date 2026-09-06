@@ -33,46 +33,36 @@ QtObject {
         query: "/xbel/bookmark"
         // An absent, empty or unreadable history answers Ready with no rows, and a truncated one
         // answers with the bookmarks it did read: either way the rail draws what is really there.
-        onStatusChanged: if (status !== XmlListModel.Loading) settle.restart()
+        onStatusChanged: if (status !== XmlListModel.Loading) root.rebuild()
         XmlListModelRole { name: "href"; attributeName: "href" }
         XmlListModelRole { name: "visited"; attributeName: "visited" }
         XmlListModelRole { name: "modified"; attributeName: "modified" }
         XmlListModelRole { name: "added"; attributeName: "added" }
     }
 
-    // The model is a model and not a list, so the rows are read off instantiated objects; there is
-    // no get() on XmlListModel in Qt 6.
-    property Instantiator bookmarkRows: Instantiator {
-        id: bookmarks
-        model: history
-        delegate: QtObject {
-            required property string href
-            required property string visited
-            required property string modified
-            required property string added
-        }
-        onCountChanged: settle.restart()
-    }
+    // Qt 6 gives XmlListModel no get(), so the rows are read off the model itself: data() is
+    // invokable and the roles are numbered from Qt.UserRole in the order declared above.
+    readonly property int hrefRole: Qt.UserRole
+    readonly property int visitedRole: Qt.UserRole + 1
+    readonly property int modifiedRole: Qt.UserRole + 2
+    readonly property int addedRole: Qt.UserRole + 3
 
-    // The delegates are created one at a time, so the rebuild waits for the batch rather than
-    // running once per bookmark; a zero interval is the next event loop turn, after the last one.
-    property Timer settleTimer: Timer {
-        id: settle
-        interval: 0
-        onTriggered: root.rebuild()
-    }
-
+    // ui/js/Recent.js LIMIT bounds the read and not just the rail: an Instantiator over the whole
+    // model built one QObject per bookmark, and a 50,000 bookmark history cost seconds against a
+    // fraction of one here, a magnitude and not a number to cite. The bound is the file's own
+    // order, which is the whole file on any history the desktop actually keeps.
     function rebuild() {
         var found = []
-        for (var i = 0; i < bookmarks.count; i++) {
-            var row = bookmarks.objectAt(i)
-            if (!row) {
-                continue
-            }
+        var wanted = Math.min(history.count, Recent.LIMIT)
+        for (var i = 0; i < wanted; i++) {
+            var at = history.index(i, 0)
             // visited is when the file itself was last opened, which is what Recent means; the
             // other two stamp the bookmark and stand in for a writer that left visited out.
-            var stamp = row.visited.length > 0 ? row.visited : (row.modified.length > 0 ? row.modified : row.added)
-            found.push({ href: row.href, stamp: stamp })
+            var visited = String(history.data(at, root.visitedRole) || "")
+            var modified = String(history.data(at, root.modifiedRole) || "")
+            var added = String(history.data(at, root.addedRole) || "")
+            found.push({ href: String(history.data(at, root.hrefRole) || ""),
+                         stamp: visited.length > 0 ? visited : (modified.length > 0 ? modified : added) })
         }
         root.paths = Recent.paths(found)
         root.refreshed()
