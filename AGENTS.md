@@ -435,6 +435,21 @@ renames them over the operator's only copy, every hand-written line included. De
 the sentence has already been posted and a save has to land somewhere, and pinned in
 `tests/uistate.sh` so the next change to `update()` is visible rather than silent.
 
+**A `ui.json` whose bytes cannot be read at all is refused, and that is a different case.** The
+paragraph above is a document this can read and cannot parse. A regular `ui.json` whose bytes
+`read()` cannot get at all is the third instance of the data loss this release closed twice
+already: `read()` answers the shipped defaults for it too, and `update()` used to rename those
+defaults over the only copy of what the operator wrote. `chmod 000` is one way in and one
+`sudo flea` is the other, because the rename needs write on the directory and never read on the
+file. `read()` still never fails, because a front end reads it before the first paint; the
+distinction lives in `refuse_a_bad_target`, which `write()` calls before it creates the temp, so a
+link, a device and a file this cannot read are all refused with one sentence naming the path and
+nothing is renamed over any of them. `tests/uistate.sh` pins both ways in, the exit status, the
+sentence and the file byte for byte after, with a first run beside them to prove the guard did not
+close the write that legitimately creates the file; `tests/ui.sh` `settings_read_refused` drives
+the same file through the window, where the operator is told twice, once by `ui/PaneWire.qml` that
+what is on disk was not used and once by the status bar that the setting was not saved.
+
 **A refused write reaches the operator.** `ui/ViewState.qml` records a patch as stored only when
 `flea --ui-state` exits 0. `ui/js/UiState.js` holds that bookkeeping, and `ui/PaneWire.qml` turns
 the failure into the status bar's one transient sentence through `ui/js/Errors.js`, the same slot
@@ -657,8 +672,11 @@ opened. Qt's XML reader does the parsing in `ui/PickerRecent.qml`, because a han
 reader would be a second implementation of a file this application does not own. Every application
 on the box appends to it, so `ui/js/Recent.js` treats a bookmark as untrusted text: only a real
 local `file://` URI with an empty or `localhost` authority becomes a path, a control character in
-the decoded form refuses it, and the read stops at 500 entries. The rows come back from the backend
-through `listpaths`, which stats each path and drops the ones that are gone, so a stale entry is
+the decoded form refuses it, and the read stops at 500 entries. That cap is
+`ui/PickerRecent.qml`'s and not only the rail's: it reads the bookmarks off the model with `data()`
+rather than instantiating one QObject per bookmark, which cost seconds against a fraction of one on
+a 50,000 bookmark history here, a magnitude and not a number to cite. The rows come back from the
+backend through `listpaths`, which stats each path and drops the ones that are gone, so a stale entry is
 removed rather than drawn against a failed stat; the listing's base is `/` and each row is named by
 its path under it, which is why `ui/PickerList.qml` draws a Recent row by its own leaf and
 `Picker.rowPath` answers with the whole path. Recent is a location and never a directory: it is
@@ -1101,12 +1119,12 @@ the five keys that came out are the round's own subject: `display.opacity`, `dis
 and `display.shadows`, which are the compositor's and which Flea mirrors rather than owning a second
 writable copy of, and `language` and `updates`, which nothing in this release reads.
 
-`src/uistore.rs` is 394 lines by `wc -l`, over the soft budget and 6 under the hard cap, with its
-`#[cfg(test)]` at 192, so 191 lines of implementation and 203 of tests. Just over half the file is
+`src/uistore.rs` is 397 lines by `wc -l`, over the soft budget and 3 under the hard cap, with its
+`#[cfg(test)]` at 195, so 194 lines of implementation and 203 of tests. Just over half the file is
 that test module because every claim it makes is about a real file, a real symlink, a real lock and
 a real rename, and each of those costs a fixture on disk. The seam for the next change is the four
-write helpers at the bottom, `make_dir`, `take_lock`, `refuse_a_link` and `write_new`, which know
-nothing about `Store` beyond the paths they are handed.
+write helpers at the bottom, `make_dir`, `take_lock`, `refuse_a_bad_target` and `write_new`, which
+know nothing about `Store` beyond the paths they are handed.
 
 `src/uistate.rs` is 363 lines by `wc -l`, over the soft budget and 37 under the hard cap, with its
 `#[cfg(test)]` at 188, so 187 lines of implementation and 176 of tests. It is one job in three
@@ -3420,8 +3438,14 @@ database's, `gio open` is how it is asked, and there is no desktop-entry parsing
 
 **`flea --terminal <dir>` is the same shape for a terminal**, and the topbar's terminal button and
 `Ctrl+T` are its only callers. `src/terminal.rs` canonicalizes the directory the same way, refuses
-anything that is not one, and hands the result to `xdg-terminal-exec` as a single `--dir=` argument,
-with the same three guards the opener carries: `/dev/null` on all three descriptors,
+anything that is not one, and hands the result to `xdg-terminal-exec` as a single `--dir=` argument
+built as an `OsString`, because `Path::display` would substitute U+FFFD for a byte that is not
+UTF-8. **No argv reaches that line with such a byte today**, and the reason is not this file:
+`main()` collects `std::env::args()`, which panics on an argument that is not valid Unicode, so
+`flea --terminal`, `flea --open` and a bare path argument all abort at `env.rs` with a Rust panic
+and status 101 before any mode of their own runs, measured on this box. The `OsString` is the
+lossless form and not a behaviour change; the panic is a separate defect of its own shape. It
+carries the same three guards the opener does: `/dev/null` on all three descriptors,
 `process_group(0)`, and `thp::enable()` before the spawn. Unlike `--open` it does not wait, because
 the terminal it starts lives as long as the user keeps it open: it returned with the stub's log
 still empty, against a stub that slept half a second before its first write. `xdg-terminal-exec` is

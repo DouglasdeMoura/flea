@@ -514,8 +514,6 @@ and the application cannot disagree.
 | `a`, Ctrl-k | Add a network mount; `a` from the rail, Ctrl-k from either view under the Mac preset |
 | Ctrl-e | Eject the rail's device, or the removable volume the listing is inside |
 | Ctrl-t | Open the configured terminal in the directory being shown; the topbar's terminal button is the same action |
-| Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid |
-| Ctrl-Shift-+, Ctrl-Shift-- , Ctrl-Shift-0 | Interface scale up, down, back to the desktop's own |
 | Ctrl-1, Ctrl-2, Ctrl-3 | List, columns, grid, under the Mac preset |
 | Ctrl-Shift-1, Ctrl-Shift-2, Ctrl-Shift-3 | The same three, under the Windows preset |
 | Ctrl-h | Show hidden files, under the Windows preset |
@@ -620,11 +618,13 @@ FLEA_PACKAGE_FILE=/path/to/flea.pkg.tar.zst ./tests/package.sh # real makepkg ar
 ./tools/flea-bench-report     # a field run's CSV as the tables in this README
 ```
 
-`./tests/run-all.sh` is the main headless command. It builds both cargo profiles, because
-`protocol.sh` drives the debug binary and `thumbs.sh` the release one, runs every suite that needs nothing but a shell, and
-reads each suite's own exit code rather than a pipeline's. It then names `ui.sh`, `drag.sh`,
-`bench.sh` and `package.sh` and says what each needs: a display, a real pointer, an idle box, or a
-real makepkg archive. There is no CI, and `PKGBUILD`'s `check()` runs `cargo test` alone.
+`./tests/run-all.sh` is the main headless command. It builds nothing, so the two cargo profiles are
+the caller's job: `protocol.sh` drives the debug binary and `thumbs.sh` the release one, and each
+suite that cannot find its binary says so rather than reporting on nothing. It runs every suite that
+needs nothing but a shell, and reads each suite's own exit code rather than a pipeline's. It then
+names `ui.sh`, `drag.sh`, `bench.sh` and `package.sh` and says what each needs: a display, a real
+pointer, an idle box, or a real makepkg archive. There is no CI, and `PKGBUILD`'s `check()` runs
+`cargo test` alone.
 
 `tools/flea-acceptance` derives its checklist at run time from the protocol document, the
 key table, the context menu, the design canvas and the sidebar, so it cannot be smaller

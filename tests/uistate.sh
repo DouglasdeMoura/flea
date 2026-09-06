@@ -7,6 +7,13 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 BIN=./target/debug/flea
+# A clean git archive export carries no target/, and without this every case below runs against a
+# missing binary and reports them as product failures.
+if [ ! -x "$BIN" ]; then
+    printf 'uistate.sh: no binary at %s\n' "$BIN" >&2
+    printf 'uistate.sh: build it (cargo build); refusing to report on nothing\n' >&2
+    exit 1
+fi
 SANDBOX=$FIXTURE_ROOT/uistate
 fail=0
 
@@ -325,6 +332,40 @@ env WAYLAND_DISPLAY=flea-uistate-test-display PATH=/nonexistent-flea-test-path \
     XDG_STATE_HOME="$STATE" XDG_CONFIG_HOME="$CONFIG" $BIN --gui </dev/null >/dev/null 2>&1
 check "a ui.json that is not text is left byte for byte" "$notext_sha" "$(sha256sum "$UI" | cut -d' ' -f1)"
 check "and view.json is not read in its place" "1" "$(flea_ui 2>&1 | tr -d ' \n' | grep -c '"columns":\["name","size","date"\]')"
+
+# The write half of that same file, which the settle alone did not close: read() answers the shipped
+# defaults for bytes it cannot read, so a patch that went ahead would rename a full default document
+# over the operator's only copy. update() refuses the write instead, and says which file and why.
+out=$(flea_ui '{"hidden":true}' 2>&1); rc=$?
+check "a patch onto a ui.json that is not text exits 2" "2" "$rc"
+check "and names the read as the reason" "1" "$(echo "$out" | grep -c 'could not be read')"
+check "and leaves that file byte for byte" "$notext_sha" "$(sha256sum "$UI" | cut -d' ' -f1)"
+
+# The way in that needs no hex editor: a mode this process cannot read, which one `sudo flea` also
+# leaves behind as a root-owned ui.json inside a user-owned directory. The rename needs the directory
+# and not the file, so this guard is the only thing between one settings write and every key in it.
+fresh
+mkdir -p "$STATE/flea"
+printf '{\n  "columns": ["name", "size"],\n  "density": "compact",\n  "fromANewerFlea": {"a": 1}\n}\n' > "$UI"
+denied_sha=$(sha256sum "$UI" | cut -d' ' -f1)
+denied_ino=$(stat -c '%i' "$UI")
+chmod 000 "$UI"
+out=$(flea_ui '{"hidden":true}' 2>&1); rc=$?
+check "a patch onto an unreadable ui.json exits 2" "2" "$rc"
+check "and names the read as the reason" "1" "$(echo "$out" | grep -c 'could not be read')"
+check "and prints its sentence on stderr" "1" "$(flea_ui '{"hidden":true}' 2>&1 >/dev/null | grep -c '^flea: ')"
+check "and prints nothing on stdout" "" "$(flea_ui '{"hidden":true}' 2>/dev/null)"
+# ls -A: update() takes the lock before it looks at the target, so the lock is all a refusal leaves.
+check "and the refusal left only the lock it took" "ui.json ui.json.lock" "$(ls -A "$STATE/flea" | sort | tr '\n' ' ' | sed 's/ $//')"
+chmod 600 "$UI"
+check "the operator's file is byte for byte what it was" "$denied_sha" "$(sha256sum "$UI" | cut -d' ' -f1)"
+check "and is the same file, not a new one renamed over it" "$denied_ino" "$(stat -c '%i' "$UI")"
+
+# The control the guard must not have broken: a first run has no file to spend, so it writes one.
+fresh
+out=$(flea_ui '{"hidden":true}' 2>&1); rc=$?
+check "a first run still writes its state file" "0" "$rc"
+check "and the patch landed in it" "1" "$(grep -c '"hidden": true' "$UI")"
 
 # A launch with nothing to migrate leaves ~/.local/state alone, the way a first run always has.
 fresh

@@ -1,4 +1,5 @@
 use crate::thp;
+use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -28,9 +29,12 @@ pub fn open_terminal(path: &str) -> i32 {
     }
     // The setting is inherited across exec, so this is the last point that can hand it back.
     thp::enable();
+    // An OsString and not a format!, because Path::display would substitute U+FFFD for a byte that is not UTF-8.
+    let mut dir = OsString::from("--dir=");
+    dir.push(&target);
     // corner: spawn and not exec, because the terminal outlives us; see AGENTS.md "Opening a file".
     let started = Command::new("xdg-terminal-exec")
-        .arg(format!("--dir={}", target.display()))
+        .arg(&dir)
         // The terminal outlives us, so an inherited pipe would kill it on its first write; see AGENTS.md "Opening a file".
         .stdin(Stdio::null())
         .stdout(Stdio::null())

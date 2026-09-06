@@ -51,10 +51,6 @@ function runInventory(check) {
               var mine = Settings.GLYPHS[id] !== undefined ? Settings.GLYPHS[id] : Settings.MARKS[id]
               return mine === undefined || mine !== builtMark[id]
           }).join(","), "")
-    // New folder is a row the board gives no switch and the two locked ones are drawn locked;
-    // anything else without a switch would be a row the panel cannot reach.
-    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
-
     // New folder and Open in terminal are rows this release's panel gives no switch, and the two
     // locked ones are drawn locked; anything else without a switch would be a row it cannot reach.
     // SettingsMenus.html does draw a switch for Open in terminal, so that switch is still owed.
