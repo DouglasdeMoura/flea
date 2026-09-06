@@ -171,20 +171,25 @@ check "a plain drag is a move, so the source is gone" \
 
 # ---------------------------------------------------------------- R3
 echo
-echo "== R3: ctrl decides copy versus move, and it is read off the keyboard =="
-# The DragHandler updates its centroid on press and motion only, never on the release, so a ctrl
-# pressed after the last motion is invisible to it and only Keys.onPressed can carry it. Pressing
-# ctrl after the final motion is exactly what makes this the keyboard path rather than the centroid.
+echo "== R3: ctrl decides copy versus move, and the lift is where it is read =="
+# The modifier used to ride drag.proposedAction, which Qt recomputes from the live keyboard, so ctrl
+# pressed after the final motion still reached the drop. It cannot any more: the drag advertises
+# Qt.CopyAction alone so Chromium stops reporting dropEffect move, and Qt clamps a DragEvent's
+# proposedAction to what the source advertised. Measured on Qt 6.11.2 from the DropArea itself, the
+# receiver read proposedAction 2 of supported 3 under copy|move and 1 of 1 under copy alone, and
+# Copy|Link reads 1 of 5, so no pair of actions both discriminates ctrl and keeps the copy promise.
+# ui/js/Drag.js's own row marker carries it instead, baked when the DragHandler activates, so ctrl
+# is held from before the press here and a ctrl pressed mid-drag now leaves the drag a move.
 set -- $(screen_centre r3.txt); sx=$1; sy=$2
 set -- $(screen_centre aaa);    ax=$1; ay=$2
 warp "$sx" "$sy"; sleep 0.4
+ctrl_down; sleep 0.3
 press; sleep 0.3
 glide_to "$ax" "$ay"; sleep 0.6
-ctrl_down; sleep 0.5
 release; sleep 0.3
 ctrl_up; sleep 0.4
 wait_for "$HOMEDIR/aaa/r3.txt" present
-check "ctrl pressed after the last motion still makes it a copy" \
+check "ctrl held from the lift makes it a copy" \
       "$([ -e "$HOMEDIR/aaa/r3.txt" ] && echo copied || echo missing)" "copied"
 check "and the source survives, which is what copy means" \
       "$([ -e "$HOMEDIR/r3.txt" ] && echo kept || echo GONE)" "kept"

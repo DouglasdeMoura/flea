@@ -102,38 +102,38 @@ function run(check) {
     check("a URI this side writes round trips back to its path",
           String(Drag.pathsFromUrls([Drag.uriFor("/d/a b#c.txt")])), "/d/a b#c.txt")
 
-    var mime = Drag.mimeFor(pane([], [], rows), [0, 2])
+    var mime = Drag.mimeFor(pane([], [], rows), [0, 2], false)
     check("the wire carries the marker, sender first then the rows it holds",
           mime[Drag.ROWS_MIME].split("\n")[1], "0,2")
     check("and a CRLF separated uri-list of the carried rows",
           mime["text/uri-list"], "file:///d/omarchy\r\nfile:///d/a.txt\r\n")
     check("a drag carrying nothing offers no list either, for the same reason",
-          Drag.mimeFor(pane([], [], rows), []).hasOwnProperty("text/uri-list"), false)
+          Drag.mimeFor(pane([], [], rows), [], false).hasOwnProperty("text/uri-list"), false)
     check("the bar says nothing extra when the drag can leave", Drag.reachNote(true), "")
     check("and names the limit when it cannot", Drag.reachNote(false), " · too wide to drag out")
     // A selection reaches past the window the client holds, and dropping the rest in silence is how
     // Ops.js "abandoned the rest" on a wide move. The payload and the count the bar says must agree,
     // so an unresolvable selection offers no uri-list at all rather than a subset of one.
-    var wide = Drag.mimeFor(pane([], [], rows), [0, 9])
+    var wide = Drag.mimeFor(pane([], [], rows), [0, 9], false)
     check("a selection reaching past the held window offers no uri-list at all",
           wide.hasOwnProperty("text/uri-list"), false)
     check("and the marker still carries the whole selection, so an internal drop is complete",
           wide[Drag.ROWS_MIME].split("\n")[1], "0,9")
     check("a fully resolvable selection still offers both",
-          Drag.mimeFor(pane([], [], rows), [0, 2]).hasOwnProperty("text/uri-list"), true)
+          Drag.mimeFor(pane([], [], rows), [0, 2], false).hasOwnProperty("text/uri-list"), true)
 
     // The marker names the application; the instance mime names this process. Another Flea window is
     // a different process whose row indices mean nothing here, so it must not take the internal path.
     check("a drag from this window is recognised as its own",
-          Drag.isOwnDrag(Drag.markerPayload([0, 2])), true)
+          Drag.isOwnDrag(Drag.markerPayload([0, 2], false)), true)
     check("a drag from another Flea window is not",
           Drag.isOwnDrag("some-other-flea\n0,2"), false)
     check("and neither is something carrying no marker at all",
           Drag.isOwnDrag(""), false)
     check("the marker names the sender before the rows",
-          Drag.markerPayload([0, 2]).split("\n")[1], "0,2")
+          Drag.markerPayload([0, 2], false).split("\n")[1], "0,2")
     check("and the whole marker is what goes on the wire",
-          Drag.mimeFor(pane([], [], rows), [0, 2])[Drag.ROWS_MIME], Drag.markerPayload([0, 2]))
+          Drag.mimeFor(pane([], [], rows), [0, 2], false)[Drag.ROWS_MIME], Drag.markerPayload([0, 2], false))
 
     // One function decides the verb, and the label and the transfer both read it: a line promising a
     // copy while a move happens is the shape this branch has already produced twice.
@@ -153,6 +153,35 @@ function run(check) {
     check("and so does the bar line",
           Drag.line(1, "omarchy", Drag.verbFor(true, false, 56, 56) === "copy"),
           "Move 1 item to omarchy · ctrl copies")
+
+    // The lift's ctrl rides the marker because the drop event cannot carry it any more: Flea now
+    // advertises Qt.CopyAction alone, so Chromium stops reporting dropEffect move, and Qt clamps
+    // a DragEvent's proposedAction to what the source advertised. Measured on Qt 6.11.2: the
+    // receiver read proposedAction 2 of supported 3 under copy|move and 1 of 1 under copy alone.
+    check("the marker's last field is the modifier the lift read",
+          Drag.markerPayload([0, 2], true).split("\n")[2], "copy")
+    check("and a plain lift says move in that same field",
+          Drag.markerPayload([0, 2], false).split("\n")[2], "move")
+    check("a marked copy reads back as one", Drag.markerCopying(Drag.markerPayload([2], true)), true)
+    check("a marked move reads back as one", Drag.markerCopying(Drag.markerPayload([2], false)), false)
+    check("a marker carrying no modifier field is not a copy",
+          Drag.markerCopying("some-other-flea\n0,2"), false)
+    check("and neither is a drag carrying no marker at all", Drag.markerCopying(""), false)
+
+    // The round trip the DropArea makes: what mimeFor put on the wire is what verbFor reads back.
+    var plainWire = Drag.mimeFor(pane([], [], rows), [0, 2], false)[Drag.ROWS_MIME]
+    var heldWire = Drag.mimeFor(pane([], [], rows), [0, 2], true)[Drag.ROWS_MIME]
+    check("the wire carries the modifier the lift read", Drag.markerCopying(heldWire), true)
+    check("and a plain lift puts a move on it", Drag.markerCopying(plainWire), false)
+    check("so a plain drag within one volume still moves",
+          Drag.verbFor(Drag.isOwnDrag(plainWire), Drag.markerCopying(plainWire), 56, 56), "move")
+    check("ctrl at the lift still forces a copy",
+          Drag.verbFor(Drag.isOwnDrag(heldWire), Drag.markerCopying(heldWire), 56, 56), "copy")
+    check("and across two volumes the marker cannot make it a move",
+          Drag.verbFor(Drag.isOwnDrag(plainWire), Drag.markerCopying(plainWire), 56, 32), "copy")
+    check("a marked drag from another Flea window still copies, whatever its marker says",
+          Drag.verbFor(Drag.isOwnDrag("some-other-flea\n0,2\nmove"),
+                       Drag.markerCopying("some-other-flea\n0,2\nmove"), 56, 56), "copy")
 
     var fromOtherFlea = []
     Drag.dropExternal(pane(fromOtherFlea, [], rows), ["file:///x/a.txt"], 0)
