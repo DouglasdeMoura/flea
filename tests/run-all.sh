@@ -11,7 +11,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-headless="js keymap-gen charts budget empty-state sandbox gio-auth gvfs ops modes protocol archive thumbs network-open-share uistate uiwriter media"
+headless="js keymap-gen charts budget empty-state sandbox gio-auth gvfs ops modes protocol archive thumbs network-open-share mount-listing uistate uiwriter media"
 failed=0
 ran=0
 

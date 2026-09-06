@@ -100,7 +100,9 @@ gridIconSize|46|2 x 23
 gridMinCellWidth|146|space(125), GridView.dc.html's five-column reference viewport over five tiles
 settingsPanelWidth|560|space(480), the Settings board's border-box panel
 settingsRailWidth|150|560 - 408 - 2 outer hairlines
-settingsPaneWidth|408|space(350), the pane inside those hairlines"
+settingsPaneWidth|408|space(350), the pane inside those hairlines
+settingsIndent|52|52 x 13 / 13, the continuation indent five settings boards draw a hint and the ruler at
+settingsRailPaddingY|10|10 x 13 / 13, the inset Settings.dc.html gives the rail column above its first row"
 
 checked=0
 drift=0

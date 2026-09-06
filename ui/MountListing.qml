@@ -22,7 +22,8 @@ Item {
     signal listed()
 
     // A Process's own onExited can race its StdioCollector's text property, so the listing is also
-    // captured via onStreamFinished as a fallback; see the OEM Dropbox panel's Service.qml.
+    // captured via onStreamFinished as a fallback; poll() clears it, because a fallback held over
+    // from the last listing would answer an empty one with the shares it found the time before.
     property string _output: ""
     // A re-read asked for mid-listing used to be dropped, leaving a just-mounted share to wait out
     // the poll; this remembers it instead, and listProcess runs it the moment the listing ends.
@@ -45,6 +46,7 @@ Item {
             return
         }
         root._timedOut = false
+        root._output = ""
         listProcess.running = true
         listTimeout.restart()
     }
