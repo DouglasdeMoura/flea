@@ -106,6 +106,7 @@ function act(action, root) {
     case "trash": Ops.trash(root); return
     case "trashArm": Trash.arm(root); return
     case "copy": Ops.clip(root, false); return
+    case "copydirpath": root.copyDirPath(); return
     case "cut": Ops.clip(root, true); return
     case "paste": Ops.paste(root); return
     case "undo": Ops.undo(root); return

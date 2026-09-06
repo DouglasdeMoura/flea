@@ -360,6 +360,11 @@ action = "tabClose"
 char = "y"
 action = "copy"
 
+# The capital-is-the-variant shape g/G, j/J and s/S already use: y takes the file, Y takes the route.
+[[text]]
+char = "Y"
+action = "copydirpath"
+
 [[text]]
 char = "x"
 action = "cut"
@@ -511,6 +516,11 @@ label = "go to path"
 keys = "y ^c"
 action = "copy"
 label = "copy"
+
+[[sheet]]
+keys = "Y"
+action = "copydirpath"
+label = "copy folder path"
 
 [[sheet]]
 keys = "x ^x"
