@@ -28,7 +28,9 @@ conflicts=('flea-git')
 optdepends=('libarchive: archive listing and extraction'
             '7zip: 7z archive support'
             'imagemagick: image conversion'
-            'tailscale: Taildrop sharing')
+            'tailscale: Taildrop sharing'
+            'ffmpeg: media metadata in the preview column'
+            'dropbox-cli: Dropbox share links')
 # The release profile strips, so a debug package would have nothing to hold.
 options=('!debug')
 # Empty on purpose: with no source array makepkg builds from $startdir, so a clone is the source.

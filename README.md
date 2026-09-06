@@ -86,8 +86,9 @@ To track `main` instead of releases, use the AUR package:
 omarchy pkg aur add flea-git
 ```
 
-Four optional packages each unlock one feature and nothing else: `libarchive` for archive listing
-and extraction, `7zip` for `.7z` archives, `imagemagick` for image conversion, and `tailscale` for
+Six optional packages each unlock one feature and nothing else: `libarchive` for archive listing
+and extraction, `7zip` for `.7z` archives, `imagemagick` for image conversion, `ffmpeg` for the
+media metadata the preview column reads, `dropbox-cli` for Dropbox share links, and `tailscale` for
 Taildrop sharing.
 
 [`docs/install.md`](docs/install.md) has the rest: what lands on disk, what `flea --default` writes
