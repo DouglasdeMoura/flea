@@ -55,6 +55,10 @@ function run(check) {
     // which on the rail reads as a row of documents where the disks should be.
     drawsItsOwnMark("drive")
 
+    // The picker rail's Recent mark, which reaches ui/PickerPlaces.qml by name and falls into the
+    // same silent trap if PATHS never learns it.
+    drawsItsOwnMark("history")
+
     var sidebarNames = ["house", "download", "file-text", "image", "film", "music", "folder-git-2", "folder"]
     for (var j = 0; j < sidebarNames.length; j++) {
         drawsItsOwnMark(sidebarNames[j])

@@ -38,6 +38,34 @@ re-scanning: `sort` reorders whichever listing `list` last produced and cannot a
 remove rows, so changing `hidden` always means a fresh `list`, which is also what
 clears the cursor and selection back to row 0.
 
+### listpaths
+
+`{"c":"listpaths","paths":[<string>,...],"first":<uint>}`
+
+Example: `{"c":"listpaths","paths":["/home/gm/Pictures/a.png","/home/gm/Downloads"],"first":80}`
+
+Builds a fresh listing out of the paths the client names, replacing the current one, and answers a
+`listed` line followed immediately by a `rows` line covering rows `0..first`, exactly as `list`
+does. The listing's base is `/` and each entry is its absolute path with the leading slash removed,
+so `window`, `thumb`, `paths` and every other per-row facility keep working with no special case
+anywhere; that is the same shape a `search` listing takes, for the same reason. The client splits
+the last `/` itself when it wants to draw a name rather than a path.
+
+**Nothing is sorted.** The order the client sent is the order it gets back, because the one caller
+is the picker's Recent location and its order is the history's own, newest first; a sort by name
+would throw that away. `read` on the `listed` line is the time this build took and `sort` is always
+`0.0`.
+
+**A path that does not exist is dropped, not listed.** The build `lstat`s each one, so a history
+entry whose file has since been deleted never reaches the client, rather than arriving as a row
+whose `p`, `s` and `m` are all 0. A path that is not absolute, and the root itself, are dropped the
+same way: this list is read out of a file every application on the desktop writes, so it is checked
+here rather than trusted. The type recorded in `d` is the link's own, the same rule `list` follows,
+so a symlink to a directory is listed as a file and a symlink to nothing is still an entry.
+
+There is no cancel and no streaming: the build is one `lstat` per path inside the read loop, and the
+one caller sends a few hundred at most.
+
 ### window
 
 `{"c":"window","start":<uint>,"count":<uint>}`

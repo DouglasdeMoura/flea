@@ -648,6 +648,24 @@ gets the same chooser.
   `ui/PickerList.qml` hands `Row` `Picker.HIDDEN_COLS` and the chooser never inherits Mode or Kind
   from `ViewState`, whatever the header menu has switched on for the browser window.
 
+**Recent, and why it is read-only.** `SendPicker.html` draws a Recent row above Home in the rail,
+says the location's own name where the path would be, and draws Parent disabled with the words
+"unavailable in Recent". The history it lists is the desktop's own,
+`$XDG_DATA_HOME/recently-used.xbel` and `~/.local/share` when the session set no data home: Flea
+keeps no history of its own, writes nothing to that file, and reads it only when the location is
+opened. Qt's XML reader does the parsing in `ui/PickerRecent.qml`, because a hand-rolled XBEL
+reader would be a second implementation of a file this application does not own. Every application
+on the box appends to it, so `ui/js/Recent.js` treats a bookmark as untrusted text: only a real
+local `file://` URI with an empty or `localhost` authority becomes a path, a control character in
+the decoded form refuses it, and the read stops at 500 entries. The rows come back from the backend
+through `listpaths`, which stats each path and drops the ones that are gone, so a stale entry is
+removed rather than drawn against a failed stat; the listing's base is `/` and each row is named by
+its path under it, which is why `ui/PickerList.qml` draws a Recent row by its own leaf and
+`Picker.rowPath` answers with the whole path. Recent is a location and never a directory: it is
+named by the token `flea:recent`, which no absolute path can equal, Parent refuses in it, Back
+works out of it, a caller's own `folder` still wins at startup, and a save is not offered it at all
+because a history is not a directory to write into.
+
 **Why the backend is Python.** It is the second non-Rust helper in this tree, after
 `tools/flea-gio-auth`. A portal backend has to own a bus name, export objects, answer calls out of
 order and stay reachable while a window is open; this crate has no dependencies at all, so the Rust

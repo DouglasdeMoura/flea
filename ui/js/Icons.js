@@ -76,6 +76,9 @@ var PATHS = {
     "server": "M2 2h20v8H2z M2 14h20v8H2z M6 6L6.01 6 M6 18L6.01 18",
     // The Network group's add mark, replacing a Text "+" the operator read as a Christian cross.
     "plus": "M5 12h14 M12 5v14",
+    // The picker rail's Recent mark, lucide rotate-ccw, the one SendPicker.html itself draws; the
+    // circle is a real curve and stays, and the arrow head is already square on lucide's own grid.
+    "history": "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8 M3 3v5h5",
     // Lucide's hard-drive with its four baked 2 unit corner arcs cut square, which lands the body on
     // (6,4) (18,4) (22,12) (22,20) (2,20) (2,12); the divider and the two LED dots are lucide's own.
     "drive": "M6 4h12l4 8v8H2v-8z M2 12h20 M6 16L6.01 16 M10 16L10.01 16",

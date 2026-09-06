@@ -15,6 +15,7 @@ pub mod kind;
 pub mod linecount;
 pub mod dirsize;
 pub mod dirsizereq;
+pub mod listpaths;
 pub mod scan;
 pub mod fuzzy;
 pub mod search;

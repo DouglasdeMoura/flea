@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Filter.js" as Filter
+import "js/Match.js" as Match
 import "js/Picker.js" as Picker
 
 // The picker's listing: ui/Row.qml drawn behind a check box, and the keys that move through it. The
@@ -31,7 +32,12 @@ ListView {
         // filter chip the two differ, and ui/js/Filter.js is what converts between them.
         readonly property int listingIndex: Filter.at(root.picker.shown, index)
         readonly property var row: root.picker.rowFor(cell.listingIndex)
-        readonly property string rowPath: cell.row ? Picker.join(root.picker.path, cell.row.n) : ""
+        readonly property string rowPath: cell.row ? Picker.rowPath(root.picker.path, cell.row.n) : ""
+        // A Recent row is named by its whole path under the listing base, and SendPicker.html draws
+        // the file's own name; the row handed to Row.qml is the same row under that name.
+        readonly property var shownRow: cell.row && root.picker.recent
+            ? Object.assign({}, cell.row, { n: Match.base(cell.row.n) })
+            : cell.row
         // A file request marks files and a folder request marks folders; the other kind is a way
         // through the tree and never an answer, so it carries no box at all.
         readonly property bool markable: cell.row !== null && cell.row.d === root.picker.folderMode
@@ -61,7 +67,7 @@ ListView {
             leadingSlot: root.checkSize + Theme.spacing.gap
             compactDate: true
             hiddenCols: Picker.HIDDEN_COLS
-            row: cell.row
+            row: cell.shownRow
             cursor: cell.listingIndex === root.picker.cursorIndex
             hovered: hover.hovered
             kindNames: root.picker.kindNames
