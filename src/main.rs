@@ -24,6 +24,19 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::exit;
 
+// --default owns both per-user steps, because a user updating from 0.1.3 has no picker routing yet.
+fn claim_both() -> i32 {
+    let handler = defaults::claim();
+    let picker = chooser::claim();
+    handler.max(picker)
+}
+
+fn release_both() -> i32 {
+    let handler = defaults::release();
+    let picker = chooser::release();
+    handler.max(picker)
+}
+
 fn usage(message: &str) -> ! {
     eprintln!("flea: {}", message);
     eprintln!("usage: flea [--tui|--gui] [--select <uri|path>] [path]");
@@ -113,15 +126,20 @@ fn main() {
         exit(terminal::open_terminal(&args[2]));
     }
 
-    // flea --default [off]: the one per-user step pacman cannot own, see docs/install.md.
+    // flea --default [off]: both per-user steps pacman cannot own, see docs/install.md.
     if args.len() == 2 && args[1] == "--default" {
-        exit(defaults::claim());
+        exit(claim_both());
     }
     if args.len() == 3 && args[1] == "--default" && args[2] == "off" {
-        exit(defaults::release());
+        exit(release_both());
     }
     if args.get(1).map(String::as_str) == Some("--default") {
         usage("--default takes nothing, or off");
+    }
+
+    // corner: an undocumented alias for --default off, kept out of usage on purpose.
+    if args.len() == 2 && args[1] == "--youleftmeforstrata" {
+        exit(release_both());
     }
 
     // flea --picker [off]: the chooser routing, the other per-user step, see docs/install.md.
