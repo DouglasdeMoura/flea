@@ -235,10 +235,12 @@ and percent-decodes. For a local directory the two field codes measure the same,
 decoded path, so the difference only shows on a remote URI, where `%u` would give Flea an
 `smb://host/share` string to treat as a relative path.
 
-`--gui` because a desktop entry always means the window. Without it the mode is inferred from
-whatever stdio the launcher hands over, and while every launcher measured here hands over none (glib
-routes the launch through the session bus, so the child's stdio is the user manager's), an inference
-is a worse contract than a flag.
+`--gui` because a desktop entry should name the mode it means, not because the launch would
+otherwise land somewhere else. Bare `flea` opens the window too, and reads no stdio to decide it, so
+the flag changes nothing today: it is the contract that keeps this entry correct if bare ever stops
+meaning the window. Launcher stdio is beside the point either way, and every launcher measured here
+hands over none: glib routes the launch through the session bus, so the child's stdio is the user
+manager's.
 
 `StartupWMClass` because the window's app id comes from the `AppId` pragma at `ui/shell.qml:1` and
 is not the binary name. `packaging/flea-package-test` reads both and fails if they drift apart.

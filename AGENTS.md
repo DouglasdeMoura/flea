@@ -621,8 +621,15 @@ installs that file. With one installed it runs `chooser::claim()` too, which wri
 `~/.config/mimeapps.list`, `~/.config/hypr/bindings.lua` and
 `~/.config/xdg-desktop-portal/portals.conf`. **A refused handler claim stops the command there**, so
 the chooser half never writes behind a step that wrote nothing. `release_both()` is
-unconditional and reverses every step, each half a no-op when it was never claimed; no half's
-failure blocks another, see `defaults::report` and `chooser::report`. The `undo both with:` line
+unconditional and runs every step back, each half a no-op when it was never claimed; no half's
+failure blocks another, see `defaults::report` and `chooser::report`. **Running a step back is not
+always restoring it.** The key block and the picker's window rule are marked blocks and the chooser
+routing is one key, so cutting them leaves what was there before; the handler half is
+`release_mime()`, which only calls `drop_default()` to delete Flea's line and then reports what
+`xdg-mime query default` answers next. Nothing persists the `was <id>` that `claim_mime()` printed,
+so a handler the operator had pinned is never written back, and on a box that had one
+`flea --default off` leaves a `[Default Applications]` section that no longer names it.
+The `undo both with:` line
 belongs to the invocation and not to a step, so `main.rs` prints it once, after the steps it ran,
 and `--default off` prints none at all.
 
@@ -647,7 +654,9 @@ exactly once, and a type nobody matches on twice would be ceremony.
 `--tui` and `--gui` are mutually exclusive; giving both is a usage error naming the conflict,
 never a coin flip. With neither flag the window is the default, including when both handles are
 a terminal, because the terminal interface is reserved but not built and a bare invocation must
-open the product that exists. `--tui` is the only route to that reserved interface. It requires
+open the product that exists. `--tui` is the only route to that reserved interface, and the only
+mode that reads the tty at all: `main.rs` computes the `is_terminal()` pair one line above the
+`if want_tui` that is its only reader, so no other mode can consult it even by accident. It requires
 both stdin and stdout to be a real terminal, not just one, so a future implementation cannot write
 escape codes into a pipeline. `flea | head` gives stdin a tty and stdout a pipe and an explicit
 `--tui` therefore refuses. A window launch without a non-empty `WAYLAND_DISPLAY` or `DISPLAY`
@@ -759,13 +768,17 @@ child exits, and a write still in flight would be a lost answer read as a fault.
 
 ## Module map
 
-- `main.rs` dispatches on argv: `--backend` runs the command loop, `--prewarm <path>
-  <first> <dest>` writes the prewarm file, `--open <path>` hands one file to the desktop's
-  handler, `--terminal <dir>` opens the configured terminal there, `--default [off]` claims or
-  releases the OS-level default and the chooser routing together, `--picker [off]` claims or
-  releases the desktop's file chooser alone, `--pick <reply>` opens one chooser window for
-  `tools/flea-portal`, and anything else
-  opens the window unless explicit `--tui` requests the terminal interface, see "Modes".
+- `main.rs` dispatches on argv, and this is every flag it matches: `--backend` runs the command
+  loop, `--prewarm <path> <first> <dest>` writes the prewarm file, `--open <path>` hands one file
+  to the desktop's handler, `--terminal <dir>` opens the configured terminal there,
+  `--default [off]` claims or releases the OS-level default and the chooser routing together,
+  `--youleftmeforstrata` is the undocumented second spelling of `--default off`, `--picker [off]`
+  claims or releases the desktop's file chooser alone, `--pick <reply>` opens one chooser window
+  for `tools/flea-portal`, `--ui-state [<patch>]` reads or merges the shared view state,
+  `--version` prints the version, `--print-target` resolves `--select`'s pair for the tests, and
+  anything else opens the window, on `--select`'s parent directory when one is given, unless
+  explicit `--tui` requests the terminal interface, `--gui` being the explicit spelling of the
+  window a bare invocation already means, see "Modes".
 - `paths.rs` resolves the UI directory and whether a display is available.
 - `gui.rs` execs `qs` against the resolved UI directory.
 - `thp.rs` the one `prctl(PR_SET_THP_DISABLE)` declaration, `disable()` and `enable()`.
