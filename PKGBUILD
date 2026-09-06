@@ -14,10 +14,17 @@ license=('MIT')
 # python-gobject is what tools/flea-portal answers org.freedesktop.impl.portal.FileChooser with, and
 # what tools/flea-filemanager1 answers org.freedesktop.FileManager1 with; it is the same binding
 # omarchy-file-select, the client that portal serves, is already written against.
-depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'python-gobject' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
+# qt6-webengine ships QtQuick.Pdf and qt6-multimedia ships QtMultimedia, which ui/PreviewPdf.qml and
+# ui/PreviewMedia.qml import: neither is in the omarchy plus quickshell closure, so a clean box
+# installed a Flea whose PDF and media preview could not load at all.
+# gcc-libs and glibc are the binary's only direct links, and hicolor-icon-theme owns the directory
+# the desktop icon is installed into.
+# python is the interpreter of two scripts this package installs and D-Bus activates at runtime, so
+# it is a runtime dependency rather than only the checkdepend the sandboxed child needs.
+depends=('bubblewrap' 'expect' 'gcc-libs' 'glib2' 'glibc' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'hicolor-icon-theme' 'omarchy' 'python' 'python-gobject' 'qt6-multimedia' 'qt6-webengine' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
 makedepends=('cargo')
-# check() runs the real sandboxed child, which shells to /usr/bin/python3 to reserve address space.
-checkdepends=('python')
+# Both packages own /usr/bin/flea, so pacman refuses the pair rather than leaving one half-installed.
+conflicts=('flea-git')
 optdepends=('libarchive: archive listing and extraction'
             '7zip: 7z archive support'
             'imagemagick: image conversion'
