@@ -27,8 +27,12 @@ use std::process::exit;
 // --default owns both per-user steps, because a user updating from 0.1.3 has no picker routing yet.
 fn claim_both() -> i32 {
     let handler = defaults::claim();
-    let picker = chooser::claim();
-    handler.max(picker)
+    // A source build has no flea.portal to prefer, which is the picker's precondition, not a failure here.
+    if !chooser::backend_installed() {
+        eprintln!("flea: no portal backend is installed, so the file chooser step was skipped");
+        return handler;
+    }
+    handler.max(chooser::claim())
 }
 
 fn release_both() -> i32 {

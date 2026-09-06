@@ -13,6 +13,11 @@ const PORTAL_FILE: &str = "flea.portal";
 const GROUP: &str = "[preferred]";
 
 // flea --picker
+// --default asks this before claiming, because a box with no flea.portal has nothing to prefer.
+pub fn backend_installed() -> bool {
+    installed_portal().is_some()
+}
+
 pub fn claim() -> i32 {
     if installed_portal().is_none() {
         eprintln!(
