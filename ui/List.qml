@@ -109,8 +109,11 @@ ListView {
         Item {
             id: ghost
             Drag.dragType: Drag.Automatic
-            Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
-            Drag.proposedAction: root.dragCopy ? Qt.CopyAction : Qt.MoveAction
+            // Copy alone, because supportedActions is the only one of these another application
+            // ever sees: offering Qt.MoveAction told Chromium the drop was a move, which Google's
+            // uploader refuses, and liftEnded removes nothing so it was a promise Flea cannot keep.
+            Drag.supportedActions: Qt.CopyAction
+            Drag.proposedAction: Qt.CopyAction
             Drag.mimeData: root.dragMime
         }
 
@@ -124,15 +127,12 @@ ListView {
                     drag.accepted = false
                     return
                 }
-                // A foreign drag always copies; Flea's own takes the action Qt negotiated from the
-                // modifier, because a platform drag runs a nested event loop in which this window
-                // receives no key events and the Keys handler that used to carry ctrl cannot fire.
-                root.dragCopy = DragOps.verbFor(DragOps.isOwnDrag(drag.getDataAsString(root.dragKey)), drag.proposedAction === Qt.CopyAction, root.pane.backend.dirDev, cell.row ? cell.row.v : 0) === "copy"
+                root.dragCopy = root.verbAt(drag.getDataAsString(root.dragKey), cell.row) === "copy"
                 root.dropIndex = cell.listingIndex
             }
             onPositionChanged: function (drag) {
                 if (root.dropIndex === cell.listingIndex)
-                    root.dragCopy = DragOps.verbFor(DragOps.isOwnDrag(drag.getDataAsString(root.dragKey)), drag.proposedAction === Qt.CopyAction, root.pane.backend.dirDev, cell.row ? cell.row.v : 0) === "copy"
+                    root.dragCopy = root.verbAt(drag.getDataAsString(root.dragKey), cell.row) === "copy"
             }
             onExited: {
                 if (root.dropIndex === cell.listingIndex) root.dropIndex = -1
@@ -144,16 +144,15 @@ ListView {
                 // Only this window's own drag takes the internal path. The row marker names the
                 // application and not the process, so another Flea window matched it, resolved its
                 // indices against this listing's own empty selection, and dropped nothing at all.
-                var own = DragOps.isOwnDrag(drop.getDataAsString(root.dragKey))
-                if (own) {
-                    var copying = DragOps.verbFor(true, drop.proposedAction === Qt.CopyAction, root.pane.backend.dirDev, cell.row ? cell.row.v : 0) === "copy"
-                    root.dropped(cell.listingIndex, copying)
-                    drop.accept(copying ? Qt.CopyAction : Qt.MoveAction)
+                var marker = drop.getDataAsString(root.dragKey)
+                if (DragOps.isOwnDrag(marker)) {
+                    root.dropped(cell.listingIndex, root.verbAt(marker, cell.row) === "copy")
+                    drop.accept(Qt.CopyAction)
                     return
                 }
                 // Another Flea window is a foreign source like any other: it arrives by path, never
-                // by row, and it copies. Accepted as a copy explicitly and never as the proposed
-                // action, so no source deletes its own file on the strength of this drop.
+                // by row, and it copies. Both branches accept a copy and never the proposed action,
+                // so no source deletes its own file on the strength of this drop.
                 DragOps.dropExternal(root.pane, drop.urls, cell.listingIndex)
                 root.dropIndex = -1
                 root.dragCopy = false
@@ -217,7 +216,7 @@ ListView {
         root.dragRows = DragOps.carried(root.pane, index)
         root.dropIndex = -1
         root.liftMoved(centroid)
-        root.dragMime = DragOps.mimeFor(root.pane, root.dragRows)
+        root.dragMime = DragOps.mimeFor(root.pane, root.dragRows, root.dragCopy)
         // Automatic starts the platform drag on this assignment and does not return until the drop,
         // so everything the gesture needs is already set above. The drop lands in a DropArea, this
         // window's own or another application's, while this line blocks.
@@ -225,9 +224,18 @@ ListView {
     }
 
     // Only the modifier survives here: the platform drag takes its position from the pointer, and
-    // once it starts the compositor owns the pointer and this stops being called at all.
+    // once it starts the compositor owns the pointer and this stops being called at all. It is also
+    // the last reading of ctrl the gesture gets, so mimeFor bakes what it leaves behind into the marker.
     function liftMoved(centroid) {
         root.dragCopy = DragOps.copying(centroid.modifiers)
+    }
+
+    // The one place a drop event becomes a verb, so enter, move and drop cannot disagree. Both of
+    // the things verbFor needs to know about the source come off the marker: which window sent the
+    // drag, and whether ctrl was down when it did.
+    function verbAt(marker, row) {
+        return DragOps.verbFor(DragOps.isOwnDrag(marker), DragOps.markerCopying(marker),
+                               root.pane.backend.dirDev, row ? row.v : 0)
     }
 
     // The delegate drawing the editor, or null when the row was released past the cache buffer,

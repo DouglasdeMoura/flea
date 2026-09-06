@@ -109,11 +109,19 @@ var ROWS_MIME = "application/x-flea-rows"
 // selection it never made and the drop does nothing at all.
 var INSTANCE = String(Date.now()) + "-" + String(Math.floor(Math.random() * 1000000000))
 
-// The marker's payload: which Flea sent it, then the rows it carries. One marker rather than a
-// second mime type, because two types are two things to keep in agreement and a drop carrying one
-// but not the other is a state nobody would have written a branch for.
-function markerPayload(rows) {
-    return INSTANCE + "\n" + rows.join(",")
+// The marker's payload: which Flea sent it, the rows it carries, then the modifier the lift read.
+// One marker rather than a second mime type, because two types are two things to keep in agreement
+// and a drop carrying one but not the other is a state nobody would have written a branch for.
+// The modifier rides here because Drag.supportedActions is the only field another application ever
+// sees, and offering it Qt.MoveAction is what made Chromium report dropEffect move.
+function markerPayload(rows, copy) {
+    return INSTANCE + "\n" + rows.join(",") + "\n" + (copy ? "copy" : "move")
+}
+
+// Whether the marked drag was lifted with ctrl down. Anything carrying no marker answers false,
+// which costs nothing: verbFor already copies everything that did not come from this window.
+function markerCopying(payload) {
+    return String(payload).split("\n")[2] === "copy"
 }
 
 // Whether a marked drag began in this very window. An unmarked drag has no payload and answers false,
@@ -142,9 +150,9 @@ function uriFor(path) {
 // "a wide move relocated a few files and abandoned the rest", and here it would hand another
 // application a subset while the bar named the whole count. No list at all is refusable and visible.
 // Whether the key is present is also what tells the bar the drag cannot leave Flea.
-function mimeFor(pane, rows) {
+function mimeFor(pane, rows, copy) {
     var mime = {}
-    mime[ROWS_MIME] = markerPayload(rows)
+    mime[ROWS_MIME] = markerPayload(rows, copy)
     var uris = []
     for (var i = 0; i < rows.length; i++) {
         var row = pane.rowFor(rows[i])
@@ -163,6 +171,10 @@ function mimeFor(pane, rows) {
 // cannot drift apart. Finder's rules, all of them: a drag from anywhere but this window copies, a
 // drag within one volume moves, a drag across two copies so the original survives the crossing, and
 // ctrl forces a copy either way.
+//
+// ctrlHeld comes off the marker markerCopying reads, and never off the drop event: Qt clamps a
+// DragEvent's proposedAction to the actions the source advertised, so a copy-only drag reports
+// Qt.CopyAction whether or not ctrl is down.
 //
 // srcDev is the listing's own filesystem from the listed line and destDev is the dropped-on folder's
 // from its row; docs/protocol.md documents both. Either being 0 means the stat failed, which is a
