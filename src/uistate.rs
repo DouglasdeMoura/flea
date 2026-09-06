@@ -268,6 +268,8 @@ mod tests {
         let current = from_file("{}");
         for (patch, named) in [
             (r#"{"view":"miller"}"#, "view"),
+            // The dual group is stored for a newer Flea, but this one cannot draw that view.
+            (r#"{"view":"dual"}"#, "view"),
             (r#"{"places":{"sidebarWidth":"wide"}}"#, "places.sidebarWidth"),
             (r#"{"notAKey":1}"#, "notAKey"),
             (r#"{"menu":{"nope":1}}"#, "menu.nope"),

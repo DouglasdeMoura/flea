@@ -92,7 +92,8 @@ pub const DISPLAY: &[(&str, Rule)] = &[("textSize", Rule::Group(TEXT_SIZE))];
 pub const MENU: &[(&str, Rule)] = &[("hidden", Rule::Ids)];
 
 pub const SCHEMA: &[(&str, Rule)] = &[
-    ("view", Rule::Word(&["list", "columns", "grid", "dual"])),
+    // No "dual": every view in ui/Pane.qml gates on an exact match, so a stored "dual" draws nothing.
+    ("view", Rule::Word(&["list", "columns", "grid"])),
     ("density", Rule::Word(&["compact", "normal", "comfortable"])),
     ("columns", Rule::Columns),
     ("addressBar", Rule::Word(&["path", "breadcrumb"])),
