@@ -34,11 +34,12 @@ To make Flea the default file manager:
 flea --default
 ```
 
-This sets Flea as the `inode/directory` handler, makes Omarchy's two file-manager keys,
-`SUPER + SHIFT + F` and `SUPER + ALT + SHIFT + F`, open it instead of Nautilus, and claims the file
-chooser described below. Run `flea --default off` before `omarchy pkg drop flea`: it puts the keys
-and the chooser back and deletes Flea's handler line, which leaves the `inode/directory` default
-wherever the rest of the lookup resolves to rather than at a handler you had pinned yourself, see
+This sets Flea as the `inode/directory` handler, puts Flea in front of the other file managers for
+"Show in folder", makes Omarchy's two file-manager keys, `SUPER + SHIFT + F` and
+`SUPER + ALT + SHIFT + F`, open it instead of Nautilus, and claims the file chooser described below.
+Run `flea --default off` before `omarchy pkg drop flea`: it puts the keys, "Show in folder" and the
+chooser back and deletes Flea's handler line, which leaves the `inode/directory` default wherever
+the rest of the lookup resolves to rather than at a handler you had pinned yourself, see
 [`docs/install.md`](docs/install.md).
 
 To make Flea the file chooser every application opens, the dialog behind `omarchy tailscale send`
@@ -55,27 +56,29 @@ portal caller on the box at once. It writes one interface key to
 other portal keep the backend they already had. It also adds one Hyprland rule that gives the chooser
 the same floating treatment Omarchy already gives the GTK one. `flea --picker off` puts both back.
 
-"Show in folder" needs neither of those and no configuration at all. Chromium, Firefox, Steam and
-every other application that reveals a downloaded file call `org.freedesktop.FileManager1` on the
-session bus, and installing Flea registers it for that name, so the reveal opens Flea on the file's
-own directory with the file selected. Nothing is claimed while Flea is not running: D-Bus starts the
-service on the call and it exits again half a minute later.
+"Show in folder" is one more thing `flea --default` claims. Chromium, Firefox, Steam and every
+other application that reveals a downloaded file call `org.freedesktop.FileManager1` on the session
+bus, and Flea answers it by opening the file's own directory with the file selected. No process sits
+on that name while Flea is not running: D-Bus starts the service on the call and it exits again half
+a minute later.
 
-**One caveat, and it is the whole of it.** Nautilus, Dolphin, Thunar and Nemo each register for that
-same name, and Omarchy ships Nautilus in `omarchy-base.packages`, so on a stock box there are at
-least two claimants. D-Bus keeps the FIRST registration the services directory hands back, which is
-readdir order and is neither alphabetical nor newest-wins: measured on this box by giving a private
-bus all five files and moving Flea's to the front, the front one won both times. Which one is in
-front after installing Flea is therefore not something Flea can decide. Ask the box:
+**Installing does not decide that one, and this is why.** Nautilus, Dolphin, Thunar and Nemo each
+register for that same name, and Omarchy ships Nautilus in `omarchy-base.packages`, so on a stock
+box there are at least two claimants in `/usr/share/dbus-1/services`. D-Bus keeps the FIRST
+registration it reads, and which of them that is inside one directory depends on which bus you run:
+dbus-broker 37, the one Omarchy runs, sorts the directory; dbus-daemon 1.16.2 takes it in readdir
+order. Neither is newest-wins and neither is anything an installer can steer. On this box today,
+with four claimants installed, the one that answers is Nemo's.
+`flea --default` settles it from outside that directory instead of joining the queue, by writing one
+registration to `~/.local/share/dbus-1/services`, which D-Bus reads before every system directory.
+Ask the box which one answers, and it tells you by naming the ones it threw away:
 
 ```bash
-for f in $(ls -U /usr/share/dbus-1/services); do
-  grep -Fqs 'Name=org.freedesktop.FileManager1' "/usr/share/dbus-1/services/$f" && { echo "$f answers"; break; }
-done
+journalctl --user -b | grep "duplicate name 'org.freedesktop.FileManager1'"
 ```
 
-If that names something other than `com.thisisgm.flea.FileManager1.service`, remove the file manager
-you are not using and it will name Flea's.
+The claimant that is not on that list is the one answering. `flea --default off` removes Flea's file
+and hands the name back.
 
 To track `main` instead of releases, use the AUR package:
 
@@ -488,9 +491,10 @@ interface is not built yet, so `flea --tui` in a terminal exits 2 saying so. A w
 no non-empty `WAYLAND_DISPLAY` or `DISPLAY` exits 2 rather than failing inside `qs`. Giving both
 flags is a usage error naming the conflict, never a coin flip.
 
-`--default` opens no window: it sets the `inode/directory` handler, Omarchy's two file-manager
-keys and the file chooser. `off` runs all three back, and two of them land where they started. The
-keys and the picker's window rule are marked blocks and the chooser routing is one key, so
+`--default` opens no window: it sets the `inode/directory` handler, the `org.freedesktop.FileManager1`
+registration behind "Show in folder", Omarchy's two file-manager keys and the file chooser. `off`
+runs all four back, and three of them land where they started. The keys and the picker's window rule
+are marked blocks, the chooser routing is one key, and the registration is a file of Flea's own, so
 removing them leaves Omarchy's own behaviour; the handler is deleted rather than restored, so
 afterwards the `inode/directory` default is whatever the rest of the lookup resolves to,
 `org.gnome.Nautilus.desktop` on stock Omarchy. `flea --default off` names that resulting handler

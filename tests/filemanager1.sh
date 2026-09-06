@@ -28,6 +28,10 @@ fail() { printf 'FAIL %s\n' "$*"; failed=$((failed + 1)); }
 for tool in dbus-daemon python3; do
     command -v "$tool" >/dev/null 2>&1 || { printf 'FAIL %s is not installed, so nothing below was run\n' "$tool"; exit 1; }
 done
+# The --default cases drive the real binary; without it every one of them would report a missing
+# binary as a product failure, which is the wrong green this suite exists to refuse.
+BIN="$root/target/debug/flea"
+[[ -x "$BIN" ]] || { printf 'FAIL %s is missing, run cargo build\n' "$BIN"; exit 1; }
 
 stop_bus() {
     if [[ "$bus_pid" != 0 ]] && kill -0 "$bus_pid" 2>/dev/null; then
@@ -43,18 +47,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A bus of this suite's own, listening inside the fixture and reading service files from the one
-# directory it is given. FLEA_BIN is set in the daemon's environment because an activated service
-# inherits the daemon's, which is the only way the stub reaches a child D-Bus starts.
+# A bus of this suite's own, listening inside the fixture and reading service files from the
+# directories it is given, in that order. FLEA_BIN is set in the daemon's environment because an
+# activated service inherits the daemon's, which is the only way the stub reaches a child D-Bus starts.
 start_bus() {
-    local services="$1"
+    local services
     cat > "$fixture/bus.conf" <<CONF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
   <type>session</type>
   <listen>unix:path=$fixture/bus</listen>
-  <servicedir>$services</servicedir>
+CONF
+    # One line per directory, in the order given, because that order is the whole subject of the
+    # user-file cases below: D-Bus keeps the first registration it reads for a name.
+    for services in "$@"; do
+        printf '  <servicedir>%s</servicedir>\n' "$services" >> "$fixture/bus.conf"
+    done
+    cat >> "$fixture/bus.conf" <<CONF
   <policy context="default">
     <allow send_destination="*" eavesdrop="true"/>
     <!-- The receive half, copied from /usr/share/dbus-1/session.conf: without it every method
@@ -287,6 +297,175 @@ case_packaged() {
     [[ "$failed" == "$before" ]] && pass "packaged: the executable and its vendor-named registration are installed"
 }
 
+# --------------------------------------------------------------------------------------------
+# flea --default's claim on the name, which is the half a stock box needs: nautilus, dolphin,
+# thunar and nemo each ship a registration for it in /usr/share/dbus-1/services, and D-Bus keeps
+# whichever it reads first. $XDG_DATA_HOME is read before every system directory, so the file
+# `flea --default` writes there settles it. Everything below runs against a sandbox HOME and a
+# sandbox XDG ladder, and the operator's own ~/.local/share/dbus-1/services is never a path here.
+
+home="$fixture/home"
+sysdata="$fixture/sysdata"
+userservices="$home/data/dbus-1/services/org.freedesktop.FileManager1.service"
+# Every rival names its own stub, so the log says which registration the bus actually kept.
+rivals="org.freedesktop.FileManager1 org.kde.dolphin.FileManager1 org.xfce.Thunar.FileManager1 nemo.FileManager1"
+
+# The two commands the other halves of --default shell out to are stubbed here: they are modes.sh's
+# subject and not this suite's, and a real hyprctl reachable from here would reload the operator's
+# live Hyprland config rather than anything inside the fixture.
+make_default_fixture() {
+    local name
+    mkdir -p "$home/config/hypr" "$home/data" "$home/stubs" \
+        "$sysdata/applications" "$sysdata/dbus-1/services" "$fixture/rivaldir"
+    printf -- '-- stock omarchy bindings\n' > "$home/config/hypr/bindings.lua"
+    printf '[Desktop Entry]\nName=Flea\nExec=flea --gui %%f\n' > "$sysdata/applications/com.thisisgm.flea.desktop"
+    # The shipped registration with only its Exec repointed at the recording stub, the same
+    # substitution make_fixture already makes, so the Name= under test stays the packaged file's.
+    sed "s#^Exec=.*#Exec=$fixture/flea-stub#" "$service_file" \
+        > "$sysdata/dbus-1/services/com.thisisgm.flea.FileManager1.service"
+    # The four rivals a stock Omarchy box carries, in one system directory of their own, created
+    # in the order nautilus, dolphin, thunar, nemo so that nautilus's is the one first in ls -U.
+    # Each names a stub of its own, so the log says which registration the bus actually kept.
+    mkdir -p "$fixture/rivalbin"
+    for name in $rivals; do
+        cat > "$fixture/rivalbin/$name" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "$name" >> "\$RIVAL_LOG"
+STUB
+        chmod +x "$fixture/rivalbin/$name"
+        cat > "$fixture/rivaldir/$name.service" <<RIVAL
+[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=$fixture/rivalbin/$name
+RIVAL
+    done
+    cat > "$home/stubs/hyprctl" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+    # xdg-mime's own state, so the read-back defaults.rs makes has something honest to answer with.
+    cat > "$home/stubs/xdg-mime" <<STUB
+#!/bin/sh
+state="$home/mime-default"
+case "\$1 \$2" in
+  "query default") cat "\$state" 2>/dev/null; exit 0 ;;
+  "default "*) printf '%s' "\$2" > "\$state"; exit 0 ;;
+esac
+exit 1
+STUB
+    chmod +x "$home/stubs/hyprctl" "$home/stubs/xdg-mime"
+}
+
+# The binary, run the way a user runs it, with every path it can reach inside the fixture.
+flea_default() {
+    env -i PATH="$home/stubs:/usr/bin:/bin" HOME="$home" \
+        XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" XDG_DATA_DIRS="$sysdata" \
+        XDG_STATE_HOME="$home/state" \
+        "$BIN" "$@" 2>&1
+}
+
+case_default_writes_the_user_registration() {
+    local out rc want_exec
+    out=$(flea_default --default); rc=$?
+    [[ "$rc" == 0 ]] || { fail "claim: flea --default exited $rc: $out"; return; }
+    [[ -f "$userservices" ]] || { fail "claim: no registration was written to $userservices"; return; }
+    # The Exec is the installed registration's own, never a path the claim invented.
+    want_exec=$(grep '^Exec=' "$sysdata/dbus-1/services/com.thisisgm.flea.FileManager1.service")
+    if [[ "$(grep '^Exec=' "$userservices")" != "$want_exec" ]]; then
+        fail "claim: the written Exec is $(grep '^Exec=' "$userservices"), not the packaged $want_exec"
+        return
+    fi
+    grep -Fq 'Name=org.freedesktop.FileManager1' "$userservices" \
+        || { fail "claim: the written file does not claim org.freedesktop.FileManager1"; return; }
+    # Today's production bug was a user-level service file nobody could trace, so this one says so.
+    if [[ "$(head -1 "$userservices")" != '# Written by `flea --default`; `flea --default off` removes it.' ]]; then
+        fail "claim: the written file carries no provenance line: $(head -1 "$userservices")"
+        return
+    fi
+    pass "claim: flea --default wrote $userservices with the packaged Exec and a line saying who wrote it"
+}
+
+case_default_is_idempotent() {
+    local before after out
+    before=$(cat "$userservices")
+    out=$(flea_default --default)
+    after=$(cat "$userservices")
+    [[ "$before" == "$after" ]] || fail "idempotent: a second flea --default rewrote the file"
+    if printf '%s\n' "$out" | grep -Fq 'org.freedesktop.FileManager1: already'; then
+        pass "idempotent: a second flea --default says already and rewrites nothing"
+    else
+        fail "idempotent: a second flea --default did not report the claim as already: $out"
+    fi
+}
+
+case_default_off_removes_it() {
+    local out
+    out=$(flea_default --default off)
+    [[ -e "$userservices" ]] && { fail "release: flea --default off left $userservices behind"; return; }
+    # The claim created both directories, so the release takes both back when it emptied them.
+    [[ -e "$home/data/dbus-1" ]] && { fail "release: the empty $home/data/dbus-1 was left behind"; return; }
+    out=$(flea_default --default off)
+    if printf '%s\n' "$out" | grep -Fq 'org.freedesktop.FileManager1: nothing to undo'; then
+        pass "release: flea --default off removed the registration and the directories, and says nothing to undo when run again"
+    else
+        fail "release: a second flea --default off did not say nothing to undo: $out"
+    fi
+}
+
+# A registration nobody installed is a claim on nothing, so the step refuses rather than writing an
+# Exec it made up. This is the case a source build on a box carrying an older package reaches.
+case_default_refuses_without_the_packaged_registration() {
+    local out rc
+    rm -f "$sysdata/dbus-1/services/com.thisisgm.flea.FileManager1.service"
+    out=$(flea_default --default); rc=$?
+    sed "s#^Exec=.*#Exec=$fixture/flea-stub#" "$service_file" \
+        > "$sysdata/dbus-1/services/com.thisisgm.flea.FileManager1.service"
+    [[ -e "$userservices" ]] && { fail "refuse: a registration was written with none installed"; return; }
+    [[ "$rc" == 1 ]] || { fail "refuse: flea --default exited $rc with no packaged registration"; return; }
+    if printf '%s\n' "$out" | grep -Fq 'is not installed in any data directory'; then
+        pass "refuse: with no packaged registration installed, the step names what is missing and writes nothing"
+    else
+        fail "refuse: the refusal did not name the missing registration: $out"
+    fi
+}
+
+# The ordering claim, driven rather than asserted. The bus is given the same two directories in the
+# same order D-Bus reads them, the data home and then a system one, and the call is made three
+# times: with the data home empty, with the file flea --default writes in it, and after the release.
+# Prints the name of the registration that answered.
+ask_who() {
+    export RIVAL_LOG="$fixture/rival.log"
+    : > "$RIVAL_LOG"
+    : > "$fixture/argv.log"
+    start_bus "$home/data/dbus-1/services" "$fixture/rivaldir" || return 1
+    ask ShowItems "$(uri_for "$fixture/docs/alpha.txt")" >/dev/null
+    sleep 1
+    stop_bus
+    if [[ -s "$fixture/argv.log" ]]; then printf 'flea\n'; else printf '%s\n' "$(cat "$RIVAL_LOG")"; fi
+}
+
+case_the_user_registration_outranks_the_packaged_ones() {
+    local before claimed released first
+    # The negative control: with nothing in the data home, a packaged rival answers. Which rival is
+    # dbus-daemon's own business, and it is asserted rather than assumed, so the case below is a
+    # claim about the directory order and not about a rival that happened to disappear.
+    first=$(ls -U "$fixture/rivaldir" | head -1)
+    first=${first%.service}
+    rm -rf "$home/data/dbus-1"
+    before=$(ask_who)
+    [[ "$before" == "$first" ]] \
+        || { fail "outrank: with no user registration '$before' answered, not '$first', the first in ls -U"; return; }
+    flea_default --default >/dev/null
+    claimed=$(ask_who)
+    flea_default --default off >/dev/null
+    released=$(ask_who)
+    if [[ "$claimed" == flea && "$released" == "$first" ]]; then
+        pass "outrank: $first answered, flea --default made Flea answer over it, and flea --default off handed it back"
+    else
+        fail "outrank: after the claim '$claimed' answered and after the release '$released' did"
+    fi
+}
+
 make_fixture
 case_unowned
 start_bus "$fixture/services" || exit 1
@@ -298,6 +477,13 @@ case_properties_refused
 case_refuses
 stop_bus
 case_packaged
+
+make_default_fixture
+case_default_writes_the_user_registration
+case_default_is_idempotent
+case_default_off_removes_it
+case_default_refuses_without_the_packaged_registration
+case_the_user_registration_outranks_the_packaged_ones
 
 printf 'filemanager1: %d failure(s)\n' "$failed"
 exit "$failed"

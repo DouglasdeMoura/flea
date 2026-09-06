@@ -605,26 +605,38 @@ writes nothing when Flea's own desktop entry, `com.thisisgm.flea.desktop` (`defa
 is not installed under `$XDG_DATA_HOME` (or `~/.local/share`) or any of `$XDG_DATA_DIRS` (default
 `/usr/local/share:/usr/share`): the packaged entry is the proof the pacman package landed, and
 pointing `xdg-mime` or Hyprland's bindings at an uninstalled binary would be a claim on nothing.
-Past that check `defaults::claim()` rewrites two independent per-user files through
-`userfile::replace_file` (see
-"Predictable path writes"): the `inode/directory` MIME default via `xdg-mime`, and the
-additive, markered block `hyprkeys::claim()` adds to Omarchy's `~/.config/hypr/bindings.lua` for
-the two file-manager chords.
+Past that check `defaults::claim()` runs three independent halves, each one line of output through
+`defaults::report()`, which takes exactly those three and prints every one whatever the others did:
+the `inode/directory` MIME default via `xdg-mime`, the user-level D-Bus registration described in
+"Show in folder", and the additive, markered block `hyprkeys::claim()` adds to Omarchy's
+`~/.config/hypr/bindings.lua` for the two file-manager chords. The first and third rewrite existing
+per-user files through `userfile::replace_file` (see "Predictable path writes"); the second creates
+its own file with `userfile::create_file`, so a symlink planted at that path is refused rather than
+followed.
 
-**The chooser step is the conditional one and the other two are not.** Past the handler half,
+**The registration half refuses rather than skipping.** `claim_service()` reads its `Exec` out of
+the packaged `com.thisisgm.flea.FileManager1.service` found on the same XDG ladder
+`installed_entry()` reads, and with none installed it returns an `Err` naming what is missing rather
+than writing a path of its own. That `Err` makes `defaults::claim()` non-zero, so `claim_both()`
+stops before the chooser step. The box that reaches it is the same one the chooser step skips: a
+`cargo build` binary run against a package that predates 0.1.4.
+
+**The chooser step is the one that skips rather than fails, and no other step does.** Past the handler half,
 `claim_both()` asks `chooser::backend_installed()`, and with no `flea.portal` in any portal
 directory it says `no portal backend is installed, so the file chooser step was skipped` on stderr
 and counts that as no failure: that is what a source build gets, because only the pacman package
 installs that file. With one installed it runs `chooser::claim()` too, which writes
 `~/.config/xdg-desktop-portal/portals.conf` and a second markered block in the same
-`~/.config/hypr/bindings.lua`. So a full `--default` touches three files, not two:
-`~/.config/mimeapps.list`, `~/.config/hypr/bindings.lua` and
-`~/.config/xdg-desktop-portal/portals.conf`. **A refused handler claim stops the command there**, so
+`~/.config/hypr/bindings.lua`. So a full `--default` touches four files, not two:
+`~/.config/mimeapps.list`, `~/.local/share/dbus-1/services/org.freedesktop.FileManager1.service`,
+`~/.config/hypr/bindings.lua` and `~/.config/xdg-desktop-portal/portals.conf`.
+**A refused handler claim stops the command there**, so
 the chooser half never writes behind a step that wrote nothing. `release_both()` is
 unconditional and runs every step back, each half a no-op when it was never claimed; no half's
 failure blocks another, see `defaults::report` and `chooser::report`. **Running a step back is not
-always restoring it.** The key block and the picker's window rule are marked blocks and the chooser
-routing is one key, so cutting them leaves what was there before; the handler half is
+always restoring it.** The key block and the picker's window rule are marked blocks, the chooser
+routing is one key, and the registration is a whole file of Flea's own, so cutting them leaves what
+was there before; the handler half is
 `release_mime()`, which only calls `drop_default()` to delete Flea's line and then reports what
 `xdg-mime query default` answers next. Nothing persists the `was <id>` that `claim_mime()` printed,
 so a handler the operator had pinned is never written back, and on a box that had one
@@ -809,36 +821,62 @@ is the right test here, and it is there because the check costs nothing and the 
 interface.** Nautilus owns `/usr/share/dbus-1/services/org.freedesktop.FileManager1.service` on this
 box, so a file of that name is a pacman conflict; dolphin, thunar and nemo each ship their own
 vendor-named file carrying `Name=org.freedesktop.FileManager1`, which makes a vendor name the
-measured convention rather than a workaround.
+measured convention rather than a workaround. The user-level file `flea --default` writes takes the
+plain interface name instead, because no package installs into `$XDG_DATA_HOME` and there is nothing
+there to collide with; D-Bus keys on `Name=` either way.
 
-**With several installed the choice is not ours, and this is the honest limit of the feature.**
-Measured on a private bus given all five files with every `Exec` rewritten to a marker: D-Bus keeps
-the FIRST registration the directory hands back. Writing Flea's file last, nautilus's won; writing
-it first, Flea's won. So the rule is readdir order, not alphabetical and not newest-wins, and readdir
-order is the filesystem's. Omarchy ships nautilus in `omarchy-base.packages`, so a stock box always
-has a second claimant and on this box today nautilus's file is the first of the four in `ls -U`.
-The README gives the one-liner that asks the box which one answers, and says to remove the other
-file manager, because the only mechanism that would outrank a package file is a user-level service
-file in `$XDG_DATA_HOME/dbus-1/services` and this tree does not write one: that directory is scanned
-first and shadows `/usr/share/dbus-1/services` silently, which is how a development portal backend
-shipped to the operator as a bug.
-Nothing is ever written to `~/.local/share/dbus-1/services`: a user-level service file outranks
-`/usr/share/dbus-1/services` and silently shadows it, which is how a development portal backend
-shipped to the operator as a bug.
+**Installing does not decide which one answers, and `flea --default` is what does.**
+D-Bus keeps the FIRST registration it reads, and inside one directory the two buses disagree about
+which that is. Measured on 2026-09-06 with all five files in one directory, every `Exec` rewritten
+to a marker: dbus-daemon 1.16.2 ran nautilus's, which is first in `ls -U` and third alphabetically;
+dbus-broker 37 kept `com.thisisgm.flea.FileManager1.service`, which is last in `ls -U` and first
+alphabetically, and logged the other four as duplicates. So dbus-daemon takes readdir order and
+dbus-broker sorts, neither is newest-wins, and an installer can steer neither. Omarchy ships
+nautilus in `omarchy-base.packages`, so a stock box always has a second claimant; on this box on
+2026-09-06, four installed and no Flea package, dbus-broker threw away nautilus's, dolphin's and
+thunar's, so nemo's is the one answering.
+
+The directory order is what settles it, and it is not readdir's. `$XDG_DATA_HOME/dbus-1/services` is
+read before every `$XDG_DATA_DIRS` entry, so one file there outranks all four: that is the same
+shadowing that shipped a development portal backend to the operator as a bug this morning, used on
+purpose. `defaults::claim_service()` writes it, `defaults::release_service()` removes it and the two
+directories it created when nothing else is in them, and both are per-user preferences pacman cannot
+own, which is why they are steps of `flea --default` and not PKGBUILD lines. Measured on this box
+with dbus-broker 37 and a sandbox XDG ladder: with the user file present the broker logged
+`Ignoring duplicate name 'org.freedesktop.FileManager1' in service file '<path>'` for all five
+system files and none for the user one.
+
+**The file leads with a comment saying who wrote it.** dbus-broker 37 and dbus-daemon 1.16.2 both
+accept a `#` comment in a `.service` file, before the group header and after it, measured on this
+box; the untraceable user-level service file was this morning's production bug, so the first line
+is the provenance and it is also how `release_service()` tells Flea's file from somebody else's. A
+file at that path whose first line is not the marker is left alone and named, never overwritten.
+The `Exec` is copied out of the installed packaged registration, so the two can never disagree and
+no install path is written down twice.
 
 **`tests/filemanager1.sh` drives the real interface on a private session bus** it starts inside its
-own fixture, with a service directory of its own and `FLEA_BIN` pointing at a stub that records its
+own fixture, with service directories of its own and `FLEA_BIN` pointing at a stub that records its
 argv. That makes D-Bus activation itself part of the test rather than a manual step, and the first
 case is the negative control: on a bus with an empty service directory the same call fails
 `ServiceUnknown`. The registration under test is the shipped file with only its `Exec` repointed at
 the checkout, so a broken `Name=` in `packaging/` reddens the suite.
+
+**Its last five cases are `flea --default`'s claim on the name.** They run the real binary against a
+sandbox `HOME` and a sandbox XDG ladder, with `xdg-mime` and `hyprctl` stubbed on `PATH`, because a
+reachable `hyprctl` would reload the operator's live Hyprland config rather than anything in the
+fixture. The last of them is the ordering one, and it is a driven negative control rather than an
+assertion: the bus is given the sandbox data home and then a directory of four rival registrations,
+the rival first in `ls -U` answers, `flea --default` makes Flea answer over it, and
+`flea --default off` hands it back. The suite is already in `tests/run-all.sh`'s `headless` list, so
+this coverage needed no new entry there.
 
 ## Module map
 
 - `main.rs` dispatches on argv, and this is every flag it matches: `--backend` runs the command
   loop, `--prewarm <path> <first> <dest>` writes the prewarm file, `--open <path>` hands one file
   to the desktop's handler, `--terminal <dir>` opens the configured terminal there,
-  `--default [off]` claims or releases the OS-level default and the chooser routing together,
+  `--default [off]` claims or releases the OS-level default, the "Show in folder" registration and
+  the chooser routing together,
   `--youleftmeforstrata` is the undocumented second spelling of `--default off`, `--picker [off]`
   claims or releases the desktop's file chooser alone, `--pick <reply>` opens one chooser window
   for `tools/flea-portal`, `--ui-state [<patch>]` reads or merges the shared view state,
@@ -855,8 +893,9 @@ the checkout, so a broken `Name=` in `packaging/` reddens the suite.
   the `inode/directory` MIME default via `xdg-mime`, and reporting each half, see "Modes".
 - `hyprkeys.rs` adds or removes the additive, markered block in Omarchy's
   `~/.config/hypr/bindings.lua` that binds the two file-manager chords to Flea, see "Modes".
-- `userfile.rs` resolves `$HOME` and `$XDG_CONFIG_HOME` and rewrites a per-user file through
-  an exclusive temp plus rename, see "Predictable path writes".
+- `userfile.rs` resolves `$HOME`, `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME`, walks the XDG data
+  ladder for an installed file, and rewrites a per-user file through an exclusive temp plus
+  rename, see "Predictable path writes".
 - `error.rs` the one error type, naming the failing operation and input.
 - `json.rs` the wire's JSON: read one named field out of one line, escape one string into one.
 - `jsondoc.rs` one whole JSON document in and out, which the one-line scanner above deliberately is not.
