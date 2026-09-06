@@ -13,6 +13,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# Both profiles unconditionally, seven suites driving the debug binary and thumbs.sh the release one: an `[ ! -x <path> ]` guard is satisfied by a stale binary from an older commit, and measured on 2026-09-05 the debug and release hashes were unchanged across a whole run-all over edited source.
+printf 'run-all: building target/debug/flea, seven suites need it\n'
+cargo build -q || { printf 'run-all: cargo build failed, nothing else was run\n' >&2; exit 1; }
+printf 'run-all: building target/release/flea, thumbs.sh needs it\n'
+cargo build -q --release || { printf 'run-all: release build failed, nothing else was run\n' >&2; exit 1; }
+
 headless="js keymap-gen charts budget empty-state sandbox capability-ownership gio-auth gvfs ops modes protocol archive thumbs network-open-share mount-listing uistate uiwriter media"
 failed=0
 ran=0
