@@ -40,11 +40,13 @@ function label(copy) {
     return copy ? "copy here" : "move here"
 }
 
-// The status bar's half of the board: "Move 2 items to omarchy · ctrl copies".
+// The status bar's half of the board: "Move 2 items to omarchy · ctrl at lift copies". The hint
+// names the lift because Drag.active runs a nested event loop the window gets no key events in, so
+// a ctrl pressed after the drag starts cannot reach anything and must not be advertised as if it can.
 function line(n, name, copy) {
     var verb = copy ? "Copy " : "Move "
     var where = name.length > 0 ? " to " + name : " to a folder"
-    return verb + Ops.items(n) + where + (copy ? "" : " · ctrl copies")
+    return verb + Ops.items(n) + where + (copy ? "" : " · ctrl at lift copies")
 }
 
 // The drop: rows, not paths, for the reason Ops.moveToDropbox gives, and the clipboard is left alone

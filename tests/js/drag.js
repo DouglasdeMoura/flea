@@ -43,10 +43,10 @@ function run(check) {
 
     // The status bar's half of the board's caption, "copy vs move reads in the status bar".
     check("the bar names the verb, the count and the folder",
-          Drag.line(2, "omarchy", false), "Move 2 items to omarchy · ctrl copies")
+          Drag.line(2, "omarchy", false), "Move 2 items to omarchy · ctrl at lift copies")
     check("a copy line drops the hint", Drag.line(1, "omarchy", true), "Copy 1 item to omarchy")
     check("with no folder under the pointer it says where one would go",
-          Drag.line(3, "", false), "Move 3 items to a folder · ctrl copies")
+          Drag.line(3, "", false), "Move 3 items to a folder · ctrl at lift copies")
 
     // The drop is the transfer request, rows and not paths, the shape Ops.moveToDropbox sends.
     var sent = []
@@ -152,7 +152,7 @@ function run(check) {
           Drag.label(Drag.verbFor(true, false, 56, 32) === "copy"), "copy here")
     check("and so does the bar line",
           Drag.line(1, "omarchy", Drag.verbFor(true, false, 56, 56) === "copy"),
-          "Move 1 item to omarchy · ctrl copies")
+          "Move 1 item to omarchy · ctrl at lift copies")
 
     // The lift's ctrl rides the marker because the drop event cannot carry it any more: Flea now
     // advertises Qt.CopyAction alone, so Chromium stops reporting dropEffect move, and Qt clamps

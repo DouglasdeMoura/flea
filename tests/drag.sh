@@ -207,7 +207,7 @@ press; sleep 0.3
 glide_to "$bx" "$by"; sleep 0.8
 MID=$(ipc stickyMessage)
 release; sleep 0.6
-check "the line names the folder under the pointer" "$MID" "Move 1 item to bbb · ctrl copies"
+check "the line names the folder under the pointer" "$MID" "Move 1 item to bbb · ctrl at lift copies"
 
 # ---------------------------------------------------------------- R1
 echo
