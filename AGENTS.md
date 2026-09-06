@@ -1434,17 +1434,16 @@ waits for its consumer.
   `CARGO_TARGET_DIR`. **`96186ff`'s own message is wrong about this and cannot be rewritten,
   because the branch is shared:** its subject says nine suites were uninvoked and its body says
   seven, and the derived answer is zero of the twelve there were
-  then. **The runner builds nothing, and the way it stopped is worth knowing.** It built both
-  profiles from `324f321` until `e3bf8c0`, a merge whose own message lists `tests/run-all.sh` as a
-  conflict: the resolution kept the union of the two `headless=` lists and dropped the `cargo build`
-  pair that BOTH sides carried. `grep cargo tests/run-all.sh` is empty from that commit on,
-  `a485200` and `7a5c9a3` included, so both cargo profiles are the caller's job now. `protocol.sh`
-  drives the debug binary and `thumbs.sh` the release one, and each suite that cannot find its own
-  binary says so and exits rather than reporting every case as a product failure. **That guard
-  answers "is there a binary", never "is it this commit's binary"**, which is the very defect
-  `39e1737` was written to close, so a stale `target/debug/flea` still certifies code nobody
-  compiled. Whether the build belongs back in the runner is the runner owner's call and not a
-  documentation question; what is recorded here is what the file does. It runs every suite that
+  then. **The runner builds both cargo profiles unconditionally, and it lost that once.** It
+  built them from `324f321`, and `8eec5fc` replaced an `[ ! -x <path> ]` pair with an
+  unconditional one on measured evidence: the guards were satisfied by a stale binary from an older
+  commit, and the debug and release hashes were unchanged across a whole run-all over edited source.
+  A conflict resolution over `tests/run-all.sh` then kept the union of two `headless=` lists and
+  dropped the `cargo build` pair BOTH sides carried, so it was absent at `a485200` and through the
+  0.1.4 lanes until it was restored. **A guard answers "is there a binary", never "is it this
+  commit's binary"**, which is the defect `39e1737` and `8eec5fc` were both written to close, so the
+  unconditional build is the contract and the per-suite `-x` guards exist only for a suite invoked
+  directly. Seven suites drive the debug binary and `thumbs.sh` the release one. It runs every suite that
   needs nothing but a shell, and reads each suite's OWN exit code, never a pipeline's.
   Its own `headless=` list is the inventory of those and its own `not_run` list is the inventory of
   the rest with what each needs, so this paragraph carries neither a count nor a membership for

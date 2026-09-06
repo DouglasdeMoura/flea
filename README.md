@@ -597,7 +597,7 @@ chord.
 ## Testing
 
 ```bash
-./tests/run-all.sh            # every suite that needs only a shell; it builds nothing
+./tests/run-all.sh            # every suite that needs only a shell, and both cargo profiles
 cargo test                    # unit tests
 ./tests/js.sh                 # pure QML JavaScript helpers
 ./tests/protocol.sh           # drives the built binary over real stdin
@@ -622,11 +622,13 @@ FLEA_PACKAGE_FILE=/path/to/flea.pkg.tar.zst ./tests/package.sh # real makepkg ar
 ./tools/flea-bench-report     # a field run's CSV as the tables in this README
 ```
 
-`./tests/run-all.sh` is the main headless command. It builds nothing, so the two cargo profiles are
-the caller's job: `protocol.sh` drives the debug binary and `thumbs.sh` the release one, and each
-suite that cannot find its binary says so and stops rather than reporting on nothing. That check
-asks whether a binary is there and not whether it is this commit's, so build before you run. It runs
-every suite that needs nothing but a shell, and reads each suite's own exit code, not a pipeline's.
+`./tests/run-all.sh` is the main headless command. It builds both cargo profiles unconditionally,
+because seven suites drive the debug binary and `thumbs.sh` the release one, and an "is there a
+binary" guard is satisfied by a stale one from an older commit. Cargo decides for itself whether a
+rebuild is owed, so a current tree pays nothing for asking. A suite invoked directly still says so
+and stops when it cannot find its binary, rather than reporting every case as a product failure. It
+runs every suite that needs nothing but a shell, and reads each suite's own exit code, not a
+pipeline's.
 It then names the suites it cannot run and says what each needs: `ui.sh` the display, `drag.sh` the
 display and a real pointer through uinput, `picker.sh` the display, a session bus and Flea
 activatable as the chooser backend, `bench.sh` its own benchmark contract, `package.sh` a real
