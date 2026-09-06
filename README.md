@@ -34,9 +34,10 @@ To make Flea the default file manager:
 flea --default
 ```
 
-This sets Flea as the `inode/directory` handler and makes Omarchy's two file-manager keys,
-`SUPER + SHIFT + F` and `SUPER + ALT + SHIFT + F`, open it instead of Nautilus. Run
-`flea --default off` before `omarchy pkg drop flea` to restore the previous handlers and remove it.
+This sets Flea as the `inode/directory` handler, makes Omarchy's two file-manager keys,
+`SUPER + SHIFT + F` and `SUPER + ALT + SHIFT + F`, open it instead of Nautilus, and claims the file
+chooser described below. Run `flea --default off` before `omarchy pkg drop flea` to restore the
+previous handlers and remove it.
 
 To make Flea the file chooser every application opens, the dialog behind `omarchy tailscale send`
 and every Flatpak's Open and Save:
@@ -448,14 +449,14 @@ flea [path]                # terminal in a real terminal, a window everywhere el
 flea --gui [path]          # force the window
 flea --tui [path]          # force the terminal interface (not built yet)
 flea --select <uri|path>   # open the containing directory with that entry selected
-flea --default [off]       # become the desktop's default file manager, or stop being it
+flea --default [off]       # become the desktop's default file manager and chooser, or stop
 ```
 
 `--tui` and `--gui` are mutually exclusive. With neither given, `flea` opens the terminal
 interface only when both stdin and stdout are a real terminal, and opens the window
 otherwise, which is the branch a `.desktop` launcher takes since it has no controlling
-terminal. `--default` opens no window: it sets the `inode/directory` handler and Omarchy's
-two file-manager keys, and `off` undoes both, see
+terminal. `--default` opens no window: it sets the `inode/directory` handler, Omarchy's two
+file-manager keys and the file chooser, and `off` undoes every one of them, see
 [`docs/install.md`](docs/install.md). `--backend`, `--prewarm`, `--open` and `--terminal` are the
 internal modes the UI and the benchmarks drive directly; `flea --open <path>` is what Enter
 on a file runs, and it hands the file to `gio open` and waits for it, while
@@ -507,6 +508,7 @@ and the application cannot disagree.
 | `f`, Ctrl-f | Search the subtree from home; Tab on the query line points the walk at the folder the pane is in instead, and the strip names the scope it will use |
 | `o` | Reveal the result in its own directory |
 | `y`, `x`, `p`, Ctrl-c, Ctrl-x, Ctrl-v | Copy, cut, paste; the chords are what Omarchy's Super-c, Super-x and Super-v deliver |
+| `Y` | Copy the route of the directory being shown, for pasting into a terminal |
 | `dd`, Delete, Ctrl-Delete | Trash. Two presses on the letter, one on the key; Ctrl-Delete under the Mac preset |
 | `r`, F2 | Rename |
 | `z`, Ctrl-z | Undo the last operation |
