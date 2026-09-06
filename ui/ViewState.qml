@@ -26,10 +26,11 @@ QtObject {
     // first frame: it is what a first launch draws, when there is no file to settle and none to read.
     readonly property var defaultColumns: ["name", "size", "date"]
 
-    // Mirrors "menu"."hidden" in src/uischema.rs, for the same first launch: seven ids this release's
-    // menu cannot build and Copy path, which the SettingsMenus board ships switched off.
-    readonly property var defaultMenuHidden: ["delete", "openwith", "terminal", "moveto", "copyto",
-                                              "properties", "permissions", "copypath"]
+    // Mirrors "menu"."hidden" in src/uischema.rs, for the same first launch: six ids this release's
+    // menu cannot build, plus Copy path and Open in terminal, which the SettingsMenus board ships
+    // switched off. Every id here is an action ui/js/Menu.js gives a row, or will give one.
+    readonly property var defaultMenuHidden: ["delete", "openwith", "openTerminal", "moveto",
+                                              "copyto", "properties", "permissions", "copypath"]
 
     // ui.json names what is SHOWN. ui/Header.qml, ui/Row.qml and ui/ContextMenu.qml all ask the
     // opposite question, so the inversion lives here once rather than at each of them.
@@ -61,6 +62,11 @@ QtObject {
     readonly property var menu: root.state.menu || ({})
     readonly property var menuHidden: Array.isArray(root.menu.hidden) ? root.menu.hidden
                                                                       : root.defaultMenuHidden
+
+    // The Menus section's "Show keyboard hints" row, `keyHints` in src/uischema.rs. It draws the key
+    // beside every menu row and the tip under an empty directory, and it binds no key of its own:
+    // every chord answers whether this is on or off.
+    readonly property bool keyHints: root.state.keyHints === true
 
     // "mac" or "windows", the Keys section's two-value toggle over the one generated key table.
     readonly property string keysPreset: Settings.contains(Settings.PRESETS, root.state.keys)
@@ -126,6 +132,10 @@ QtObject {
 
     function toggleMenuBasic() {
         root.setMenuHidden(Settings.toggleMaster(root.menuHidden))
+    }
+
+    function toggleKeyHints() {
+        root.changeKey("keyHints", !root.keyHints)
     }
 
     function setKeysPreset(name) {

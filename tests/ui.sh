@@ -327,6 +327,22 @@ assert_window() {
     assert_theme
 }
 
+# The state a case needs the window to start from, written through flea --ui-state so the schema
+# sees it too, into a state home inside the fixture root: hard rule 9 covers writes, so no case here
+# reaches the operator's own ~/.local/state/flea/ui.json. Exports it, because launch() below hands
+# the window whatever environment the case is holding.
+seed_ui_state() {
+    local state="$1" patch="$2"
+    sandbox_scratch "$state"
+    env XDG_STATE_HOME="$state" "$flea_bin" --ui-state "$patch" >/dev/null \
+        || fail "the seeding write through flea --ui-state failed for $patch"
+    export XDG_STATE_HOME="$state"
+}
+
+# The shipped menu.hidden set less Open in terminal, so a case can drive that row without changing
+# any other row of the menu; src/uischema.rs DEFAULTS is where the eight come from.
+terminal_shown='["delete","openwith","moveto","copyto","properties","permissions","copypath"]'
+
 launch() {
     local start_path="$1"
     kill_flea
@@ -909,6 +925,11 @@ case_rows() {
     printf 'abc' > "$dir/target.txt"
     ln -s "$dir/subdir" "$dir/linkdir"
     ln -s ../elsewhere "$dir/relative"
+    # The hint slot is the Menus section's own row and ships off, and Open in terminal ships hidden,
+    # so this case says outright which state it is asserting rather than reading the operator's.
+    local real_state="${XDG_STATE_HOME-}"
+    seed_ui_state "$fixture_root/rows-state" \
+        "{\"keyHints\":true,\"menu\":{\"hidden\":$terminal_shown}}"
     launch "$dir"
     # subdir, linkdir, relative, target.txt.
     wait_listing 4
@@ -994,6 +1015,28 @@ case_rows() {
         || fail "rows: Open in terminal printed a bare key, and only a chord reaches it"
     key -k Escape >/dev/null
     settle
+
+    # The other half of the same row: with hints off, which is what ships, the slot draws nothing at
+    # all. The labels are unchanged, so this is the hint column leaving and not the menu changing.
+    seed_ui_state "$fixture_root/rows-state" \
+        "{\"keyHints\":false,\"menu\":{\"hidden\":$terminal_shown}}"
+    launch "$dir"
+    wait_listing 4
+    seek_row_named target.txt
+    key m >/dev/null
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "rows: m opened no menu with hints off"
+    shot rows-menu-nohints
+    local off_labels off_hints
+    off_labels=$(ipc contextMenuEntries)
+    off_hints=$(ipc contextMenuHints)
+    printf 'ROWS hints-off labels=%q\n hints=%q\n' "$off_labels" "$off_hints"
+    [[ "$off_labels" == "$labels" ]] \
+        || fail "rows: switching the hints off changed the menu to $off_labels"
+    [[ -z "${off_hints//|/}" ]] || fail "rows: the hints row is off and the slot still prints $off_hints"
+    key -k Escape >/dev/null
+    settle
+    if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
 }
 
 # Catches removing the exit-status branches from ui/Opener.qml or the dispatch from Pane.openCursor.
@@ -1122,6 +1165,10 @@ case_openterminal() {
     } > "$dir/bin/$open_handoff"
     chmod +x "$dir/bin/$open_handoff"
 
+    # Open in terminal ships switched off in the Menus section, so the menu half below says which
+    # state it is driving instead of reading whatever the operator's own ui.json holds.
+    local real_state="${XDG_STATE_HOME-}"
+    seed_ui_state "$fixture_root/openterminal-state" "{\"menu\":{\"hidden\":$terminal_shown}}"
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
     flea_bin="$dir/bin/flea"
@@ -1206,6 +1253,7 @@ case_openterminal() {
     [[ ! -s "$ran" ]] || fail "openterminal: the failing stub still logged $(cat "$ran")"
 
     printf 'OPENTERMINAL menu=ok list=ok rail=ok single-flight=ok crossed=ok failure=ok\n'
+    if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
     kill_flea
 }
 

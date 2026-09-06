@@ -164,9 +164,14 @@ function runHidden(check, full) {
           menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath"]),
           "Open|-|Compress|-|Send with Taildrop|Move to Dropbox|-|Open in terminal|New folder|Show hidden files")
     check("hiding everything hideable still leaves the two locked rows and New folder",
-          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath",
+          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath", "openTerminal",
                 "compress", "taildrop", "dropbox", "open", "toggleHidden"]),
-          "Open|-|Open in terminal|New folder|Show hidden files")
+          "Open|-|New folder|Show hidden files")
+    // The shipped set named this row "terminal" while the menu built it as "openTerminal", so the
+    // switch missed it and every menu drew it. The id the panel stores is the action id, as it is
+    // for every other row.
+    check("the shipped hidden id for Open in terminal is the action the menu really builds",
+          menu(["openTerminal"]).indexOf("Open in terminal"), -1)
     check("Open and the hidden toggle are refused by the filter itself, not only by the panel",
           Menu.isHidden(["open", "toggleHidden"], "open") + "|"
           + Menu.isHidden(["open", "toggleHidden"], "toggleHidden"), "false|false")

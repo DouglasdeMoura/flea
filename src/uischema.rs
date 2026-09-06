@@ -13,6 +13,7 @@ pub const DEFAULTS: &str = r#"{
   "groupByKind": false,
   "hidden": false,
   "wrapAtEnds": false,
+  "keyHints": false,
   "places": {
     "favourites": [],
     "showHome": true, "showNetwork": true,
@@ -26,7 +27,7 @@ pub const DEFAULTS: &str = r#"{
   },
   "keys": "mac",
   "display": { "textSize": { "mode": "system" } },
-  "menu": { "hidden": ["delete", "openwith", "terminal",
+  "menu": { "hidden": ["delete", "openwith", "openTerminal",
             "moveto", "copyto", "properties", "permissions", "copypath"] }
 }"#;
 
@@ -101,6 +102,9 @@ pub const SCHEMA: &[(&str, Rule)] = &[
     ("groupByKind", Rule::Bool),
     ("hidden", Rule::Bool),
     ("wrapAtEnds", Rule::Bool),
+    // The Menus section's "Show keyboard hints" row: every menu's key column and the empty
+    // directory's own tip, off until it is switched on.
+    ("keyHints", Rule::Bool),
     ("places", Rule::Group(PLACES)),
     ("preview", Rule::Group(PREVIEW)),
     // ui/js/Keymap.js holds one table with a Mac and a Windows overlay, so those are the two values
@@ -159,8 +163,8 @@ mod tests {
             keys,
             [
                 "view", "density", "columns", "addressBar", "sort", "dual", "foldersFirst",
-                "groupByKind", "hidden", "wrapAtEnds", "places", "preview", "keys", "display",
-                "menu"
+                "groupByKind", "hidden", "wrapAtEnds", "keyHints", "places", "preview", "keys",
+                "display", "menu"
             ]
         );
         assert_eq!(d.get("view").and_then(Json::as_str), Some("list"));
@@ -171,6 +175,7 @@ mod tests {
         assert_eq!(d.get("groupByKind").and_then(Json::as_bool), Some(false));
         assert_eq!(d.get("hidden").and_then(Json::as_bool), Some(false));
         assert_eq!(d.get("wrapAtEnds").and_then(Json::as_bool), Some(false));
+        assert_eq!(d.get("keyHints").and_then(Json::as_bool), Some(false));
         let cols: Vec<&str> = d.get("columns").and_then(Json::as_array).expect("columns").iter().filter_map(Json::as_str).collect();
         assert_eq!(cols, ["name", "size", "date"]);
         assert_eq!(d.get("sort").and_then(|s| s.get("key")).and_then(Json::as_str), Some("name"));
@@ -202,7 +207,7 @@ mod tests {
             .collect();
         assert_eq!(
             hidden,
-            ["delete", "openwith", "terminal", "moveto", "copyto", "properties", "permissions", "copypath"]
+            ["delete", "openwith", "openTerminal", "moveto", "copyto", "properties", "permissions", "copypath"]
         );
     }
 

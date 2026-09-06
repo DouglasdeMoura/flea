@@ -367,7 +367,9 @@ row:
   tri-state master over Cut, Copy, Paste, Duplicate, Rename and Move to Trash that reads the
   enabled count, "5 of 6". Open and Show hidden files are listed but locked: a menu that cannot
   open the row under the cursor is not a menu. A row that leaves takes its separator with it, and
-  the change lands on the menu's next open. Hiding a row never touches its key.
+  the change lands on the menu's next open. Hiding a row never touches its key. Show keyboard hints
+  is the one row here that is not an action: off, which is how it ships, no menu prints the key
+  beside a row and an empty folder offers no tip; on, both appear. Every chord is bound either way.
 - **Keys.** Mac or Windows, over the one `keys.toml` table. Everything the two platforms agree on
   is shared and answers under both; the preset carries only the chords where they differ, and it
   rebinds in the window at once. Press `?` for the whole map.

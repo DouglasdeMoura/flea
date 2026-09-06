@@ -21,7 +21,7 @@ var BASIC = ["cut", "copy", "paste", "duplicate", "rename", "trash"]
 // cannot draw is absent rather than switched off: a toggle over a row no menu has is a mock control.
 var MENU_GROUPS = [
     { label: "Basic file actions", master: true, ids: BASIC },
-    { label: "Open and inspect", master: false, ids: ["copypath"] },
+    { label: "Open and inspect", master: false, ids: ["openTerminal", "copypath"] },
     { label: "Extras", master: false,
       ids: ["compress", "extract", "convert", "taildrop", "dropbox", "sharelink"] }
 ]
@@ -33,7 +33,8 @@ var LOCKED = ["open", "toggleHidden"]
 
 var LABELS = {
     cut: "Cut", copy: "Copy", paste: "Paste", duplicate: "Duplicate", rename: "Rename",
-    trash: "Move to Trash", copypath: "Copy path", compress: "Compress", extract: "Extract",
+    trash: "Move to Trash", openTerminal: "Open in terminal", copypath: "Copy path",
+    compress: "Compress", extract: "Extract",
     convert: "Convert", taildrop: "Send with Taildrop", dropbox: "Move to Dropbox",
     sharelink: "Copy share link", open: "Open", toggleHidden: "Show hidden files"
 }
@@ -47,7 +48,8 @@ var PRESET_LABELS = { mac: "Mac", windows: "Windows" }
 // ui/js/Menu.js's own glyphs by action id, which tests/js/settings.js asserts the two agree on.
 var GLYPHS = {
     cut: "scissors", copy: "copy", paste: "clipboard", duplicate: "file-plus", rename: "rename",
-    trash: "trash", copypath: "file-text", compress: "archive", extract: "archive-out",
+    trash: "trash", openTerminal: "terminal", copypath: "file-text", compress: "archive",
+    extract: "archive-out",
     convert: "sliders", sharelink: "network", open: "folder-open", toggleHidden: "eye"
 }
 
@@ -136,12 +138,12 @@ function focusable(row) {
     return row.kind === "check" || row.kind === "master" || row.kind === "choice"
 }
 
-// state: { textSize, hidden, preset, baseSize, monitorScale, cornerRadius, presetKeys }
+// state: { textSize, hidden, keyHints, preset, baseSize, monitorScale, cornerRadius, presetKeys }
 function rows(section, state) {
     if (section === "display")
         return displayRows(state)
     if (section === "menus")
-        return menuRows(state.hidden)
+        return menuRows(state.hidden, state.keyHints)
     return keyRows(state)
 }
 
@@ -185,7 +187,9 @@ function scaleLabel(scale) {
     return (Math.round(scale * 100) / 100) + "x"
 }
 
-function menuRows(hidden) {
+// The one row of this section that is not a menu action: it governs how every menu row is drawn
+// rather than whether it exists, so it sits in its own group and never in MENU_GROUPS.
+function menuRows(hidden, keyHints) {
     var out = []
     for (var g = 0; g < MENU_GROUPS.length; g++) {
         var group = MENU_GROUPS[g]
@@ -201,6 +205,11 @@ function menuRows(hidden) {
                        on: !isHidden(hidden, group.ids[i]) })
         }
     }
+    out.push({ kind: "group", label: "Shortcuts" })
+    out.push({ kind: "check", id: "keyHints", label: "Show keyboard hints", glyph: "keyboard",
+               on: keyHints === true })
+    out.push({ kind: "hint", label: "Draws each row's key beside it, and the next move under an "
+                                    + "empty folder. Every key stays bound either way." })
     out.push({ kind: "group", label: "Always shown" })
     for (var l = 0; l < LOCKED.length; l++)
         out.push({ kind: "lock", id: LOCKED[l], label: label(LOCKED[l]), glyph: GLYPHS[LOCKED[l]] })
