@@ -36,8 +36,10 @@ flea --default
 
 This sets Flea as the `inode/directory` handler, makes Omarchy's two file-manager keys,
 `SUPER + SHIFT + F` and `SUPER + ALT + SHIFT + F`, open it instead of Nautilus, and claims the file
-chooser described below. Run `flea --default off` before `omarchy pkg drop flea` to restore the
-previous handlers and remove it.
+chooser described below. Run `flea --default off` before `omarchy pkg drop flea`: it puts the keys
+and the chooser back and deletes Flea's handler line, which leaves the `inode/directory` default
+wherever the rest of the lookup resolves to rather than at a handler you had pinned yourself, see
+[`docs/install.md`](docs/install.md).
 
 To make Flea the file chooser every application opens, the dialog behind `omarchy tailscale send`
 and every Flatpak's Open and Save:
@@ -444,26 +446,45 @@ is one character per kind, upgrading to Nerd Font glyphs where the terminal has 
 cargo build --release
 ```
 
-The binary lands at `target/release/flea`. Running it dispatches by mode:
+The binary lands at `target/release/flea`. Running it dispatches by mode. This is what `flea`
+prints as its own usage, so the two cannot disagree:
 
 ```bash
-flea [path]                # terminal in a real terminal, a window everywhere else
-flea --gui [path]          # force the window
-flea --tui [path]          # force the terminal interface (not built yet)
-flea --select <uri|path>   # open the containing directory with that entry selected
-flea --default [off]       # become the desktop's default file manager and chooser, or stop
+flea [--tui|--gui] [--select <uri|path>] [path]
+flea --default [off]
+flea --picker [off]
+flea --ui-state [<json patch>]
+flea --version
 ```
 
-`--tui` and `--gui` are mutually exclusive. With neither given, `flea` opens the terminal
-interface only when both stdin and stdout are a real terminal, and opens the window
-otherwise, which is the branch a `.desktop` launcher takes since it has no controlling
-terminal. `--default` opens no window: it sets the `inode/directory` handler, Omarchy's two
-file-manager keys and the file chooser, and `off` undoes every one of them, see
-[`docs/install.md`](docs/install.md). `--backend`, `--prewarm`, `--open` and `--terminal` are the
-internal modes the UI and the benchmarks drive directly; `flea --open <path>` is what Enter
-on a file runs, and it hands the file to `gio open` and waits for it, while
-`flea --terminal <dir>` is what the topbar's terminal button and `Ctrl+T` run, and it hands the
-directory to `xdg-terminal-exec --dir=`. See `AGENTS.md` for their contract.
+**Bare `flea` opens the window.** It does not look at stdin or stdout, so a real terminal gets the
+window exactly as a `.desktop` launcher does, and `--gui` is the explicit spelling of the same
+thing. `--tui` is the only route to the terminal interface and the only mode that reads the tty at
+all: it wants both stdin and stdout to be a real terminal, not just one, so a future implementation
+cannot write escape codes into a pipeline, and `flea --tui | head` is therefore refused. That
+interface is not built yet, so `flea --tui` in a terminal exits 2 saying so. A window launch with
+no non-empty `WAYLAND_DISPLAY` or `DISPLAY` exits 2 rather than failing inside `qs`. Giving both
+flags is a usage error naming the conflict, never a coin flip.
+
+`--default` opens no window: it sets the `inode/directory` handler, Omarchy's two file-manager
+keys and the file chooser. `off` runs all three back, and two of them land where they started. The
+keys and the picker's window rule are marked blocks and the chooser routing is one key, so
+removing them leaves Omarchy's own behaviour; the handler is deleted rather than restored, so
+afterwards the `inode/directory` default is whatever the rest of the lookup resolves to,
+`org.gnome.Nautilus.desktop` on stock Omarchy. `flea --default off` names that resulting handler
+on its own line, so it does not claim more than it did. If you had pinned a handler yourself, the
+claim run printed it as `was <id>`, and `xdg-mime default <id> inode/directory` is how you put
+that pin back by hand. See [`docs/install.md`](docs/install.md).
+
+The usage above lists the modes meant to be typed. It deliberately leaves out the ones Flea's own
+parts drive: `--backend`, `--prewarm`, `--open`, `--terminal`, `--pick` and `--print-target` are
+all real and all absent from it, so being unlisted says nothing about whether a mode exists.
+`flea --open <path>` is what Enter on a file runs, and it hands the file to `gio open` and waits
+for it, while `flea --terminal <dir>` is what the topbar's terminal button and `Ctrl+T` run, and
+it hands the directory to `xdg-terminal-exec --dir=`. **Both print nothing whatever when they
+succeed**, and exit 0, so silence from one of them is the success case and not a missing mode.
+`flea --pick <reply-file>` is the file chooser's own entry point, run by `tools/flea-portal` for
+one portal request rather than by a person. See `AGENTS.md` for their contract.
 
 `--select` accepts either a `file://` URI (percent-decoded) or a bare path, opens its
 parent directory, and puts the cursor and the selection on that one entry once the
