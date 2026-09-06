@@ -95,7 +95,14 @@ fn ui_state(args: &[String]) -> i32 {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    // args() panics on a non-UTF-8 argument and a Linux filename is any bytes, so refuse instead.
+    let args: Vec<String> = match std::env::args_os().map(|a| a.into_string()).collect() {
+        Ok(v) => v,
+        Err(bad) => {
+            eprintln!("flea: {} is not valid UTF-8, and Flea takes text paths", bad.to_string_lossy());
+            exit(2);
+        }
+    };
 
     // Bare, so a script can read it without parsing. Checked before every other mode: the only
     // way to tell which Flea is installed is to ask it, and updates here are a manual git pull.
