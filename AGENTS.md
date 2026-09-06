@@ -999,8 +999,9 @@ its own decisive axis (the toolchain) made the rest of that measurement moot. `u
 files. Rust and QML get a 250-line soft budget and a 400-line hard cap; JS gets 200
 soft and 300 hard. Going over the hard cap fails the tool; going over the soft budget
 only warns. The budget is a smell detector, not a target, and **it is not a reason to refactor a
-stable file**. Two files cross the hard cap purely as arithmetic of a clean merge for 0.1.4, with
-no conflict and no new code: `ui/ChromeBar.qml` and `ui/Sidebar.qml`. `ui/NetworkMounts.qml` was a
+stable file**. Three files cross the hard cap purely as arithmetic of a clean merge for 0.1.4, with
+no conflict and no new code: `ui/ChromeBar.qml`, `ui/Sidebar.qml` and `ui/Row.qml`, the last by a
+single line. `ui/NetworkMounts.qml` was a
 third until its own reconciliation extracted `authFailure` to `ui/js/Errors.js` and brought it to
 398, so it is not listed. They
 are listed in `tools/flea-file-budget` as known exceptions so the tool still fails on anything
