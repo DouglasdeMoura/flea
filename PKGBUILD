@@ -11,8 +11,9 @@ license=('MIT')
 # xdg-terminal-exec is what --terminal execs, so the topbar's terminal button needs it installed.
 # wl-clipboard ships wl-copy, which ui/Opener.qml pipes into for the menu's Copy Path row; nothing
 # else in this closure requires it, so on a clean Omarchy box that row failed silently without it.
-# python-gobject is what tools/flea-portal answers org.freedesktop.impl.portal.FileChooser with; it
-# is the same binding omarchy-file-select, the client that portal serves, is already written against.
+# python-gobject is what tools/flea-portal answers org.freedesktop.impl.portal.FileChooser with, and
+# what tools/flea-filemanager1 answers org.freedesktop.FileManager1 with; it is the same binding
+# omarchy-file-select, the client that portal serves, is already written against.
 depends=('bubblewrap' 'expect' 'glib2' 'gvfs' 'gvfs-dnssd' 'gvfs-nfs' 'gvfs-smb' 'omarchy' 'python-gobject' 'quickshell' 'shared-mime-info' 'util-linux' 'wl-clipboard' 'xdg-terminal-exec' 'xdg-utils')
 makedepends=('cargo')
 # check() runs the real sandboxed child, which shells to /usr/bin/python3 to reserve address space.
@@ -53,6 +54,12 @@ package() {
   install -Dm755 tools/flea-portal "$pkgdir/usr/lib/flea/flea-portal"
   install -Dm644 packaging/flea.portal -t "$pkgdir/usr/share/xdg-desktop-portal/portals"
   install -Dm644 packaging/org.freedesktop.impl.portal.desktop.flea.service -t "$pkgdir/usr/share/dbus-1/services"
+  # org.freedesktop.FileManager1, which is what Chromium's "Show in folder" calls. The file is named
+  # for Flea and not for the interface: nautilus owns the plain org.freedesktop.FileManager1.service
+  # path here, and dolphin, thunar and nemo each ship their own vendor-named file declaring the same
+  # Name=, so a vendor name is the convention and the only way to avoid a pacman file conflict.
+  install -Dm755 tools/flea-filemanager1 "$pkgdir/usr/lib/flea/flea-filemanager1"
+  install -Dm644 packaging/com.thisisgm.flea.FileManager1.service -t "$pkgdir/usr/share/dbus-1/services"
   install -Dm644 packaging/com.thisisgm.flea.desktop -t "$pkgdir/usr/share/applications"
   install -Dm644 packaging/com.thisisgm.flea.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps"
   install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
