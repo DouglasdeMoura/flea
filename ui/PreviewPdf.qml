@@ -45,6 +45,20 @@ Item {
         source: root.active && root.path.length > 0 ? Format.fileUri(root.path) : ""
     }
 
+    // The page's own paper, painted beneath the raster: on this box the rendered page can arrive
+    // with a transparent background, text drawn and paper not, and the dark frame behind showed
+    // through it (measured in the Quick Look and in the column, Vulkan and GL, with the document
+    // Ready and the page count right). The paper is the document's own, not a theme role, so the
+    // colour is a constant: every page this draws is white wherever the raster itself would be.
+    // Visible exactly when the page is, so a document still loading draws no white rectangle.
+    Rectangle {
+        anchors.centerIn: parent
+        visible: page.visible
+        width: page.width
+        height: page.height
+        color: "#ffffff"
+    }
+
     // The page is the only light surface in the app, which is exactly what the canvas draws.
     PdfPageImage {
         id: page
