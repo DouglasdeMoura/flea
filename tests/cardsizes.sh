@@ -24,12 +24,12 @@ SB=$FIXTURE_ROOT/flea-cardsizes-$$
 pass=0
 fail=0
 # A failure raised inside a command substitution runs in a subshell: its line goes to the script's
-# own stdout through fd 3, never into the captured value, and it is counted through a file the
-# summary reads, never through the variable that subshell cannot reach.
+# own stdout through fd 3, never into the captured value, and it is counted as one marker line in a
+# file the summary reads, never through the variable that subshell cannot reach.
 exec 3>&1
 fails_file=$(mktemp)
 ok()  { printf 'ok   %s\n' "$*"; pass=$((pass+1)); }
-bad() { printf 'FAIL %s\n' "$*" >&3; fail=$((fail+1)); echo "$*" >> "$fails_file"; }
+bad() { printf 'FAIL %s\n' "$*" >&3; fail=$((fail+1)); echo x >> "$fails_file"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got [$2], expected [$3])"; fi; }
 
 cleanup() {
