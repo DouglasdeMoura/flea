@@ -1,7 +1,7 @@
 # Maintainer: GM <gianmarcomorales@icloud.com>
 
 pkgname=flea
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc='Fast, keyboard-first file manager for Omarchy'
 arch=('x86_64' 'aarch64')
