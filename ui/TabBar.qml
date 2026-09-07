@@ -84,8 +84,11 @@ Item {
                     anchors.fill: parent
                     pane: root.pane
                     dest: Tabs.pathAt(root.tabs, root.currentIndex, tab.index, root.path)
-                    destDev: tab.current && root.pane && root.pane.backend ? root.pane.backend.dirDev : 0
-                    onEntered: hoverSwitch.restart()
+                    destDev: Tabs.devAt(root.tabs, root.currentIndex, tab.index,
+                                        root.pane && root.pane.backend ? root.pane.backend.dirDev : 0)
+                    // Only an accepted enter arms the switch: Qt emits entered before it reads accepted,
+                    // and a refused drag gets no exited, so the timer would otherwise never stop.
+                    onEntered: function (drag) { if (drag.accepted) hoverSwitch.restart() }
                     onExited: hoverSwitch.stop()
                     onDropped: hoverSwitch.stop()
                 }

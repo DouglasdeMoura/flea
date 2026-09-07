@@ -102,6 +102,8 @@ fn base_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
 }
 
+pub const INTO_ITSELF: &str = "cannot move or copy a folder into itself";
+
 // Copy or move, one top-level item at a time, reporting each item's own terminal line as it lands.
 pub fn run_transfer(
     id: usize,
@@ -123,6 +125,13 @@ pub fn run_transfer(
         let src = PathBuf::from(raw);
         let name = base_name(&src);
         let dst = dest.join(&name);
+        // A folder into itself or its own subtree: copy_dir would read its own fresh copy until the disk
+        // is full, so the refusal ui/js/Drag.js canDropInto makes is made again here, per item.
+        if dest.starts_with(&src) {
+            failed += 1;
+            let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: INTO_ITSELF.to_string() });
+            continue;
+        }
         match one_item(id, index, &name, moving, &src, &dst, &cancel, &tx, &mut steps) {
             Ok(()) => {
                 ok += 1;
@@ -271,6 +280,30 @@ mod tests {
         );
         assert!(usable_dest("relative/path").is_err(), "a relative destination is never resolved here");
         assert!(usable_dest(&d.join("missing").to_string_lossy()).is_err(), "Flea does not create the destination");
+    }
+
+    #[test]
+    fn a_folder_is_refused_into_itself_and_into_its_own_subtree_while_a_lookalike_sibling_lands() {
+        let d = TestDir::new("intoitself");
+        let src = d.dir("x");
+        d.file("x/a.txt", "body");
+        let deep = d.dir("x/deep");
+        let sibling = d.dir("x2");
+        let (tx, rx) = channel();
+        let paths = vec![src.to_string_lossy().to_string()];
+        run_transfer(1, false, paths.clone(), src.clone(), Arc::new(AtomicBool::new(false)), tx);
+        let (ok, failed, _, _, entry) = done_line(rx);
+        assert_eq!((ok, failed), (0, 1), "a folder into itself is one refused item");
+        assert!(entry.steps.is_empty(), "and nothing was created");
+        assert!(!src.join("x").exists());
+        let (tx, rx) = channel();
+        run_transfer(2, true, paths.clone(), deep.clone(), Arc::new(AtomicBool::new(false)), tx);
+        assert_eq!(done_line(rx).1, 1, "a move into its own subtree is refused the same way");
+        assert!(src.join("a.txt").exists(), "and the source is untouched");
+        let (tx, rx) = channel();
+        run_transfer(3, false, paths, sibling.clone(), Arc::new(AtomicBool::new(false)), tx);
+        assert_eq!(done_line(rx).0, 1, "x2 is not inside x, so the copy lands");
+        assert_eq!(std::fs::read_to_string(sibling.join("x/a.txt")).unwrap(), "body");
     }
 
     #[test]

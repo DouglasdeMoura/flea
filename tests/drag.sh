@@ -43,6 +43,8 @@ sandbox_make "$SB"
 mkdir -p "$HOMEDIR/.local/state/omarchy" "$HOMEDIR/aaa" "$HOMEDIR/bbb"
 ln -sfn "$HOME/.local/state/omarchy/current" "$HOMEDIR/.local/state/omarchy/current"
 for f in r1a r1b r2 r3 r4; do printf '%s payload\n' "$f" > "$HOMEDIR/$f.txt"; done
+# R6 shows hidden files in a second tab on the same directory, so every index below this one shifts.
+printf 'hidden\n' > "$HOMEDIR/.r0hidden"
 
 # ---------------------------------------------------------------- pointer
 warp() { hyprctl dispatch "hl.dsp.cursor.move({x = $1, y = $2})" >/dev/null; }
@@ -252,7 +254,9 @@ set -- $(screen_centre r1a.txt); sx=$1; sy=$2
 set -- $(ipc tabCentre 1); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
-glide_to "$tx" "$ty"; sleep 1.0
+# The rest outlives the switch by a second: the pressed row's delegate is released by the re-list
+# while the drag still runs, and the QDrag used to die with it (quickshell SIGSEGV, 2026-09-07).
+glide_to "$tx" "$ty"; sleep 1.6
 check "resting on the second tab selected it" "$(ipc tabIndex)" "1"
 glide_to "$tx" $(( WY + 700 )); sleep 0.6
 release; sleep 0.6
@@ -261,6 +265,32 @@ check "the file landed on the second tab's floor" \
       "$([ -e "$HOMEDIR/bbb/r1a.txt" ] && echo bbb || echo missing)" "bbb"
 check "as a move, so the source is gone" \
       "$([ -e "$HOMEDIR/r1a.txt" ] && echo still-there || echo moved)" "moved"
+check "and the window survived the drop" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+
+# ---------------------------------------------------------------- R6
+echo
+echo "== R6: a tab on the same directory re-lists under the drag, and the drop still names the lifted file =="
+# The second tab shows hidden files, so .r0hidden takes index 0 and every row below it shifts by one.
+# A drop resolved by the lifted index would move the row now sitting there; by path it moves r1b.txt.
+omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.5
+omarchy-drive key --window flea . >/dev/null 2>&1; sleep 0.6
+check "the second tab shows the hidden file" "$(rowidx .r0hidden)" "0"
+omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.6
+check "and the first tab does not" "$(rowidx .r0hidden || echo none)" "none"
+set -- $(screen_centre r1b.txt); sx=$1; sy=$2
+set -- $(ipc tabCentre 1); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+warp "$sx" "$sy"; sleep 0.4
+press; sleep 0.3
+glide_to "$tx" "$ty"; sleep 1.2
+check "resting on the same-directory tab selected it" "$(ipc tabIndex)" "1"
+set -- $(screen_centre aaa); fx=$1; fy=$2
+glide_to "$fx" "$fy"; sleep 0.6
+release; sleep 0.6
+wait_for "$HOMEDIR/aaa/r1b.txt" present
+check "the lifted file landed in the folder under the drop" \
+      "$([ -e "$HOMEDIR/aaa/r1b.txt" ] && echo aaa || echo missing)" "aaa"
+check "and no other file moved" "$(ls "$HOMEDIR/aaa" | tr '\n' ' ')" "r1b.txt "
+check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
 echo
 echo "$((pass + fail)) checks, $fail failed"
 [ "$fail" = 0 ] || exit 1

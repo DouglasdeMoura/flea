@@ -117,6 +117,17 @@ function sameListing(payload, path) {
     return isOwnDrag(payload) && markerSource(payload) === path
 }
 
+// Whether a drag carries at least one local path, which is what decides a drop resolves by path.
+function hasPaths(urls) {
+    return pathsFromUrls(urls).length > 0
+}
+
+// The by-index drop's gate: only a selection too wide to carry paths takes it, only onto its own
+// listing, and never onto a folder it carries itself.
+function canDropByIndex(marker, path, rows, index) {
+    return sameListing(marker, path) && rows.indexOf(index) < 0
+}
+
 // Whether the marked drag was lifted with ctrl down. Anything carrying no marker answers false,
 // which costs nothing: verbFor already copies everything that did not come from this window.
 function markerCopying(payload) {
@@ -178,7 +189,15 @@ function canDropInto(marker, urls, dest) {
     if (isOwnDrag(marker) && markerSource(marker) === dest) {
         return false
     }
-    return pathsFromUrls(urls).length > 0
+    var paths = pathsFromUrls(urls)
+    for (var i = 0; i < paths.length; i++) {
+        // A folder into itself or its own subtree: copy_dir would read its own fresh copy until the
+        // disk is full, so the drop is refused here and again in src/backend/opsreq.rs.
+        if (dest === paths[i] || dest.indexOf(paths[i] + "/") === 0) {
+            return false
+        }
+    }
+    return paths.length > 0
 }
 
 // The transfer for a drop that resolves by path. verbFor decides move against copy the same way a

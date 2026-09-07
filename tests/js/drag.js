@@ -95,9 +95,25 @@ function run(check) {
     var refused = []
     check("a refused drop sends nothing", Drag.dropInto(pane(refused, [], rows), wire[Drag.ROWS_MIME], urls, "/d", 42), false)
     check("and nothing reached the backend", refused.length, 0)
-    var refused = []
-    check("a drop of a folder onto itself sends nothing", Drag.drop(pane(refused, [], rows), [0, 2], 0, false), false)
-    check("and nothing went out", refused.length, 0)
+    var folded = []
+    check("a drop of a folder onto itself sends nothing", Drag.drop(pane(folded, [], rows), [0, 2], 0, false), false)
+    check("and nothing went out", folded.length, 0)
+    // A folder into itself or its own subtree is refused by path too, the gate the floor, the tabs and
+    // a folder row all share; a sibling whose name merely starts the same is not the subtree.
+    var folderUrls = ["file:///d/omarchy"]
+    check("a folder cannot land on itself by path", Drag.canDropInto("", folderUrls, "/d/omarchy"), false)
+    check("nor inside its own subtree", Drag.canDropInto("", folderUrls, "/d/omarchy/deep"), false)
+    check("a sibling that starts with the same name is fine", Drag.canDropInto("", folderUrls, "/d/omarchy2"), true)
+    var inside = []
+    check("and the transfer is refused before it is sent", Drag.dropInto(pane(inside, [], rows), "", folderUrls, "/d/omarchy/deep", 3), false)
+    check("so nothing reached the backend", inside.length, 0)
+    // Which route a drop takes: paths whenever the drag carries them, the row index only for a
+    // selection too wide to carry paths, and then only on the listing it was lifted from.
+    check("hasPaths reads the uri-list", Drag.hasPaths(urls), true)
+    check("and answers false for a drag carrying none", Drag.hasPaths([]), false)
+    check("a wide drag drops by index on its own listing", Drag.canDropByIndex(wire[Drag.ROWS_MIME], "/d", [0, 2], 1), true)
+    check("but not onto a folder it carries", Drag.canDropByIndex(wire[Drag.ROWS_MIME], "/d", [0, 2], 0), false)
+    check("and never on another listing", Drag.canDropByIndex(wire[Drag.ROWS_MIME], "/e", [0, 2], 1), false)
     var onFile = []
     check("a drop on a file sends nothing", Drag.drop(pane(onFile, [], rows), [2], 3, false), false)
     check("a drop on a row that is not loaded sends nothing", Drag.drop(pane(onFile, [], rows), [2], 9, false), false)
