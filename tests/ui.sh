@@ -5870,7 +5870,7 @@ assert_monitor_scale_row() {
     live=$(hyprctl monitors -j | jq -r 'map(select(.focused)) | .[0].scale // empty')
     [[ -n "$live" ]] || fail "settings: hyprctl reports no focused monitor, so the row has no contract"
     shown=$(awk -v s="$live" 'BEGIN { printf "%g", s + 0 }')
-    [[ "$(ipc settingsRows)" == *"fact|Scale|${shown}x"* ]] \
+    [[ "$(ipc settingsRows)" == *"fact|Scale|Read-only ${shown}x"* ]] \
         || fail "settings: the Scale row does not show the compositor's ${shown}x, got $(ipc settingsRows)"
 }
 

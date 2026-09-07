@@ -189,12 +189,13 @@ function displayRows(state) {
     return out
 }
 
-// The compositor's number as Hyprland writes it, 1.00 and 1.25; an unanswered query says so rather
+// The SettingsScale board's own cell: the word first, then the compositor's number as Hyprland writes
+// it, 1.00 and 1.25; an unanswered query says so rather
 // than reading as 1x, because a wrong number here looks exactly like a right one.
 function scaleLabel(scale) {
     if (!(scale > 0))
         return "not reported"
-    return (Math.round(scale * 100) / 100) + "x"
+    return "Read-only " + (Math.round(scale * 100) / 100) + "x"
 }
 
 // The one row of this section that is not a menu action: it governs how every menu row is drawn
