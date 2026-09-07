@@ -247,8 +247,10 @@ ShellRoot {
             // In the columns view that area is all three columns, so the mark takes the middle one:
             // an empty current directory is that column's answer, not the parent column's.
             // listArea is measured inside pane, which starts below the chrome bar, so pane's own y is added; pane.x is zero.
+            // Below the pane: its context menu is the pane's child, and the caption was painted over it.
             Flea.EmptyState {
                 id: emptyState
+                z: -1
                 x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
                 y: pane.y + pane.listArea.y
                 width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listArea.width
@@ -266,6 +268,7 @@ ShellRoot {
 
             // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.
             Flea.LoadingState {
+                z: -1
                 x: pane.listArea.x
                 y: pane.y + pane.listArea.y
                 width: pane.listArea.width

@@ -54,6 +54,8 @@ Item {
     property int pendingSize: 0
     // The settle idiom Pane's own thumbnail request reuses: a held j/k costs zero reloads until the cursor rests.
     readonly property int followSettleMs: 120
+    // The same dim ui/SettingsPanel.qml lays over the listing.
+    readonly property real groundOpacity: 0.5
 
     // Read through to PreviewMedia so this file never has to import QtMultimedia itself; 0 before
     // the loader has produced an item, same shape root.status already uses.
@@ -192,9 +194,23 @@ Item {
         onPositionChanged: root.revealStrip()
     }
 
+    // PdfViewer.html and MediaPlayer.html draw a pane with its own edge; on the surface colour alone the
+    // inset vanished into the listing behind it, whose rows and columns showed all round.
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.color.background
+        opacity: root.active ? root.groundOpacity : 0
+        Behavior on opacity {
+            enabled: !Theme.reducedMotion
+            NumberAnimation { duration: root.active ? Motion.durMs.open : Motion.durMs.close }
+        }
+    }
+
     Rectangle {
         id: surface
         anchors.centerIn: parent
+        border.width: Theme.spacing.hairline
+        border.color: Theme.color.muted
         // Open rises into place; close does not translate (enabled: root.active), only fades,
         // faster than the open animation. root.active itself already flipped above, synchronously.
         anchors.verticalCenterOffset: root.active ? 0 : Motion.translateUpPx
