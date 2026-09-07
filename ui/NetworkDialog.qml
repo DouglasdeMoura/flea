@@ -21,7 +21,8 @@ Item {
     readonly property string dialogTitle: root.baseTitle() + (root.failedConnect ? ", failed connect" : "")
     // The card keeps this much window above and below it when the window is shorter than the card.
     readonly property int clampMargin: 8
-    readonly property Item cardItem: card
+    // var, not Item: BorderSurface is a qs.Ui type qmllint cannot resolve, and Item would read as incompatible.
+    readonly property var cardItem: card
 
     signal closed()
     // Sidebar's own bookmarksFile FileView never watched a directory absent at its own

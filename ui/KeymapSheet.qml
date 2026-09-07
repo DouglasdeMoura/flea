@@ -14,7 +14,8 @@ Item {
     // The canvas draws this panel at 300 design pixels wide, the same as the convert popup.
     readonly property int sheetWidth: 300
     readonly property int clampMargin: 8
-    readonly property Item cardItem: card
+    // var, not Item: BorderSurface is a qs.Ui type qmllint cannot resolve, and Item would read as incompatible.
+    readonly property var cardItem: card
     // Two columns, which is what the canvas draws and what keeps the whole map on one panel.
     readonly property int columns: 2
     // A cap is sized from the type scale, never from the text inside it, so every cap is one height.

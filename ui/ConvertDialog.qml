@@ -30,7 +30,8 @@ Item {
     // The canvas draws this popup at 300 design pixels wide.
     readonly property int dialogWidth: 300
     readonly property int clampMargin: 8
-    readonly property Item cardItem: card
+    // var, not Item: BorderSurface is a qs.Ui type qmllint cannot resolve, and Item would read as incompatible.
+    readonly property var cardItem: card
 
     anchors.fill: parent
     visible: root.opened
