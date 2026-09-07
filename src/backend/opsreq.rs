@@ -117,6 +117,9 @@ pub fn run_transfer(
     let mut steps: Vec<Step> = Vec::new();
     let (mut ok, mut failed, mut skipped) = (0usize, 0usize, 0usize);
     let mut was_cancelled = false;
+    // Resolved once: a destination reached through a symlinked directory names the same inode under
+    // another string, and the per-item guards below compare against this rather than the raw path.
+    let dest_real = dest.canonicalize().unwrap_or_else(|_| dest.clone());
     for (index, raw) in paths.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             was_cancelled = true;
@@ -126,10 +129,7 @@ pub fn run_transfer(
         let src = PathBuf::from(raw);
         let name = base_name(&src);
         let dst = dest.join(&name);
-        // Both guards compare resolved paths: a destination reached through a symlinked directory names
-        // the same inode under another string, and the string compare alone let it through.
         let src_real = src.canonicalize().unwrap_or_else(|_| src.clone());
-        let dest_real = dest.canonicalize().unwrap_or_else(|_| dest.clone());
         // A folder into itself or its own subtree: copy_dir would read its own fresh copy until the disk
         // is full, so the refusal ui/js/Drag.js canDropInto makes is made again here, per item.
         if dest_real.starts_with(&src_real) {
