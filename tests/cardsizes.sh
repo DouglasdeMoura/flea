@@ -80,7 +80,8 @@ place() {
 at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered nothing"; v="0 0 0 0 dead-$RANDOM"; }; echo "$v"; }
 # Opens the network dialog from wherever the focus is: the rail's a key, reached by Tab only from the list.
 open_network() { [ "$(ipc focusView)" = rail ] || { key -k Tab; sleep 0.3; }; key a; sleep 0.7; }
-rowidx() { local i total; total=$(ipc total); for i in $(seq 0 $((total - 1))); do case "$(ipc rowAt "$i")" in "$1|"*) echo "$i"; return 0;; esac; done; return 1; }
+# rowAt answers "loading" past the held window, and the hunt ends there rather than at a 100,000 row total.
+rowidx() { local i total; total=$(ipc total); for i in $(seq 0 $((total - 1))); do case "$(ipc rowAt "$i")" in "$1|"*) echo "$i"; return 0;; ""|loading) return 1;; esac; done; return 1; }
 
 # ---------------------------------------------------------------- the app
 QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" setsid "$FLEA_BIN" --gui "$SB" >/dev/null 2>&1 </dev/null &
@@ -163,6 +164,7 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
 
   # The convert popup, from the png row's context menu; the png is row 0, scrolled back on screen first.
   key -k Home; sleep 0.3
+  check "$size the list is still on the fixture" "$(ipc path)|$(ipc focusView)" "$SB|list"
   idx=$(rowidx 0-shot.png) || idx=""
   set -- $(at rowCentre "${idx:-0}"); click_win "$1" "$2" right; sleep 0.5
   entries=$(ipc contextMenuEntries); target=-1; i=0; IFS='|'; for label in $entries; do [ "$label" = "Convert" ] && { target=$i; break; }; i=$((i+1)); done; unset IFS
