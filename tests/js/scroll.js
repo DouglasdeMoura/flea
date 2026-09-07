@@ -8,10 +8,12 @@ function run(check) {
           Scroll.distance(0, -120, 3, 24, 4), -288)
     check("one notch up moves the same distance the other way", Scroll.distance(0, 120, 3, 24, 4), 288)
     check("two notches move twice", Scroll.distance(0, -240, 3, 24, 4), -576)
-    check("a platform that reports no lines still moves one", Scroll.distance(0, -120, 0, 24, 4), -96)
-    // A touchpad hands pixels, which win over any angle that rides along.
-    check("a pixel delta is taken as it is, times the multiplier", Scroll.distance(-10, -120, 3, 24, 4), -40)
-    check("a fractional pixel delta keeps its fraction", Scroll.distance(-2.5, 0, 3, 24, 4), -10)
+    // The one fallback: the handler passes the platform's hint raw, and no lines means Qt's own three.
+    check("a platform that reports no lines moves Qt's three", Scroll.distance(0, -120, 0, 24, 4), -288)
+    check("and so does one that reports a negative count", Scroll.distance(0, -120, -1, 24, 4), -288)
+    // A touchpad hands pixels, which win over any angle that rides along and move one to one.
+    check("a pixel delta moves one to one, no multiplier", Scroll.distance(-10, -120, 3, 24, 4), -10)
+    check("a fractional pixel delta keeps its fraction", Scroll.distance(-2.5, 0, 3, 24, 4), -2.5)
     check("no delta at all moves nothing", Scroll.distance(0, 0, 3, 24, 4), 0)
     check("garbage reads as no movement", Scroll.distance("x", undefined, 3, 24, 4), 0)
 

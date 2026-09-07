@@ -215,6 +215,9 @@ QtObject {
             return item ? item.describe() : "loading"
         }
         function visibleRows(): int { return root.pane.visibleRows }
+        // The list's scroll position and the platform's lines per notch, for tests/ui.sh scroll.
+        function listContentY(): int { return Math.round(root.pane.listArea.contentY) }
+        function wheelLines(): int { return Application.styleHints.wheelScrollLines }
         function thumbRequests(): int { return root.backend.thumbRequests }
         function dirSizeRequests(): int { return root.backend.dirSizeRequests }
         function listRequests(): int { return root.backend.listRequests }

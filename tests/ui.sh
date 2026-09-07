@@ -863,6 +863,39 @@ shot() {
     printf 'SHOT %s\n' "$evidence_dir/$name.png"
 }
 
+# Catches the wheel handler losing its wiring, its sign or its rate: one notch over the list moves
+# ListView.contentY by exactly the platform's lines times Theme.scroll.notchPx times the multiplier,
+# 3 x 24 x 4 on this box, and a notch at the top moves nothing and stays inside the bounds.
+case_scroll() {
+    [[ -d "$bench_dir" ]] || fail "the 100,000-file fixture is missing at $bench_dir"
+    launch "$bench_dir"
+    wait_listing 100000
+    settle
+    local wx wy ww wh cx cy before after
+    [[ "$(ipc wheelLines)" == "3" ]] || fail "scroll: the platform reports $(ipc wheelLines) lines a notch, this case assumes 3"
+    read -r wx wy ww wh < <(window_box)
+    read -r cx cy <<< "$(ipc rowCentre 5)"
+    # omarchy-drive scroll takes no point: warp there, then one uinput pixel so Qt sees a pointer frame.
+    hyprctl dispatch "hl.dsp.cursor.move({x = $((wx + cx - 1)), y = $((wy + cy))})" >/dev/null
+    YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1
+    settle
+    before=$(ipc listContentY)
+    [[ "$before" == "0" ]] || fail "scroll: the list did not start at the top, contentY $before"
+    omarchy-drive scroll up 1 >/dev/null
+    settle
+    [[ "$(ipc listContentY)" == "0" ]] || fail "scroll: a notch up at the top moved contentY to $(ipc listContentY)"
+    omarchy-drive scroll down 1 >/dev/null
+    settle
+    after=$(ipc listContentY)
+    [[ "$after" == "288" ]] || fail "scroll: one notch down moved contentY to $after, not 288 (3 lines x 24 px x 4)"
+    omarchy-drive scroll down 2 >/dev/null
+    settle
+    after=$(ipc listContentY)
+    [[ "$after" == "864" ]] || fail "scroll: two more notches moved contentY to $after, not 864"
+    printf 'SCROLL one notch 288, three notches 864, top held at 0\n'
+    shot scroll-three-notches
+}
+
 # Catches removing the cursor clamp from ListView.onContentYChanged in ui/Pane.qml.
 case_cursor() {
     [[ -d "$bench_dir" ]] || fail "the 100,000-file fixture is missing at $bench_dir"

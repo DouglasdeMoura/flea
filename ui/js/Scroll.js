@@ -1,19 +1,21 @@
 .pragma library
 
 // The wheel's arithmetic, kept pure so tests/js/scroll.js can drive it without a Flickable.
-// ui/FastScrollHandler.qml reads the two rates off ui/Theme.qml and hands the event's numbers here.
 
 // One discrete notch is 120 units of angleDelta, Qt's own convention for a wheel click.
 var NOTCH_UNITS = 120
+// Qt's own lines per notch when the platform reports none: the one fallback, so the handler passes the raw hint.
+var DEFAULT_LINES = 3
 
-// How far a wheel event moves the content: a touchpad's pixel delta as it is, a wheel notch as the
-// platform's lines per notch times notchPx, and both times the multiplier. Zero means no movement.
+// How far a wheel event moves the content: a touchpad's pixels one to one, like every other
+// application, and a wheel notch as the platform's lines times notchPx times the multiplier.
 // Sample input: pixelDeltaY 0, angleDeltaY -120, lines 3, notchPx 24, multiplier 4 gives -288.
 function distance(pixelDeltaY, angleDeltaY, lines, notchPx, multiplier) {
-    var moved = Number(pixelDeltaY) || 0
-    if (moved === 0)
-        moved = (Number(angleDeltaY) || 0) / NOTCH_UNITS * Math.max(1, Number(lines) || 0) * notchPx
-    return moved * multiplier
+    var pixels = Number(pixelDeltaY) || 0
+    if (pixels !== 0)
+        return pixels
+    var perNotch = Number(lines) > 0 ? Number(lines) : DEFAULT_LINES
+    return (Number(angleDeltaY) || 0) / NOTCH_UNITS * perNotch * notchPx * multiplier
 }
 
 // A content position kept inside the Flickable: never above its origin, never past its last page.
