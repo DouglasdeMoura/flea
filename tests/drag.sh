@@ -275,8 +275,8 @@ echo "== R6: a tab on the same directory re-lists under the drag, and the drop s
 omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.8
 omarchy-drive key --window flea . >/dev/null 2>&1
 for i in $(seq 1 40); do [ "$(ipc showHidden)" = "true" ] && [ -n "$(rowidx .r0hidden)" ] && break; sleep 0.1; done
-# Directories sort first, so the dotfile lands after aaa and bbb and shifts every text file by one.
-check "the second tab shows the hidden file after the folders" "$(rowidx .r0hidden)" "2"
+# Directories sort first, .local among them, so the dotfile lands at row 3 and shifts every text file.
+check "the second tab shows the hidden file after the folders" "$(rowidx .r0hidden)" "3"
 omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
 check "and the first tab does not" "$(rowidx .r0hidden || echo none)" "none"
 # aaa is row 0 in both tabs, so its centre is read here, before the drag's nested loop and re-list.
