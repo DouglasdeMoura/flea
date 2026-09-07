@@ -166,8 +166,9 @@ function run(check) {
           Drag.isOwnDrag(""), false)
     check("the marker names the sender before the rows",
           Drag.markerPayload([0, 2], false).split("\n")[1], "0,2")
+    // The wire's marker carries the pane's directory and its device, 0 when the stub backend has none.
     check("and the whole marker is what goes on the wire",
-          Drag.mimeFor(pane([], [], rows), [0, 2], false)[Drag.ROWS_MIME], Drag.markerPayload([0, 2], false))
+          Drag.mimeFor(pane([], [], rows), [0, 2], false)[Drag.ROWS_MIME], Drag.markerPayload([0, 2], false, "/d", 0))
 
     // One function decides the verb, and the label and the transfer both read it: a line promising a
     // copy while a move happens is the shape this branch has already produced twice.
