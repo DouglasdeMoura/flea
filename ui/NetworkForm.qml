@@ -32,14 +32,16 @@ Column {
     readonly property bool complete: Protocols.complete({ host: root.host, port: root.port })
 
     spacing: Style.space(12)
-    // Every row's natural height whether or not the protocol shows it: ui/NetworkDialog.qml places
-    // the card's top for this height, so the chips and the first fields never move under a chip click.
+    // Every row's natural height whether or not the protocol shows it: the form keeps this height
+    // through every chip, so the chips above and the buttons below never move under the pointer,
+    // and a shorter protocol leaves its air under Mounts as rather than a hole between fields.
     readonly property real tallest: {
         var sum = 0
         for (var i = 0; i < root.children.length; i++)
             sum += root.children[i].implicitHeight
         return sum + root.spacing * (root.children.length - 1)
     }
+    height: root.tallest
 
     function pick(name) {
         root.protocol = name
