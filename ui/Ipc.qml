@@ -18,6 +18,7 @@ QtObject {
     property var settingsPanel: null
     property var networkDialog: null
     property var shareBrowser: null
+    property var emptyState: null
     // Overlays and the columns view are built by their first open, see ui/shell.qml, so until then
     // each reader below answers the empty value its type has: "", false or -1, never a throw.
     readonly property var columns: root.pane ? root.pane.columnsArea : null
@@ -199,6 +200,12 @@ QtObject {
         }
         // The empty-directory mark's own visibility, off the same listingState the overlay binds to.
         function emptyShown(): bool { return root.pane.listingState === "empty" }
+        // "x y width height" of the empty mark in window pixels, for a painted-pixel count: the state
+        // flag above cannot see a mark drawn under its own parent's paint.
+        function emptyMarkRect(): string {
+            var rect = root.fleaWindow.itemRect(root.emptyState)
+            return Math.round(rect.x) + " " + Math.round(rect.y) + " " + Math.round(rect.width) + " " + Math.round(rect.height)
+        }
         function rowAt(i: int): string {
             var item = root.pane.itemFor(i)
             return item ? item.describe() : "loading"

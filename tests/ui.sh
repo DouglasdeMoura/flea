@@ -1724,6 +1724,13 @@ case_background() {
     done
     [[ "$(ipc path)" == "$dir/dest" ]] || fail "background: the case is in $(ipc path), not $dir/dest"
     [[ "$(ipc total)" == "0" ]] || fail "background: $dir/dest listed $(ipc total) rows, not 0"
+    # The mark has to paint, not only be flagged: a z below the view's own paint hid it outright once.
+    shot background-empty
+    local mark lit
+    mark=$(ipc emptyMarkRect)
+    set -- $mark
+    lit=$(count_pixels "$evidence_dir/background-empty.png" "${3}x${4}+${1}+${2}" "((r+g+b)/3) > 0.25")
+    (( lit > 0 )) || fail "background: the empty mark painted no pixel inside ${3}x${4}+${1}+${2}"
     # The empty listing is also the strongest case for this menu, and it has no row to aim from.
     click_background
     settle

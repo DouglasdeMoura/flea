@@ -134,6 +134,9 @@ ShellRoot {
 
             Flea.Pane {
                 id: pane
+                // Above the empty and loading marks below, so its own context menu paints over them; a
+                // negative z on the marks put them under this Rectangle's own paint and hid them outright.
+                z: 1
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: tabBar.bottom
@@ -179,8 +182,11 @@ ShellRoot {
             // Every overlay below is built by its first open and kept, see AGENTS.md rule 6: a launch
             // that never opens one pays neither its compile nor its objects. Each Loader carries the
             // one or two members its callers read, and ui/Ipc.qml reads the built item or null.
+            // Each Loader carries its item's z, because a z set inside the item orders it only within
+            // the Loader, and the share browser below would otherwise paint over an open card.
             Loader {
                 id: convertDialog
+                z: 2
                 anchors.fill: parent
                 active: false
                 source: "ConvertDialog.qml"
@@ -195,6 +201,7 @@ ShellRoot {
             // The keymap sheet ? opens, over the whole window as the convert popup is.
             Loader {
                 id: keymapSheet
+                z: 2
                 anchors.fill: parent
                 active: false
                 source: "KeymapSheet.qml"
@@ -207,6 +214,7 @@ ShellRoot {
             // Settings row, which ui/js/Menu.js backgroundEntries builds and ui/Pane.qml act routes.
             Loader {
                 id: settingsPanel
+                z: 3
                 anchors.fill: parent
                 active: false
                 source: "SettingsPanel.qml"
@@ -216,6 +224,7 @@ ShellRoot {
 
             Loader {
                 id: networkDialog
+                z: 2
                 anchors.fill: parent
                 active: false
                 source: "NetworkDialog.qml"
@@ -250,7 +259,6 @@ ShellRoot {
             // Below the pane: its context menu is the pane's child, and the caption was painted over it.
             Flea.EmptyState {
                 id: emptyState
-                z: -1
                 x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
                 y: pane.y + pane.listArea.y
                 width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listArea.width
@@ -268,7 +276,6 @@ ShellRoot {
 
             // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.
             Flea.LoadingState {
-                z: -1
                 x: pane.listArea.x
                 y: pane.y + pane.listArea.y
                 width: pane.listArea.width
@@ -336,5 +343,6 @@ ShellRoot {
         settingsPanel: settingsPanel.item
         networkDialog: networkDialog.item
         shareBrowser: shareLoader.item
+        emptyState: emptyState
     }
 }
