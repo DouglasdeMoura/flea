@@ -139,12 +139,9 @@ ShellRoot {
                 pane: pane
             }
 
-            // The Omarchy mark's one placement: over the list area alone, so the rail stays live.
-            // In the columns view that area is all three columns, so the mark takes the middle one:
-            // an empty current directory is that column's answer, not the parent column's.
-            // listArea is measured inside pane, which starts below the chrome bar, so pane's own y is added; pane.x is zero.
-            // Declared before the pane, so it paints under the pane's own context menu and over this
-            // Rectangle's ground: a negative z put it under that ground and hid it outright.
+            // The mark over the list area alone (the middle column in the columns view), declared before
+            // the pane so it paints under the pane's context menu and over this Rectangle's ground: a
+            // negative z put it under that ground and hid it. listArea is pane-relative, so pane.y is added.
             Flea.EmptyState {
                 id: emptyState
                 x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)

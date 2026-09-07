@@ -46,11 +46,9 @@ ListView {
         flickable: root
     }
 
-    // The item Qt hangs the drag off, on the view and never in a delegate: a tab hover switch re-lists
-    // mid-drag and releases the pressed row, and a QDrag parented there died inside its own exec with the
-    // compositor still asking it for data (quickshell SIGSEGV in QMimeData::hasImage, 2026-09-07).
-    // Automatic makes it a real Wayland drag, so it reaches other applications, and the compositor
-    // delivers it back to this window's own DropAreas. The canvas draws no drag image.
+    // The item Qt hangs the platform drag off, on the view and never in a delegate: a tab hover switch
+    // re-lists mid-drag and releases the pressed row, and a QDrag parented there died inside its own
+    // exec while the compositor still asked it for data (quickshell SIGSEGV, 2026-09-07). No drag image.
     Item {
         id: ghost
         Drag.dragType: Drag.Automatic
