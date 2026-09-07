@@ -284,6 +284,9 @@ ShellRoot {
                 readonly property bool active: shareLoader.item !== null && shareLoader.item.active
                 function open(uri, label, names) { shareLoader.active = true; shareLoader.item.open(uri, label, names) }
                 function close() { if (shareLoader.item) shareLoader.item.close() }
+                // ui/js/Focus.js shareBrowserAct's two other verbs, reached only while the overlay is up.
+                function moveCursor(delta) { if (shareLoader.item) shareLoader.item.moveCursor(delta) }
+                function activateCursor() { if (shareLoader.item) shareLoader.item.activateCursor() }
                 Loader { id: shareLoader; anchors.fill: parent; active: false; source: "ShareBrowser.qml" }
             }
             Connections {
