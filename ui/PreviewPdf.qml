@@ -45,12 +45,9 @@ Item {
         source: root.active && root.path.length > 0 ? Format.fileUri(root.path) : ""
     }
 
-    // The page's own paper, painted beneath the raster: on this box the rendered page can arrive
-    // with a transparent background, text drawn and paper not, and the dark frame behind showed
-    // through it (measured in the Quick Look and in the column, Vulkan and GL, with the document
-    // Ready and the page count right). The paper is the document's own, not a theme role, so the
-    // colour is a constant: every page this draws is white wherever the raster itself would be.
-    // Visible exactly when the page is, so a document still loading draws no white rectangle.
+    // The page's own paper under the raster: on this box a rendered page can arrive with text drawn
+    // and no background, and the dark frame showed through it. Paper is the document's, not a theme
+    // role, so the colour is a constant; visible only with the page, so a loading document draws none.
     Rectangle {
         anchors.centerIn: parent
         visible: page.visible
