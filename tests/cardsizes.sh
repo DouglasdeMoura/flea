@@ -56,6 +56,19 @@ rect_inside() {
   if [ "$7" -ge -1 ] && [ "$8" -ge -1 ] && [ $(( $7 + $9 )) -le $(( $3 + 1 )) ] && [ $(( $8 + ${10} )) -le $(( $4 + 1 )) ]; then ok "$label is inside the ${3}x${4} window ($7 $8 $9 ${10})"; else bad "$label at $7 $8 $9 ${10} leaves the ${3}x${4} window"; fi
 }
 dispatch() { hyprctl dispatch "$1" 2>&1 | grep -v "^ok" | sed 's/^/    dispatch: /'; }
+# Sample output: 2560 1440 30 (width height reserved-top); the bar reserves the top strip.
+monitor() { hyprctl -j monitors | python3 -c 'import json,sys; m=json.load(sys.stdin)[0]; print(m["width"], m["height"], m["reserved"][1])'; }
+# A float resized in place keeps the tiled origin and runs off the bottom of the screen, so it is
+# moved to the centre of the free area and its geometry is read back before anything is measured.
+place() {
+  local w=$1 h=$2; set -- $(monitor); local mw=$1 mh=$2 top=$3
+  set -- $(geom); local dx=$(( (mw - w) / 2 - $1 )) dy=$(( top + (mh - top - h) / 2 - $2 ))
+  dispatch "hl.dsp.window.move({ x = $dx, y = $dy, window = \"address:$addr\" })"
+  sleep 0.4; set -- $(geom)
+  check "the window is ${w}x${h} at $1,$2, on screen" "$3x$4 $([ "$1" -ge 0 ] && [ "$2" -ge "$top" ] && [ $(( $1 + $3 )) -le "$mw" ] && [ $(( $2 + $4 )) -le "$mh" ] && echo inside || echo off)" "${w}x${h} inside"
+}
+# An IPC reader that answers nothing is a failed check, never an empty argument under set -u.
+at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered nothing"; v="0 0 0 0"; }; echo "$v"; }
 rowidx() { local i total; total=$(ipc total); for i in $(seq 0 $((total - 1))); do case "$(ipc rowAt "$i")" in "$1|"*) echo "$i"; return 0;; esac; done; return 1; }
 
 # ---------------------------------------------------------------- the app
@@ -71,7 +84,8 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
     tiled) ;;
     fullscreen) dispatch "hl.dsp.window.fullscreen({ window = \"address:$addr\" })" ;;
     *) [ "$(geom | awk '{print $5}')" = True ] || dispatch "hl.dsp.window.float({ window = \"address:$addr\" })"
-       dispatch "hl.dsp.window.resize({ x = ${size%x*}, y = ${size#*x}, exact = true, window = \"address:$addr\" })" ;;
+       dispatch "hl.dsp.window.resize({ x = ${size%x*}, y = ${size#*x}, exact = true, window = \"address:$addr\" })"
+       sleep 0.5; place "${size%x*}" "${size#*x}" ;;
   esac
   sleep 0.8; omarchy-drive focus flea >/dev/null 2>&1; sleep 0.3
   echo "=== $size: window $(geom)"
@@ -79,9 +93,11 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # Settings: one title height for every section, the card inside the window.
   key ,; sleep 0.6
   check "$size settings opens" "$(ipc settingsOpen)" "true"
-  display=$(ipc settingsTitleCentre)
-  key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(ipc settingsTitleCentre)
-  key j; sleep 0.3; key j; sleep 0.3; menus=$(ipc settingsTitleCentre)
+  display=$(at settingsTitleCentre)
+  key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(at settingsTitleCentre)
+  check "$size the rail walked to keys" "$(ipc settingsSection)" "keys"
+  key j; sleep 0.3; key j; sleep 0.3; menus=$(at settingsTitleCentre)
+  check "$size and on to menus" "$(ipc settingsSection)" "menus"
   check "$size settings title height is the same on keys, display and menus" "$keys|$menus" "$display|$display"
   rect_inside "$size settings card" "$(ipc settingsCardRect)"
   omarchy-drive shot "$evidence_dir/settings-$size.png" flea >/dev/null 2>&1
@@ -92,27 +108,32 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # scrolls the body by wheel and by a Tab to the password field.
   key -k Tab; sleep 0.3; key a; sleep 0.7
   check "$size network dialog opens" "$(ipc dialogOpen)" "true"
-  base=$(ipc networkChipCentre SMB)
+  base=$(at networkChipCentre SMB)
   moved=""
   for p in SFTP FTPS WebDAV NFS SMB; do
-    set -- $(ipc networkChipCentre "$p"); click_win "$1" "$2"; sleep 0.35
+    set -- $(at networkChipCentre "$p"); click_win "$1" "$2"; sleep 0.35
     [ "$(ipc networkProtocol)" = "$p" ] || moved="$moved $p:not-picked"
     [ "$(ipc networkChipCentre SMB)" = "$base" ] || moved="$moved $p:$(ipc networkChipCentre SMB)"
   done
   check "$size the chip row held its height through every protocol" "${moved:-still}" "still"
   rect_inside "$size network card" "$(ipc networkCardRect)"
   omarchy-drive shot "$evidence_dir/network-$size.png" flea >/dev/null 2>&1
-  IFS='|' read -r sy sh svh <<<"$(ipc networkScroll)"
+  scroll=$(ipc networkScroll)
+  check "$size the network body reports its scroll" "$([ -n "$scroll" ] && echo yes || echo no)" "yes"
+  IFS='|' read -r sy sh svh <<<"$scroll"
   if [ "${sh:-0}" -gt "${svh:-0}" ]; then
-    set -- $(ipc networkCardRect); scroll_win $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )); sleep 0.4
+    set -- $(at networkCardRect); scroll_win $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )); sleep 0.4
     IFS='|' read -r sy2 _ _ <<<"$(ipc networkScroll)"
     [ "${sy2:-0}" -gt 0 ] && ok "$size a wheel notch scrolls the clamped network body ($sh > $svh, contentY $sy2)" || bad "$size the clamped network body did not scroll on a wheel notch ($sh > $svh, contentY $sy2)"
     omarchy-drive shot "$evidence_dir/network-$size-scrolled.png" flea >/dev/null 2>&1
-    set -- $(ipc networkChipCentre SMB); click_win "$1" "$2"; sleep 0.3
+    # Reopened, so the body starts at the top again and the Tab walk alone is what scrolls it.
+    key -k Escape; sleep 0.4; key -k Tab; sleep 0.3; key a; sleep 0.7
+    IFS='|' read -r sy0 _ _ <<<"$(ipc networkScroll)"
+    check "$size a reopened body starts at the top" "${sy0:-none}" "0"
     for i in $(seq 1 14); do key -k Tab; sleep 0.15; [ "$(ipc networkFocus)" = "Password" ] && break; done
     IFS='|' read -r sy3 _ _ <<<"$(ipc networkScroll)"
     check "$size Tab reaches the password field" "$(ipc networkFocus)" "Password"
-    [ "${sy3:-0}" -gt 0 ] && ok "$size and the body scrolled it into view (contentY $sy3)" || bad "$size the password field was focused below the fold (contentY $sy3)"
+    [ "${sy3:-0}" -gt 0 ] && ok "$size and the Tab walk scrolled it into view (contentY $sy3)" || bad "$size the password field was focused below the fold (contentY $sy3)"
   else
     ok "$size the network body fits ($sh <= $svh), nothing to scroll"
   fi
@@ -128,9 +149,10 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   key -k Escape; sleep 0.4
   check "$size keymap sheet closed" "$(ipc keymapSheetOpen)" "false"
 
-  # The convert popup, from the png row's context menu; the png is row 0 so it is on screen at every size.
+  # The convert popup, from the png row's context menu; the png is row 0, scrolled back on screen first.
+  key -k Home; sleep 0.3
   idx=$(rowidx 0-shot.png) || idx=""
-  set -- $(ipc rowCentre "${idx:-0}"); click_win "$1" "$2" right; sleep 0.5
+  set -- $(at rowCentre "${idx:-0}"); click_win "$1" "$2" right; sleep 0.5
   entries=$(ipc contextMenuEntries); target=-1; i=0; IFS='|'; for label in $entries; do [ "$label" = "Convert" ] && { target=$i; break; }; i=$((i+1)); done; unset IFS
   for _ in $(seq 1 14); do [ "$(ipc contextMenuCursor)" = "$target" ] && break; key -k Down; sleep 0.1; done
   # Return only on the Convert row: anything else opens the file in an editor whose window retiles Flea.
@@ -143,7 +165,7 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
 
   # The context menu on the last row on screen must flip to stay inside the window.
   last=$(( $(ipc visibleRows) - 1 )); total=$(ipc total); [ "$last" -ge "$total" ] && last=$((total - 1))
-  set -- $(ipc rowCentre "$last"); click_win "$1" "$2" right; sleep 0.5
+  set -- $(at rowCentre "$last"); click_win "$1" "$2" right; sleep 0.5
   rect_inside "$size context menu on the last row on screen" "$(ipc contextMenuRect)"
   omarchy-drive shot "$evidence_dir/menu-$size.png" flea >/dev/null 2>&1
   key -k Escape; sleep 0.3

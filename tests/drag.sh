@@ -278,8 +278,12 @@ check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
 omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.8
 omarchy-drive key --window flea . >/dev/null 2>&1
 for i in $(seq 1 40); do [ "$(ipc showHidden)" = "true" ] && [ -n "$(rowidx .r0hidden)" ] && break; sleep 0.1; done
-check "the third tab shows the hidden file after the folders" "$(rowidx .r0hidden)" "3"
-# aaa is row 1 on this tab, under .local, so its centre is read here, on the tab the drop lands on.
+# .cache and .local are the window's own, so the dotfile's row is pinned as after every folder, not a number.
+hidden_row=$(rowidx .r0hidden || echo none)
+check "the third tab lists the hidden file" "$([ "$hidden_row" != none ] && echo listed || echo missing)" "listed"
+check "and every folder sorts ahead of it" "$([ "$(rowidx aaa)" -lt "$hidden_row" ] && [ "$(rowidx bbb)" -lt "$hidden_row" ] && echo yes || echo no)" "yes"
+check "so aaa is no longer row 0 on this tab" "$([ "$(rowidx aaa)" -gt 0 ] && echo shifted || echo same)" "shifted"
+# aaa's centre is read here, on the tab the drop lands on, under whatever dotdirs sort ahead of it.
 set -- $(screen_centre aaa); fx=$1; fy=$2
 omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
 check "and the home tab does not" "$(rowidx .r0hidden || echo none)" "none"
