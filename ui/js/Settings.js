@@ -15,6 +15,15 @@ var SECTIONS = [
     { id: "menus", label: "Menus", glyph: "list" }
 ]
 
+// Where a section id sits in SECTIONS, or 0 for an id no section carries.
+function sectionIndex(id) {
+    for (var i = 0; i < SECTIONS.length; i++) {
+        if (SECTIONS[i].id === id)
+            return i
+    }
+    return 0
+}
+
 // The six SettingsMenus.html puts under one master row, and the ids ui/js/Menu.js gives those rows.
 var BASIC = ["cut", "copy", "paste", "duplicate", "rename", "trash"]
 

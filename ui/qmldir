@@ -18,6 +18,7 @@ DialogField 1.0 DialogField.qml
 ContextMenu 1.0 ContextMenu.qml
 KeymapSheet 1.0 KeymapSheet.qml
 SettingsPanel 1.0 SettingsPanel.qml
+SettingsPane 1.0 SettingsPane.qml
 SettingsRail 1.0 SettingsRail.qml
 SettingsRow 1.0 SettingsRow.qml
 SettingsRuler 1.0 SettingsRuler.qml

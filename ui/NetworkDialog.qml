@@ -311,12 +311,14 @@ Item {
                     }
                 }
 
+                // The slot is always there, two caption lines tall, so an error appearing never moves the buttons.
                 Row {
-                    visible: root.statusText.length > 0
                     width: parent.width
+                    height: Theme.rowHeight
                     spacing: Theme.spacing.gap
 
                     Flea.Glyph {
+                        visible: root.statusText.length > 0
                         width: Theme.font.caption
                         height: Theme.font.caption
                         name: "alert"
@@ -330,6 +332,8 @@ Item {
                         font.family: Theme.font.family
                         font.pixelSize: Theme.font.caption
                         wrapMode: Text.Wrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
                         textFormat: Text.PlainText
                     }
                 }

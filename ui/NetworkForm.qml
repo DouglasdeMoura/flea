@@ -32,6 +32,15 @@ Column {
     readonly property bool complete: Protocols.complete({ host: root.host, port: root.port })
 
     spacing: Style.space(12)
+    // Every row's natural height whether or not the protocol shows it: the form keeps this height
+    // through every chip, so the Cancel and Save buttons below it never move under the pointer.
+    readonly property real tallest: {
+        var sum = 0
+        for (var i = 0; i < root.children.length; i++)
+            sum += root.children[i].implicitHeight
+        return sum + root.spacing * (root.children.length - 1)
+    }
+    height: root.tallest
 
     function pick(name) {
         root.protocol = name
@@ -254,6 +263,7 @@ Column {
     Text {
         visible: root.protocol === "NFS"
         width: parent.width
+        height: visible ? implicitHeight : 0
         text: "No credentials: NFS trusts the client host"
         color: Theme.color.muted
         font.family: Theme.font.family
@@ -265,7 +275,8 @@ Column {
         id: tlsRow
         width: parent.width
         visible: root.spec.tls
-        height: visible ? Theme.rowHeight - Theme.spacing.rowPaddingY : 0
+        implicitHeight: Theme.rowHeight - Theme.spacing.rowPaddingY
+        height: visible ? implicitHeight : 0
 
         readonly property bool focused: tlsRow.activeFocus
         signal tabbed(var from, bool back)
