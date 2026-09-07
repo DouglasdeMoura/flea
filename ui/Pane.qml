@@ -283,6 +283,8 @@ FocusScope {
     // How far a cursor step down moves: one row in the list, one row of tiles in the grid.
     // The columns view's own preview, exposed so a test can assert its facts without OCR; null until built.
     readonly property var columnsArea: columnsLoader.item
+    // Where the view sits, for an anchor: a Loader's item is no sibling of anything here, its Loader is.
+    readonly property Item listSlot: root.viewMode === "grid" ? gridLoader : root.viewMode === "columns" ? columnsLoader : list
     readonly property int cursorStride: root.viewMode === "grid" && gridLoader.item ? gridLoader.item.columns : 1
 
     Flea.FilterStrip {
@@ -382,7 +384,7 @@ FocusScope {
     function openCursorMenu() { return Menu.openAtCursor(root, menu, Theme.spacing.rowPaddingX) }
 
     Flea.StateMessage {
-        anchors.fill: root.listArea
+        anchors.fill: root.listSlot
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.rightMargin: Theme.spacing.rowPaddingX
         message: root.stateMessage
