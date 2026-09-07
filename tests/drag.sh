@@ -287,6 +287,8 @@ check "so aaa is no longer row 0 on this tab" "$([ "$(rowidx aaa)" -gt 0 ] && ec
 set -- $(screen_centre aaa); fx=$1; fy=$2
 omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
 check "and the home tab does not" "$(rowidx .r0hidden || echo none)" "none"
+# A selection the tab restore brought back would ride along with the lift, so it is cleared first.
+omarchy-drive key --window flea -k Escape >/dev/null 2>&1; sleep 0.3
 set -- $(screen_centre r1b.txt); sx=$1; sy=$2
 set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
 warp "$sx" "$sy"; sleep 0.4

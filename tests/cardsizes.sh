@@ -23,8 +23,11 @@ mkdir -p "$evidence_dir"
 SB=$FIXTURE_ROOT/flea-cardsizes-$$
 pass=0
 fail=0
+# A failure raised inside a command substitution runs in a subshell, so it is counted through a file
+# the summary reads, never through the variable that subshell cannot reach.
+fails_file=$(mktemp)
 ok()  { printf 'ok   %s\n' "$*"; pass=$((pass+1)); }
-bad() { printf 'FAIL %s\n' "$*"; fail=$((fail+1)); }
+bad() { printf 'FAIL %s\n' "$*"; fail=$((fail+1)); echo "$*" >> "$fails_file"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got [$2], expected [$3])"; fi; }
 
 cleanup() {
@@ -32,6 +35,7 @@ cleanup() {
   [ -n "${FLEA_PID:-}" ] && kill "$FLEA_PID" 2>/dev/null
   sleep 0.5
   sandbox_remove "$SB" 2>/dev/null
+  rm -f "$fails_file"
 }
 trap cleanup EXIT
 
@@ -59,16 +63,23 @@ dispatch() { hyprctl dispatch "$1" 2>&1 | grep -v "^ok" | sed 's/^/    dispatch:
 # Sample output: 2560 1440 30 (width height reserved-top); the bar reserves the top strip.
 monitor() { hyprctl -j monitors | python3 -c 'import json,sys; m=json.load(sys.stdin)[0]; print(m["width"], m["height"], m["reserved"][1])'; }
 # A float resized in place keeps the tiled origin and runs off the bottom of the screen, so it is
-# moved to the centre of the free area and its geometry is read back before anything is measured.
+# moved to the centre of the free area, an absolute move, and its geometry is read back and asserted.
 place() {
-  local w=$1 h=$2; set -- $(monitor); local mw=$1 mh=$2 top=$3
-  set -- $(geom); local dx=$(( (mw - w) / 2 - $1 )) dy=$(( top + (mh - top - h) / 2 - $2 ))
-  dispatch "hl.dsp.window.move({ x = $dx, y = $dy, window = \"address:$addr\" })"
-  sleep 0.4; set -- $(geom)
+  local w=$1 h=$2 mon
+  mon=$(monitor); [ -n "$mon" ] || { bad "hyprctl answered no monitor"; return; }
+  set -- $mon; local mw=$1 mh=$2 top=$3
+  dispatch "hl.dsp.window.move({ x = $(( (mw - w) / 2 )), y = $(( top + (mh - top - h) / 2 )), exact = true, window = \"address:$addr\" })"
+  sleep 0.4
+  local g; g=$(geom); [ -n "$g" ] || { bad "hyprctl answered no window geometry"; return; }
+  set -- $g
   check "the window is ${w}x${h} at $1,$2, on screen" "$3x$4 $([ "$1" -ge 0 ] && [ "$2" -ge "$top" ] && [ $(( $1 + $3 )) -le "$mw" ] && [ $(( $2 + $4 )) -le "$mh" ] && echo inside || echo off)" "${w}x${h} inside"
 }
-# An IPC reader that answers nothing is a failed check, never an empty argument under set -u.
-at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered nothing"; v="0 0 0 0"; }; echo "$v"; }
+# An IPC reader that answers nothing is a counted failure (through the file, this runs in a
+# subshell) and never an empty argument under set -u; the sentinel is distinct per call so two dead
+# reads can never compare equal.
+at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered nothing"; v="0 0 0 0 dead-$RANDOM"; }; echo "$v"; }
+# Opens the network dialog from wherever the focus is: the rail's a key, reached by Tab only from the list.
+open_network() { [ "$(ipc focusView)" = rail ] || { key -k Tab; sleep 0.3; }; key a; sleep 0.7; }
 rowidx() { local i total; total=$(ipc total); for i in $(seq 0 $((total - 1))); do case "$(ipc rowAt "$i")" in "$1|"*) echo "$i"; return 0;; esac; done; return 1; }
 
 # ---------------------------------------------------------------- the app
@@ -106,7 +117,7 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
 
   # Network: the chips keep one centre through every protocol, the card is inside, and a short window
   # scrolls the body by wheel and by a Tab to the password field.
-  key -k Tab; sleep 0.3; key a; sleep 0.7
+  open_network
   check "$size network dialog opens" "$(ipc dialogOpen)" "true"
   base=$(at networkChipCentre SMB)
   moved=""
@@ -127,7 +138,8 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
     [ "${sy2:-0}" -gt 0 ] && ok "$size a wheel notch scrolls the clamped network body ($sh > $svh, contentY $sy2)" || bad "$size the clamped network body did not scroll on a wheel notch ($sh > $svh, contentY $sy2)"
     omarchy-drive shot "$evidence_dir/network-$size-scrolled.png" flea >/dev/null 2>&1
     # Reopened, so the body starts at the top again and the Tab walk alone is what scrolls it.
-    key -k Escape; sleep 0.4; key -k Tab; sleep 0.3; key a; sleep 0.7
+    key -k Escape; sleep 0.4; open_network
+    check "$size the dialog reopened" "$(ipc dialogOpen)" "true"
     IFS='|' read -r sy0 _ _ <<<"$(ipc networkScroll)"
     check "$size a reopened body starts at the top" "${sy0:-none}" "0"
     for i in $(seq 1 14); do key -k Tab; sleep 0.15; [ "$(ipc networkFocus)" = "Password" ] && break; done
@@ -174,5 +186,7 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   [ "$size" = fullscreen ] && dispatch "hl.dsp.window.fullscreen({ window = \"address:$addr\" })"
 done
 echo
+# Failures raised inside command substitutions were counted in the file, not in the variable.
+lost=$(grep -c . "$fails_file" 2>/dev/null || echo 0); fail=$(( fail > lost ? fail : lost ))
 echo "$((pass + fail)) checks, $fail failed"
 [ "$fail" = 0 ] || exit 1
