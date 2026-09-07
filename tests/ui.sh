@@ -6083,6 +6083,15 @@ settings_keys() {
 cache_snapshot
 trap cleanup EXIT
 
+# rows_run_under "<x y w h>" <label>: the last visible row's centre lies below the card, so every control on it has a live row beneath.
+rows_run_under() {
+    local cx cy cw ch rx ry
+    read -r cx cy cw ch <<< "$1"
+    read -r rx ry <<< "$(ipc rowCentre $(( $(ipc visibleRows) - 1 )))"
+    [[ -n "$ch" && -n "$ry" && "$ry" -gt $(( cy + ch )) ]] \
+        || fail "clickthrough: the list does not run under $2 (last visible row centre y $ry, card bottom $(( ${cy:-0} + ${ch:-0} )))"
+}
+
 # The cursor parks on the last row, so a press that runs on from an overlay control to the row beneath moves it.
 case_clickthrough() {
     local dir="$fixture_root/clickthrough"
@@ -6101,6 +6110,7 @@ case_clickthrough() {
     key a >/dev/null
     settle
     [[ "$(ipc dialogOpen)" == "true" ]] || fail "clickthrough: the rail's a key did not open the network dialog"
+    rows_run_under "$(ipc networkCardRect)" "the network card"
     local p
     for p in SFTP FTPS WebDAV NFS SMB; do
         click_chip "$p"
@@ -6118,6 +6128,7 @@ case_clickthrough() {
     key , >/dev/null
     settle
     [[ "$(ipc settingsOpen)" == "true" ]] || fail "clickthrough: the comma key did not open settings"
+    rows_run_under "$(ipc settingsCardRect)" "the settings card"
     local section centre cx cy wx wy
     for section in keys menus display; do
         centre=$(ipc settingsRailRowCentre "$section")
