@@ -1301,7 +1301,9 @@ case_click() {
     printf 'alpha\n' > "$dir/alpha.txt"
     printf 'beta\n' > "$dir/beta.txt"
     printf 'gamma\n' > "$dir/gamma.txt"
-    local opened="$dir/opened.log"
+    # Outside the directory under test on purpose: the stub appends to it on every open, and a write
+    # inside the listed folder is an outside change that re-reads it under the clicks below.
+    local opened="$fixture_root/click-opened.log"
     : > "$opened"
     # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
     # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
@@ -1317,8 +1319,8 @@ case_click() {
     export PATH="$dir/bin:$PATH"
     launch "$dir"
     export PATH="$saved_path"
-    # Measured row order: bin, subdir, alpha.txt, beta.txt, gamma.txt, opened.log.
-    wait_listing 6
+    # Measured row order: bin, subdir, alpha.txt, beta.txt, gamma.txt.
+    wait_listing 5
     local alpha=2
 
     # The list view. One tap selects the row and opens nothing at all.
@@ -1361,7 +1363,7 @@ case_click() {
 
     # A plain click replaces the selection, so the next shift+click extends from the row the cursor
     # is visibly on and a write operation cannot reach rows the user thinks they dropped.
-    click_row 5 left
+    click_row 4 left
     settle
     [[ "$(ipc selectionCount)" == "0" ]] \
         || fail "click: a plain click left $(ipc selectionCount) rows selected, so the selection is stale"
@@ -1382,7 +1384,7 @@ case_click() {
     wait_path "$dir/subdir"
     key -k BackSpace >/dev/null
     wait_path "$dir"
-    wait_listing 6
+    wait_listing 5
 
     # The grid, a different delegate in a different file carrying the same contract.
     click_chrome grid
@@ -1901,6 +1903,113 @@ case_selection() {
     [[ "$(ipc selectionCount)" == "0" ]] || fail "selection: a new listing kept a stale selection"
 
     printf 'SELECTION toggle=ok extend=ok all=ok clear=ok stale=ok\n'
+    kill_flea
+}
+
+# Issue 68, driven exactly as it was reported: the reporter's own four changes made from outside
+# the window, with nothing clicked and no folder left. Catches deleting the watch from
+# src/backend/watch.rs, the changed branch from ui/Backend.qml, or the re-read from ui/PaneWire.qml.
+case_watch() {
+    local dir="$fixture_root/watch"
+    sandbox_scratch "$dir"
+    printf 'a\n' > "$dir/alpha.txt"
+    printf 'b\n' > "$dir/beta.txt"
+    printf 'p\n' > "$dir/preview-me.txt"
+    launch "$dir"
+    wait_listing 3
+    [[ "$(ipc rowAt 0)" == alpha.txt\|* ]] || fail "watch: row 0 is $(ipc rowAt 0), not alpha.txt"
+
+    # The reporter's four changes, from another process, while the window sits on the folder.
+    printf 'new\n' > "$dir/NEWFILE-appeared.txt"
+    mv "$dir/alpha.txt" "$dir/alpha-RENAMED.txt"
+    rm "$dir/beta.txt"
+    mkdir "$dir/brand-new-folder"
+    # The 400 ms settle plus the re-read; the reporter waited several seconds and saw nothing move.
+    omarchy-drive wait ipc -p "$flea_ui" flea total 4 --timeout 15 >/dev/null \
+        || fail "watch: the listing stayed at $(ipc total) rows after four outside changes"
+    settle
+    printf 'WATCH total=%s row0=%q row1=%q row2=%q\n' \
+        "$(ipc total)" "$(ipc rowAt 0)" "$(ipc rowAt 1)" "$(ipc rowAt 2)"
+    shot watch-after-outside-changes
+    # Directories first, then name ascending and case-insensitive: brand-new-folder,
+    # alpha-RENAMED.txt, NEWFILE-appeared.txt, preview-me.txt.
+    [[ "$(ipc rowAt 0)" == brand-new-folder\|dir\|* ]] \
+        || fail "watch: the new directory is not row 0, got $(ipc rowAt 0)"
+    [[ "$(ipc rowAt 1)" == alpha-RENAMED.txt\|* ]] \
+        || fail "watch: the renamed file is not row 1, got $(ipc rowAt 1)"
+    [[ "$(ipc rowAt 2)" == NEWFILE-appeared.txt\|* ]] \
+        || fail "watch: the created file is not row 2, got $(ipc rowAt 2)"
+    [[ "$(ipc rowAt 3)" == preview-me.txt\|* ]] \
+        || fail "watch: the untouched file is not row 3, got $(ipc rowAt 3)"
+
+    # The cursor is put back on the file it was on, not on the row that index now names: without the
+    # anchor the create above it leaves the cursor on brand-new-folder.
+    goto_row 3
+    [[ "$(ipc rowAt "$(ipc cursor)")" == preview-me.txt\|* ]] \
+        || fail "watch: the cursor did not start on preview-me.txt"
+    printf 'z\n' > "$dir/AAA-above-the-cursor.txt"
+    omarchy-drive wait ipc -p "$flea_ui" flea total 5 --timeout 15 >/dev/null \
+        || fail "watch: the second outside create left the listing at $(ipc total) rows"
+    settle
+    printf 'WATCH cursor=%s row=%q\n' "$(ipc cursor)" "$(ipc rowAt "$(ipc cursor)")"
+    [[ "$(ipc rowAt "$(ipc cursor)")" == preview-me.txt\|* ]] \
+        || fail "watch: a create above the cursor moved it to $(ipc rowAt "$(ipc cursor)")"
+
+    # A selection names rows by index, so the re-read waits for it rather than re-pointing it.
+    key v >/dev/null
+    settle
+    [[ "$(ipc selectionCount)" == "1" ]] || fail "watch: v did not select the cursor row"
+    printf 'held\n' > "$dir/BBB-while-selected.txt"
+    sleep 2
+    [[ "$(ipc total)" == "5" ]] \
+        || fail "watch: the listing re-read to $(ipc total) rows while a selection stood"
+    [[ "$(ipc selectionCount)" == "1" ]] || fail "watch: the held selection was cleared anyway"
+    # Clearing the selection is what pays the debt the notification left standing.
+    key -k Escape >/dev/null
+    omarchy-drive wait ipc -p "$flea_ui" flea total 6 --timeout 15 >/dev/null \
+        || fail "watch: clearing the selection did not run the owed re-read, total is $(ipc total)"
+    printf 'WATCH deferred=ok paid=ok total=%s\n' "$(ipc total)"
+
+    # A directory under continuous writing still has to settle. The timer absorbs notifications rather
+    # than being restarted by them, so the sample that matters is taken WHILE the writing is still
+    # going: a restart() is pushed forward by every notification and re-reads nothing until the writer
+    # stops, which a sample taken afterwards cannot tell apart from a timer that fired all along.
+    local before during writer n
+    before=$(ipc total)
+    ( for n in $(seq 1 40); do
+          printf 'x\n' > "$dir/stream-$n.txt"
+          sleep 0.1
+      done ) &
+    writer=$!
+    sleep 1.2
+    during=$(ipc total)
+    wait "$writer"
+    printf 'WATCH stream before=%s during=%s after=%s\n' "$before" "$during" "$(ipc total)"
+    (( during > before )) \
+        || fail "watch: nothing re-read while the directory was still being written, total stayed $before"
+
+    # A debt owed by this directory must not be paid by re-listing the next one. The selection is what
+    # holds the debt, and leaving clears that selection, so without the guard the owed re-read fires
+    # against whatever the pane has just opened.
+    key v >/dev/null
+    settle
+    printf 'owed\n' > "$dir/CCC-owed-on-leaving.txt"
+    sleep 0.5
+    # Counted from before the navigation, not from after it: the owed re-read lands about 400 ms after
+    # the selection clears, which is inside wait_path's own polling, so a sample taken on arrival has
+    # already counted it and could never tell the two apart.
+    local before_nav after_nav
+    before_nav=$(ipc listRequests)
+    key -k Backspace >/dev/null
+    wait_path "$fixture_root"
+    sleep 1.5
+    after_nav=$(ipc listRequests)
+    printf 'WATCH carried lists %s to %s, one navigation and nothing else\n' "$before_nav" "$after_nav"
+    (( after_nav == before_nav + 1 )) \
+        || fail "watch: leaving cost $(( after_nav - before_nav )) listings, so a debt owed for the directory just left was paid by the one the pane moved to"
+    key -k Escape >/dev/null
+    settle
+    assert_window
     kill_flea
 }
 
@@ -5857,21 +5966,26 @@ settings_menu_lacks() {
         || fail "settings: $label is still in the menu, got $(ipc contextMenuEntries)"
 }
 
-# The Mac/Windows toggle, proved by the keys themselves: a chord one preset binds and the other
+# The Default/Windows toggle, proved by the keys themselves: a chord one preset binds and the other
 # does not, driven through the real window in both states.
 settings_keys() {
     key , >/dev/null
     settle
     settings_section keys
-    [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Mac"* ]] \
-        || fail "settings: the preset row does not start on Mac, got $(ipc settingsRows)"
-    [[ "$(ipc settingsRows)" == *"fact|connect to server|ctrl-k"* ]] \
-        || fail "settings: the Mac preset lists none of its own chords"
+    # The shipped preset is "default", which ui/js/Settings.js labels Default and PRESET_KEYS gives
+    # ctrl-1 to ctrl-3; a window that starts anywhere else is not the one this checks the toggle on.
+    [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Default"* ]] \
+        || fail "settings: the preset row does not start on Default, got $(ipc settingsRows)"
+    [[ "$(ipc settingsRows)" == *"fact|list view|ctrl-1"* ]] \
+        || fail "settings: the Default preset lists none of its own chords"
     shot settings-keys
+    # PRESETS is default, vim, mac, windows, so Windows is three steps along and not one.
+    key l >/dev/null
+    key l >/dev/null
     key l >/dev/null
     settle
     [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Windows"* ]] \
-        || fail "settings: l did not step the preset to Windows"
+        || fail "settings: three steps of l did not reach Windows"
     [[ "$(ipc settingsRows)" == *"fact|hidden files|ctrl-h"* ]] \
         || fail "settings: the Windows preset lists none of its own chords"
     key -k Escape >/dev/null
@@ -5904,7 +6018,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu background hidden selection select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
 
 : > "$run_log"
 : > "$flea_log"
