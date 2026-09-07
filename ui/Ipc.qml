@@ -107,9 +107,16 @@ QtObject {
         function settingsRows(): string { return root.settingsPanel ? root.settingsPanel.rowsText() : "" }
         // The panel's own title, a spot on the card with no control under it: a click there must leave the panel open.
         function settingsTitleCentre(): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.titleItem) : "" }
+        // Each card's rectangle, so the window-size battery asserts every overlay stays on screen.
+        function settingsCardRect(): string { return root.settingsPanel ? root.fleaWindow.rectOf(root.settingsPanel.cardItem) : "" }
+        function networkCardRect(): string { return root.networkDialog ? root.fleaWindow.rectOf(root.networkDialog.cardItem) : "" }
+        function networkScroll(): string { return root.networkDialog ? root.networkDialog.bodyScroll() : "" }
+        function keymapCardRect(): string { return root.keymapSheet ? root.fleaWindow.rectOf(root.keymapSheet.cardItem) : "" }
+        function convertCardRect(): string { return root.convertDialog ? root.fleaWindow.rectOf(root.convertDialog.cardItem) : "" }
         // A menu row's own centre, so a driven click lands on the row a test named rather than on a
         // pixel derived from a row count the Menus settings section can change under it.
         function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
+        function contextMenuRect(): string { return root.fleaWindow.rectOf(root.pane.contextMenu()) }
         // Where a driven right click reaches the background menu: the centre of the surface that
         // answers for the directory being shown, which in the columns view is the pane's own column
         // and not the peek beside it. An empty directory has no row to aim from, and it is the case
@@ -202,10 +209,7 @@ QtObject {
         function emptyShown(): bool { return root.pane.listingState === "empty" }
         // "x y width height" of the empty mark in window pixels, for a painted-pixel count: the state
         // flag above cannot see a mark drawn under its own parent's paint.
-        function emptyMarkRect(): string {
-            var rect = root.fleaWindow.itemRect(root.emptyState)
-            return Math.round(rect.x) + " " + Math.round(rect.y) + " " + Math.round(rect.width) + " " + Math.round(rect.height)
-        }
+        function emptyMarkRect(): string { return root.fleaWindow.rectOf(root.emptyState) }
         function rowAt(i: int): string {
             var item = root.pane.itemFor(i)
             return item ? item.describe() : "loading"

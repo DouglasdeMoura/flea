@@ -64,6 +64,13 @@ ShellRoot {
             var rect = fleaWindow.itemRect(item)
             return Math.round(rect.x + rect.width / 2) + " " + Math.round(rect.y + rect.height / 2)
         }
+        // "x y width height" in window pixels, for a test that asserts a card stays inside the window.
+        function rectOf(item) {
+            if (!item)
+                return ""
+            var rect = fleaWindow.itemRect(item)
+            return Math.round(rect.x) + " " + Math.round(rect.y) + " " + Math.round(rect.width) + " " + Math.round(rect.height)
+        }
         // centreOf's sibling, "x width centre": the edges round because a click needs a whole pixel, the centre keeps three decimals because the misalignment it reads is half of one.
         function boxOf(item) {
             if (!item)

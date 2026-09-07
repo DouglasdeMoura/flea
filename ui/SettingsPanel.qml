@@ -33,6 +33,7 @@ Item {
     readonly property real groundOpacity: 0.5
     // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
     readonly property alias titleItem: title
+    readonly property Item cardItem: card
 
     // Everything ui/js/Settings.js rows() reads, built once here for the keyboard's rows and the pane's.
     readonly property var settingsState: ({

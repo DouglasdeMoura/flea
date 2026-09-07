@@ -29,6 +29,8 @@ Item {
     })
     // The canvas draws this popup at 300 design pixels wide.
     readonly property int dialogWidth: 300
+    readonly property int clampMargin: 8
+    readonly property Item cardItem: card
 
     anchors.fill: parent
     visible: root.opened
@@ -82,7 +84,8 @@ Item {
         id: card
         anchors.centerIn: parent
         width: Theme.space(root.dialogWidth)
-        height: body.implicitHeight + 2 * Theme.spacing.rowPaddingX
+        // Clamped to the window; the body scrolls whatever the clamp cut, see ui/CardScroll.qml.
+        height: Math.min(body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * root.clampMargin)
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: Theme.color.muted
@@ -95,10 +98,14 @@ Item {
             onClicked: {}
         }
 
-        Column {
+        Flea.CardScroll {
             id: body
+            anchors.fill: parent
+            anchors.topMargin: Theme.spacing.rowPaddingX
+            anchors.bottomMargin: Theme.spacing.rowPaddingX
+
+        Column {
             width: parent.width
-            y: Theme.spacing.rowPaddingX
             spacing: 0
 
             Text {
@@ -216,6 +223,7 @@ Item {
                     onActivated: root.commit()
                 }
             }
+        }
         }
     }
 
