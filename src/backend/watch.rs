@@ -217,7 +217,99 @@ mod tests {
         assert!(!w.is_current(1));
     }
 
-    // No descriptor here, so these pin the bookkeeping alone; tests/protocol.sh pins the syscalls.
+    // O_NONBLOCK, so a watch this test killed fails it by answering nothing rather than by hanging.
+    const IN_NONBLOCK: c_int = 0x800;
+
+    // Made with create_dir, which fails rather than adopting a directory that was already there, so the
+    // removal below can only ever reach a path that did not exist a moment earlier; see AGENTS.md.
+    struct Sandbox(std::path::PathBuf);
+
+    impl Sandbox {
+        fn new(name: &str) -> Sandbox {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir()
+                .join(format!("flea-watch-{}-{}-{}", std::process::id(), name, unique));
+            std::fs::create_dir(&dir).expect("a directory no other run already held");
+            Sandbox(dir)
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            // Checked in the test and not in the reviewer's head: absolute, under the temp root, named.
+            let ours = self.0.is_absolute()
+                && self.0.starts_with(std::env::temp_dir())
+                && self.0.file_name().map_or(false, |n| n.to_string_lossy().starts_with("flea-watch-"));
+            if !ours {
+                eprintln!("flea test: refusing to remove {}", self.0.display());
+                return;
+            }
+            // Not a panic: this runs while a failing test is already unwinding, and two would abort.
+            if let Err(e) = std::fs::remove_dir_all(&self.0) {
+                eprintln!("flea test: {} was left behind: {}", self.0.display(), e);
+            }
+        }
+    }
+
+    // Sample input: wd 1, mask 0x00000100, cookie 0, len 16, then "NEWFILE.txt\0\0\0\0\0".
+    fn carries_a_create(buf: &[u8], wd: c_int) -> bool {
+        let mut at = 0;
+        while at + EVENT_HEADER <= buf.len() {
+            let this = i32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
+            let mask = u32::from_ne_bytes([buf[at + 4], buf[at + 5], buf[at + 6], buf[at + 7]]);
+            let len = u32::from_ne_bytes([buf[at + 12], buf[at + 13], buf[at + 14], buf[at + 15]]) as usize;
+            // The mask and not the descriptor, because a removed watch's own IN_IGNORED carries it too.
+            if this == wd && (mask & IN_CREATE) != 0 {
+                return true;
+            }
+            at += EVENT_HEADER + len;
+        }
+        false
+    }
+
+    // Two seconds all told, which is the kernel queueing being slow rather than the watch being gone.
+    const TRIES: usize = 200;
+    const BETWEEN_TRIES: Duration = Duration::from_millis(10);
+
+    // The kernel queues on its own schedule, so this reads until the create lands or the tries run out.
+    fn saw_a_create(fd: c_int, wd: c_int) -> bool {
+        let mut buf = [0u8; BUF];
+        for _ in 0..TRIES {
+            let n = unsafe { read(fd, buf.as_mut_ptr() as *mut c_void, BUF) };
+            if n > 0 && carries_a_create(&buf[..n as usize], wd) {
+                return true;
+            }
+            thread::sleep(BETWEEN_TRIES);
+        }
+        false
+    }
+
+    // inotify_add_watch answers the descriptor the folder already holds, so an abandoned re-list of the
+    // directory on screen must not remove it. This one carries a real descriptor because the two below
+    // run at fd -1, where drop_one makes no syscall and the guard therefore has nothing to show.
+    #[test]
+    fn an_abandoned_re_list_of_the_same_folder_keeps_its_watch() {
+        let sandbox = Sandbox::new("abandon");
+        let fd = unsafe { inotify_init1(IN_CLOEXEC | IN_NONBLOCK) };
+        assert!(fd >= 0, "this box has no inotify to test with");
+        let mut w = Watch { fd, wd: -1, incoming: -1 };
+        w.begin(&sandbox.0);
+        w.commit();
+        let live = w.wd;
+        assert!(live >= 0, "the sandbox could not be watched");
+
+        w.begin(&sandbox.0);
+        assert_eq!(w.incoming, live, "a re-list of one inode aliases onto the descriptor it has");
+        w.abandon();
+
+        std::fs::write(sandbox.0.join("after-an-abandoned-relist.txt"), b"x").expect("a file in the sandbox");
+        assert!(saw_a_create(fd, live), "the abandoned re-list took the open folder's watch with it");
+    }
+
+    // No descriptor in these two, so they pin the bookkeeping alone; the one above pins the syscall.
     #[test]
     fn an_abandoned_scan_leaves_the_current_watch_alone() {
         let mut w = Watch { fd: -1, wd: 7, incoming: -1 };
