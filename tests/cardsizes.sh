@@ -23,9 +23,7 @@ mkdir -p "$evidence_dir"
 SB=$FIXTURE_ROOT/flea-cardsizes-$$
 pass=0
 fail=0
-# A failure raised inside a command substitution runs in a subshell: its line goes to the script's
-# own stdout through fd 3, never into the captured value, and it is counted as one marker line in a
-# file the summary reads, never through the variable that subshell cannot reach.
+# A bad inside a $( ) prints through fd 3 and counts through the file: its subshell reaches neither.
 exec 3>&1
 fails_file=$(mktemp)
 ok()  { printf 'ok   %s\n' "$*"; pass=$((pass+1)); }
@@ -188,8 +186,7 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   [ "$size" = fullscreen ] && dispatch "hl.dsp.window.fullscreen({ window = \"address:$addr\" })"
 done
 echo
-# Failures raised inside command substitutions were counted in the file, not in the variable.
-# grep -c prints 0 and exits 1 on an empty file, so its status is dropped rather than turned into text.
+# Subshell failures were counted in the file; grep -c exits 1 on an empty one, so its status is dropped.
 lost=$(grep -c . "$fails_file" || true)
 [ "${lost:-0}" -gt "$fail" ] && fail=$lost
 echo "$((pass + fail)) checks, $fail failed"
