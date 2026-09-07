@@ -176,34 +176,62 @@ ShellRoot {
 
             Flea.Preview { id: preview; pane: pane }
 
-            Flea.ConvertDialog {
+            // Every overlay below is built by its first open and kept, see AGENTS.md rule 6: a launch
+            // that never opens one pays neither its compile nor its objects. Each Loader carries the
+            // one or two members its callers read, and ui/Ipc.qml reads the built item or null.
+            Loader {
                 id: convertDialog
                 anchors.fill: parent
-                onAccepted: function (format, strip) { Ops.convert(pane, format, strip) }
+                active: false
+                source: "ConvertDialog.qml"
+                readonly property bool opened: item !== null && item.opened
+                function open(name, holder) { active = true; item.open(name, holder) }
+            }
+            Connections {
+                target: convertDialog.item
+                function onAccepted(format, strip) { Ops.convert(pane, format, strip) }
             }
 
             // The keymap sheet ? opens, over the whole window as the convert popup is.
-            Flea.KeymapSheet {
+            Loader {
                 id: keymapSheet
                 anchors.fill: parent
+                active: false
+                source: "KeymapSheet.qml"
+                readonly property bool opened: item !== null && item.opened
+                function open(holder) { active = true; item.open(holder) }
             }
 
             // The settings panel, reached by the comma key from either view, by the toolbar's sliders
             // button, and by the third door the Settings board draws: the background menu's own
             // Settings row, which ui/js/Menu.js backgroundEntries builds and ui/Pane.qml act routes.
-            Flea.SettingsPanel {
+            Loader {
                 id: settingsPanel
                 anchors.fill: parent
+                active: false
+                source: "SettingsPanel.qml"
+                readonly property bool opened: item !== null && item.opened
+                function open(holder) { active = true; item.open(holder) }
             }
 
-            Flea.NetworkDialog {
+            Loader {
                 id: networkDialog
-                // FocusScope remembers its own last-focused child, list or rail, and restores it.
-                onClosed: pane.forceActiveFocus()
-                onSaved: pane.sidebar.reloadBookmarks()
-                onMountRequested: function (uri, label, password) {
-                    pane.sidebar.saveNetwork(uri, label, password)
+                anchors.fill: parent
+                active: false
+                source: "NetworkDialog.qml"
+                readonly property bool opened: item !== null && item.opened
+                function open() { active = true; item.open() }
+                function openLocation(uri, label, password, reason, failedConnect) {
+                    active = true
+                    item.openLocation(uri, label, password, reason, failedConnect)
                 }
+            }
+            Connections {
+                target: networkDialog.item
+                // FocusScope remembers its own last-focused child, list or rail, and restores it.
+                function onClosed() { pane.forceActiveFocus() }
+                function onSaved() { pane.sidebar.reloadBookmarks() }
+                function onMountRequested(uri, label, password) { pane.sidebar.saveNetwork(uri, label, password) }
             }
 
             Connections {
@@ -221,9 +249,9 @@ ShellRoot {
             // listArea is measured inside pane, which starts below the chrome bar, so pane's own y is added; pane.x is zero.
             Flea.EmptyState {
                 id: emptyState
-                x: pane.listArea.x + (pane.viewMode === "columns" ? pane.columnsArea.columnWidth : 0)
+                x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
                 y: pane.y + pane.listArea.y
-                width: pane.viewMode === "columns" ? pane.columnsArea.columnWidth : pane.listArea.width
+                width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listArea.width
                 height: pane.listArea.height
                 visible: pane.listingState === "empty"
                 // The design's no-match answer: the search mark over the query it could not find.
@@ -246,14 +274,22 @@ ShellRoot {
             }
 
             // A bare Network entry's own shares, same listArea placement as EmptyState above.
-            Flea.ShareBrowser {
+            // An Item fronts this Loader because its callers read active, which is a Loader's own load switch.
+            Item {
                 id: shareBrowser
                 x: pane.listArea.x
                 y: pane.y + pane.listArea.y
                 width: pane.listArea.width
                 height: pane.listArea.height
-                onClosed: pane.forceActiveFocus()
-                onActivated: function (uri, label) { pane.sidebar.mountShare(uri, label) }
+                readonly property bool active: shareLoader.item !== null && shareLoader.item.active
+                function open(uri, label, names) { shareLoader.active = true; shareLoader.item.open(uri, label, names) }
+                function close() { if (shareLoader.item) shareLoader.item.close() }
+                Loader { id: shareLoader; anchors.fill: parent; active: false; source: "ShareBrowser.qml" }
+            }
+            Connections {
+                target: shareLoader.item
+                function onClosed() { pane.forceActiveFocus() }
+                function onActivated(uri, label) { pane.sidebar.mountShare(uri, label) }
             }
 
             // Issue 20: the mouse's own back button, taken by the window because no row is being
@@ -289,10 +325,10 @@ ShellRoot {
         backend: backend
         chrome: chrome
         tabBar: tabBar
-        convertDialog: convertDialog
-        keymapSheet: keymapSheet
-        settingsPanel: settingsPanel
-        networkDialog: networkDialog
-        shareBrowser: shareBrowser
+        convertDialog: convertDialog.item
+        keymapSheet: keymapSheet.item
+        settingsPanel: settingsPanel.item
+        networkDialog: networkDialog.item
+        shareBrowser: shareLoader.item
     }
 }

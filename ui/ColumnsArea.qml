@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Facts.js" as Facts
+import "js/Focus.js" as Focus
 import "js/Nav.js" as Nav
 import "js/Thumbs.js" as Thumbs
 import "js/Tap.js" as Tap
@@ -14,6 +15,8 @@ Item {
 
     property var pane: null
     property var menu: null
+    // Whichever view is up owns the keyboard, and Focus.handleKey is the one route all three take.
+    Keys.onPressed: function (event) { event.accepted = Focus.handleKey(event, root.pane, root.pane.sidebar) }
 
     // path -> the rows a peek answered for it. Cleared whenever the pane moves, because a stale
     // column is worse than an empty one.

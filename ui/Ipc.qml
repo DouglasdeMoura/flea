@@ -18,6 +18,9 @@ QtObject {
     property var settingsPanel: null
     property var networkDialog: null
     property var shareBrowser: null
+    // Overlays and the columns view are built by their first open, see ui/shell.qml, so until then
+    // each reader below answers the empty value its type has: "", false or -1, never a throw.
+    readonly property var columns: root.pane ? root.pane.columnsArea : null
 
     // The wrapper holds the references because an IpcHandler marshals every property it owns.
     property IpcHandler seam: IpcHandler {
@@ -94,13 +97,13 @@ QtObject {
             return root.pane.contextMenu().submenuEntries.map(function (e) { return e.label }).join("|")
         }
         function contextMenuCursor(): int { return root.pane.menuCursor }
-        function settingsOpen(): bool { return root.settingsPanel.opened }
-        function settingsSection(): string { return root.settingsPanel.section }
-        function settingsSide(): string { return root.settingsPanel.side }
-        function settingsCursor(): int { return root.settingsPanel.cursor }
+        function settingsOpen(): bool { return root.settingsPanel ? root.settingsPanel.opened : false }
+        function settingsSection(): string { return root.settingsPanel ? root.settingsPanel.section : "" }
+        function settingsSide(): string { return root.settingsPanel ? root.settingsPanel.side : "" }
+        function settingsCursor(): int { return root.settingsPanel ? root.settingsPanel.cursor : -1 }
         // One row per line, kind|label|value, so a test reads what the panel draws without OCR and
         // the stored value behind each control is assertable from the same string.
-        function settingsRows(): string { return root.settingsPanel.rowsText() }
+        function settingsRows(): string { return root.settingsPanel ? root.settingsPanel.rowsText() : "" }
         // A menu row's own centre, so a driven click lands on the row a test named rather than on a
         // pixel derived from a row count the Menus settings section can change under it.
         function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
@@ -224,30 +227,30 @@ QtObject {
         function archiveFormats(): string { return root.backend.archiveFormats.join("|") }
         function canConvert(): bool { return root.backend.canConvert }
         // The one popup in the design, so a test can assert it opened and what it would write.
-        function convertOpen(): bool { return root.convertDialog.opened }
-        function keymapSheetOpen(): bool { return root.keymapSheet.opened }
+        function convertOpen(): bool { return root.convertDialog ? root.convertDialog.opened : false }
+        function keymapSheetOpen(): bool { return root.keymapSheet ? root.keymapSheet.opened : false }
         // One row per line, "<cap> <wording>", so a test asserts the sheet without OCR.
-        function keymapSheetRows(): string { return root.keymapSheet.rows() }
-        function convertFormat(): string { return root.convertDialog.format }
-        function convertStrip(): bool { return root.convertDialog.strip }
+        function keymapSheetRows(): string { return root.keymapSheet ? root.keymapSheet.rows() : "" }
+        function convertFormat(): string { return root.convertDialog ? root.convertDialog.format : "" }
+        function convertStrip(): bool { return root.convertDialog ? root.convertDialog.strip : false }
         // The preview column's own table and state, so a test asserts the canvas's rows without OCR.
-        function previewFacts(): string { return root.pane.columnsArea.factsLine() }
-        function previewColumnState(): string { return root.pane.columnsArea.previewStateName() }
+        function previewFacts(): string { return root.columns ? root.columns.factsLine() : "" }
+        function previewColumnState(): string { return root.columns ? root.columns.previewStateName() : "" }
         // The preview column's transport, so a test can prove it plays rather than eyeball a glyph.
-        function columnMediaPlaying(): bool { return root.pane.columnsArea.mediaPlaying() }
-        function columnMediaPosition(): int { return root.pane.columnsArea.mediaPosition() }
+        function columnMediaPlaying(): bool { return root.columns ? root.columns.mediaPlaying() : false }
+        function columnMediaPosition(): int { return root.columns ? root.columns.mediaPosition() : -1 }
         function columnPlayCentre(): string {
-            var strip = root.pane.columnsArea.mediaStrip()
+            var strip = root.columns ? root.columns.mediaStrip() : null
             return strip ? root.fleaWindow.centreOf(strip.playItem) : ""
         }
-        function columnStripCentre(): string { return root.fleaWindow.centreOf(root.pane.columnsArea.mediaStrip()) }
+        function columnStripCentre(): string { return root.columns ? root.fleaWindow.centreOf(root.columns.mediaStrip()) : "" }
         // The preview column's PDF page position, so a test proves a page turned rather than
         // eyeballing a render. Both readers are pure, like every other one on this handler.
-        function columnPdfPage(): int { return root.pane.columnsArea.pdfPage() }
-        function columnPdfPages(): int { return root.pane.columnsArea.pdfPages() }
-        function columnPdfLoaded(): bool { return root.pane.columnsArea.pdfLoaded() }
+        function columnPdfPage(): int { return root.columns ? root.columns.pdfPage() : -1 }
+        function columnPdfPages(): int { return root.columns ? root.columns.pdfPages() : -1 }
+        function columnPdfLoaded(): bool { return root.columns ? root.columns.pdfLoaded() : false }
         function columnChevronCentre(dir: string): string {
-            var item = root.pane.columnsArea.pdfChevron(dir)
+            var item = root.columns ? root.columns.pdfChevron(dir) : null
             return item && item.visible ? root.fleaWindow.centreOf(item) : ""
         }
         function chromeHeight(): int { return Math.round(Theme.chromeHeight) }
@@ -296,24 +299,24 @@ QtObject {
         }
         function headerTop(): string { return String(Math.round(root.fleaWindow.itemRect(root.pane.header).y)) }
         function railRenamingIndex(): int { return root.pane.sidebar.renamingIndex }
-        function dialogOpen(): bool { return root.networkDialog.opened }
+        function dialogOpen(): bool { return root.networkDialog ? root.networkDialog.opened : false }
         // The network form's own state, so a test asserts the protocol swap and the URI it built.
-        function networkProtocol(): string { return root.networkDialog.formProtocol() }
-        function networkPort(): string { return root.networkDialog.formPort() }
-        function networkUri(): string { return root.networkDialog.formUri() }
-        function networkPathLabel(): string { return root.networkDialog.formPathLabel() }
-        function networkTitle(): string { return root.networkDialog.dialogTitle }
-        function networkFields(): string { return root.networkDialog.formFields() }
-        function networkFocus(): string { return root.networkDialog.formFocus() }
-        function networkHostPortWidths(): string { return root.networkDialog.formHostPortWidths() }
+        function networkProtocol(): string { return root.networkDialog ? root.networkDialog.formProtocol() : "" }
+        function networkPort(): string { return root.networkDialog ? root.networkDialog.formPort() : "" }
+        function networkUri(): string { return root.networkDialog ? root.networkDialog.formUri() : "" }
+        function networkPathLabel(): string { return root.networkDialog ? root.networkDialog.formPathLabel() : "" }
+        function networkTitle(): string { return root.networkDialog ? root.networkDialog.dialogTitle : "" }
+        function networkFields(): string { return root.networkDialog ? root.networkDialog.formFields() : "" }
+        function networkFocus(): string { return root.networkDialog ? root.networkDialog.formFocus() : "" }
+        function networkHostPortWidths(): string { return root.networkDialog ? root.networkDialog.formHostPortWidths() : "" }
         // Mask state and presence only: the seam never returns password content.
-        function networkPasswordState(): string { return root.networkDialog.formPasswordState() }
-        function networkPasswordEyeCentre(): string { return root.networkDialog.formPasswordEyeCentre() }
-        function networkNote(): string { return root.networkDialog.formNote() }
-        function networkAction(): string { return root.networkDialog.formAction() }
-        function networkStatus(): string { return root.networkDialog.statusText }
-        function networkDialogMetrics(): string { return root.networkDialog.formMetrics() }
-        function networkDialogMetricTargets(): string { return root.networkDialog.formMetricTargets() }
+        function networkPasswordState(): string { return root.networkDialog ? root.networkDialog.formPasswordState() : "" }
+        function networkPasswordEyeCentre(): string { return root.networkDialog ? root.networkDialog.formPasswordEyeCentre() : "" }
+        function networkNote(): string { return root.networkDialog ? root.networkDialog.formNote() : "" }
+        function networkAction(): string { return root.networkDialog ? root.networkDialog.formAction() : "" }
+        function networkStatus(): string { return root.networkDialog ? root.networkDialog.statusText : "" }
+        function networkDialogMetrics(): string { return root.networkDialog ? root.networkDialog.formMetrics() : "" }
+        function networkDialogMetricTargets(): string { return root.networkDialog ? root.networkDialog.formMetricTargets() : "" }
         // Durable and non-secret, unlike the four-second status-bar transient.
         function networkResult(): string { return root.pane.sidebar.networkResult() }
         // The "+" ink, its hit target and the rail's own indicator dot, each "x width centre" in window
@@ -328,11 +331,11 @@ QtObject {
         // Where a click probe aims: the hit target's own middle, so the probe varies only x.
         function networkMarkCentre(): string { return root.fleaWindow.centreOf(root.pane.sidebar.networkMarkItems()[1]) }
         // A protocol chip carries a label and no tree, so a test clicks its centre the way it does a row.
-        function networkChipCentre(name: string): string { return root.fleaWindow.centreOf(root.networkDialog.formChip(name)) }
-        function shareBrowserOpen(): bool { return root.shareBrowser.active }
+        function networkChipCentre(name: string): string { return root.networkDialog ? root.fleaWindow.centreOf(root.networkDialog.formChip(name)) : "" }
+        function shareBrowserOpen(): bool { return root.shareBrowser ? root.shareBrowser.active : false }
         // One share name per line, in cursor order; empty when the overlay is shut.
-        function shareBrowserEntries(): string { return root.shareBrowser.shares.join("\n") }
-        function shareBrowserCursor(): int { return root.shareBrowser.cursorIndex }
+        function shareBrowserEntries(): string { return root.shareBrowser ? root.shareBrowser.shares.join("\n") : "" }
+        function shareBrowserCursor(): int { return root.shareBrowser ? root.shareBrowser.cursorIndex : -1 }
         // One line per entry, "label|group|kind|mounted", so a test can assert count and shape without a screenshot.
         function networkEntries(): string {
             var out = []

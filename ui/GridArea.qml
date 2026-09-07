@@ -1,6 +1,7 @@
 import QtQuick
 import "." as Flea
 import "js/DirSizes.js" as DirSizes
+import "js/Focus.js" as Focus
 import "js/Tap.js" as Tap
 import "js/Thumbs.js" as Thumbs
 
@@ -26,6 +27,8 @@ GridView {
     readonly property int visibleTileRows: Math.max(1, Math.ceil(root.height / root.cellHeightPx))
 
     focus: true
+    // Whichever view is up owns the keyboard, and Focus.handleKey is the one route all three take.
+    Keys.onPressed: function (event) { event.accepted = Focus.handleKey(event, root.pane, root.pane.sidebar) }
     model: pane.total
     clip: true
     cellWidth: Math.floor(root.width / root.columns)
