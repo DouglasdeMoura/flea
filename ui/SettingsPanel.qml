@@ -299,7 +299,7 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.topMargin: Theme.spacing.rowPaddingY
                 section: root.section
-                state: root.settingsState
+                values: root.settingsState
                 cursor: root.cursor
                 side: root.side
                 onActivated: function (index) { root.side = "pane"; root.cursor = index; root.activate(index) }

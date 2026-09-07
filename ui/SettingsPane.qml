@@ -9,8 +9,9 @@ Flickable {
     id: root
 
     property string section: "display"
-    // The one object ui/js/Settings.js rows() reads, built by the panel so both files see the same values.
-    property var state: ({})
+    // The one object ui/js/Settings.js rows() reads, built by the panel so both files see the same
+    // values. Not named state: that is Item's own property, and shadowing it is a qmllint override.
+    property var values: ({})
     property int cursor: 0
     property string side: "pane"
     // The tallest section's rows, which is the height the card reserves for every section.
@@ -67,7 +68,7 @@ Flickable {
 
             Repeater {
                 id: rowItems
-                model: Settings.rows(column.modelData.id, root.state)
+                model: Settings.rows(column.modelData.id, root.values)
 
                 delegate: Flea.SettingsRow {
                     required property var modelData
