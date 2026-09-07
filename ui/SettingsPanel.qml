@@ -26,6 +26,15 @@ Item {
     // The Menus board's work-area clamp: a floating surface never renders taller than its bounds
     // less this margin, and the pane scrolls inside that while the rail stays put.
     readonly property int clampMargin: 8
+    // GM's ruling for mouse users: the rail and the first rows keep their height across sections, so
+    // the card's top is placed for the tallest section and only its bottom edge follows the one shown.
+    readonly property int chromeAndBorder: Theme.chromeHeight + 2 * Theme.spacing.hairline
+    readonly property real tallestCard: root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
+                                                                          pane.tallest + 2 * Theme.spacing.rowPaddingY)
+    readonly property real sectionCard: root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
+                                                                          pane.contentHeight + 2 * Theme.spacing.rowPaddingY)
+    readonly property real cardTop: Math.max(root.clampMargin / 2,
+                                             Math.round((root.height - Math.min(root.tallestCard, root.height - root.clampMargin)) / 2))
     readonly property real groundOpacity: 0.5
     // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
     readonly property alias titleItem: title
@@ -165,15 +174,12 @@ Item {
 
     Rectangle {
         id: card
-        anchors.centerIn: parent
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: root.cardTop
         width: root.panelWidth
         // Each side carries its own inset, above the first row and below the last, the way
         // Settings.dc.html gives the rail column a 10 of its own and the pane the row padding.
-        // pane.tallest, not the shown section's height: the card is one size whichever section is up.
-        height: Math.min(Theme.chromeHeight + 2 * Theme.spacing.hairline
-                         + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
-                                    pane.tallest + 2 * Theme.spacing.rowPaddingY),
-                         root.height - root.clampMargin)
+        height: Math.min(root.sectionCard, root.height - root.cardTop - root.clampMargin / 2)
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: Theme.color.muted
