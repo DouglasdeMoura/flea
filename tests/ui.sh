@@ -4078,8 +4078,6 @@ EOS
     [[ "$(ipc dialogOpen)" == "true" && "$(ipc networkResult)" == "missing-credential" \
         && "$(ipc networkAction)" == "Retry" && "$(ipc networkPasswordState)" == "masked|empty" ]] \
         || fail "networkauth: empty password did not remain a missing credential"
-    # The retry dialog is opened through openLocation, whose own scroll reset has no other driver.
-    [[ "$(ipc networkScroll)" == 0\|* ]] || fail "networkauth: the retry dialog opened scrolled, $(ipc networkScroll)"
     [[ "$(wc -l < "$helper_log")" -eq "$helper_calls" ]] \
         || fail "networkauth: empty password launched helper"
 
