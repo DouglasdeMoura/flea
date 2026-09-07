@@ -192,6 +192,7 @@ Item {
 
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
                     onTapped: root.strip = !root.strip
                 }
             }

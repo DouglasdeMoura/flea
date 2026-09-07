@@ -6083,8 +6083,72 @@ settings_keys() {
 cache_snapshot
 trap cleanup EXIT
 
+# An overlay control's TapHandler takes a passive grab, so without ReleaseWithinBounds the press ran on
+# to the TapHandler of the list or rail row under the card: a protocol chip clicked at 560x400 also
+# opened the rail's Home row, tests/cardsizes.sh cs-probe 2026-09-07. The cursor is parked on the last
+# row first, so a press reaching the list beneath moves it somewhere else.
+case_clickthrough() {
+    local dir="$fixture_root/clickthrough"
+    sandbox_scratch "$dir"
+    local i
+    for i in $(seq -w 1 40); do : > "$dir/f$i.txt"; done
+    launch "$dir"
+    wait_listing 40
+    key G >/dev/null
+    settle
+    local parked; parked=$(ipc cursor)
+    [[ "$parked" == "39" ]] || fail "clickthrough: G did not park the cursor on the last row, it is on $parked"
+
+    key -k Tab >/dev/null
+    settle
+    key a >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == "true" ]] || fail "clickthrough: the rail's a key did not open the network dialog"
+    local p
+    for p in SFTP FTPS WebDAV NFS SMB; do
+        click_chip "$p"
+        settle
+        [[ "$(ipc networkProtocol)" == "$p" ]] || fail "clickthrough: the $p chip did not take its click, protocol is $(ipc networkProtocol)"
+    done
+    local centre cx cy wx wy
+    centre=$(ipc networkPasswordEyeCentre)
+    [[ -n "$centre" ]] || fail "clickthrough: the network form has no password eye"
+    read -r cx cy <<< "$centre"
+    read -r wx wy _ww _wh < <(window_box)
+    omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
+    settle
+    [[ "$(ipc cursor)" == "$parked" && "$(ipc path)" == "$dir" ]] \
+        || fail "clickthrough: a network dialog click reached the pane beneath, cursor $(ipc cursor), path $(ipc path)"
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == "false" ]] || fail "clickthrough: Escape did not close the network dialog"
+    key -k Escape >/dev/null
+    settle
+
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "clickthrough: the comma key did not open settings"
+    local section
+    for section in keys menus display; do
+        centre=$(ipc settingsRailRowCentre "$section")
+        [[ -n "$centre" ]] || fail "clickthrough: the settings rail has no $section row"
+        read -r cx cy <<< "$centre"
+        read -r wx wy _ww _wh < <(window_box)
+        omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
+        settle
+        [[ "$(ipc settingsSection)" == "$section" ]] || fail "clickthrough: the $section rail row did not take its click, section is $(ipc settingsSection)"
+    done
+    [[ "$(ipc cursor)" == "$parked" && "$(ipc path)" == "$dir" ]] \
+        || fail "clickthrough: a settings rail click reached the pane beneath, cursor $(ipc cursor), path $(ipc path)"
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "false" ]] || fail "clickthrough: Escape did not close settings"
+    printf 'CLICKTHROUGH chips=ok eye=ok rail=ok cursor=%s\n' "$parked"
+    kill_flea
+}
+
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough hangshare)
 
 : > "$run_log"
 : > "$flea_log"

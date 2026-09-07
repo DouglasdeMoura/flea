@@ -332,6 +332,7 @@ Column {
 
         TapHandler {
             acceptedButtons: Qt.LeftButton
+            gesturePolicy: TapHandler.ReleaseWithinBounds
             onTapped: root.tls = !root.tls
         }
     }

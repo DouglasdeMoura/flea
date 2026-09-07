@@ -160,6 +160,7 @@ Item {
 
             TapHandler {
                 enabled: root.hasSteps
+                gesturePolicy: TapHandler.ReleaseWithinBounds
                 onTapped: root.stepped(-1)
             }
         }
@@ -195,6 +196,7 @@ Item {
 
             TapHandler {
                 enabled: root.hasSteps
+                gesturePolicy: TapHandler.ReleaseWithinBounds
                 onTapped: root.stepped(1)
             }
         }
@@ -237,6 +239,7 @@ Item {
         enabled: !root.isGroup && !root.isHint && !root.isLock && !root.hasSteps
                  && !root.hasSegment && !root.isRuler
         acceptedButtons: Qt.LeftButton
+        gesturePolicy: TapHandler.ReleaseWithinBounds
         onTapped: root.activated()
     }
 }

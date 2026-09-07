@@ -152,6 +152,7 @@ Item {
     }
 
     function showCursor() { pane.showCursor(root.cursor) }
+    function railItemFor(id) { return rail.itemFor(id) }
 
     anchors.fill: parent
     visible: root.opened
@@ -245,6 +246,7 @@ Item {
 
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
+                        gesturePolicy: TapHandler.ReleaseWithinBounds
                         onTapped: root.close()
                     }
                 }
