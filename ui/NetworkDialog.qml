@@ -14,6 +14,8 @@ Item {
     id: root
 
     property bool opened: false
+    // The Menus board's work-area clamp, the same margin ui/SettingsPanel.qml keeps.
+    readonly property int clampMargin: 8
     property string statusText: ""
     property bool dropboxInstalled: false
     property bool retrying: false
@@ -247,17 +249,22 @@ Item {
         id: card
         width: Theme.space(380)
         height: content.implicitHeight + contentTopInset + contentBottomInset
-        anchors.centerIn: parent
+        anchors.horizontalCenter: parent.horizontalCenter
+        // GM's ruling for mouse users: the top is placed as if the form showed its fullest field set,
+        // so the chips and the first fields keep their height across protocols while the card's bottom
+        // follows the one shown, and no protocol leaves empty rows. A small window clamps at the top.
+        readonly property real tallestHeight: card.height - form.height + form.tallest
+        readonly property real restingY: Math.max(root.clampMargin, Math.round((root.height - card.tallestHeight) / 2))
         // Open rises into place; close does not translate (enabled: root.opened only), only fades,
         // faster than the open animation. root.opened itself already flipped above, synchronously.
-        anchors.verticalCenterOffset: root.opened ? 0 : Motion.translateUpPx
+        y: card.restingY + (root.opened ? 0 : Motion.translateUpPx)
         opacity: root.opened ? 1 : 0
         color: Theme.color.surface
         borderSpec: Border.flat(Theme.color.accent, Style.normalBorderWidth)
         radius: Style.cornerRadius
         padding: Style.space(16)
 
-        Behavior on anchors.verticalCenterOffset {
+        Behavior on y {
             enabled: root.opened && !Theme.reducedMotion
             NumberAnimation { duration: Motion.durMs.open; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.bezierCurve }
         }
