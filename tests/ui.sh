@@ -6083,16 +6083,20 @@ settings_keys() {
 cache_snapshot
 trap cleanup EXIT
 
-# rows_run_under "<x y w h>" <label>: the last visible row's centre lies below the card, so every control on it has a live row beneath.
+# rows_run_under "<x y w h>" <label>: rows other than the parked row 0 lie under the whole card, so a press that runs on moves the cursor.
 rows_run_under() {
-    local cx cy cw ch rx ry
-    read -r cx cy cw ch <<< "$1"
-    read -r rx ry <<< "$(ipc rowCentre $(( $(ipc visibleRows) - 1 )))"
-    [[ -n "$ch" && -n "$ry" && "$ry" -gt $(( cy + ch )) ]] \
-        || fail "clickthrough: the list does not run under $2 (last visible row centre y $ry, card bottom $(( ${cy:-0} + ${ch:-0} )))"
+    local card="$1" label="$2" cx cy cw ch visible last first
+    read -r cx cy cw ch <<< "$card"
+    visible=$(ipc visibleRows)
+    [[ "$ch" =~ ^[0-9]+$ && "$visible" =~ ^[1-9][0-9]*$ ]] || fail "clickthrough: no geometry for $label (card rect [$card], visibleRows [$visible])"
+    last=$(ipc rowCentre $(( visible - 1 )))
+    first=$(ipc rowCentre 0)
+    [[ "$last" =~ ^[0-9]+\ [0-9]+$ && "$first" =~ ^[0-9]+\ [0-9]+$ ]] || fail "clickthrough: no row centres for $label (row $(( visible - 1 )) [$last], row 0 [$first])"
+    [[ "${last#* }" -gt $(( cy + ch )) ]] || fail "clickthrough: the list does not run under $label (last visible row centre y ${last#* }, card bottom $(( cy + ch )))"
+    [[ "${first#* }" -lt "$cy" ]] || fail "clickthrough: the parked row 0 reaches under $label (row 0 centre y ${first#* }, card top $cy)"
 }
 
-# The cursor parks on the last row, so a press that runs on from an overlay control to the row beneath moves it.
+# The cursor parks on row 0 above the card, so a press that runs on from an overlay control to any row beneath moves it.
 case_clickthrough() {
     local dir="$fixture_root/clickthrough"
     sandbox_scratch "$dir"
@@ -6100,19 +6104,17 @@ case_clickthrough() {
     for i in $(seq -w 1 40); do : > "$dir/f$i.txt"; done
     launch "$dir"
     wait_listing 40
-    key G >/dev/null
-    settle
     local parked; parked=$(ipc cursor)
-    [[ "$parked" == "39" ]] || fail "clickthrough: G did not park the cursor on the last row, it is on $parked"
+    [[ "$parked" == "0" ]] || fail "clickthrough: the cursor did not start on row 0, it is on $parked"
 
     key -k Tab >/dev/null
     settle
     key a >/dev/null
     settle
     [[ "$(ipc dialogOpen)" == "true" ]] || fail "clickthrough: the rail's a key did not open the network dialog"
-    rows_run_under "$(ipc networkCardRect)" "the network card"
     local p
     for p in SFTP FTPS WebDAV NFS SMB; do
+        rows_run_under "$(ipc networkCardRect)" "the network card"
         click_chip "$p"
         settle
         [[ "$(ipc networkProtocol)" == "$p" ]] || fail "clickthrough: the $p chip did not take its click, protocol is $(ipc networkProtocol)"
@@ -6128,9 +6130,9 @@ case_clickthrough() {
     key , >/dev/null
     settle
     [[ "$(ipc settingsOpen)" == "true" ]] || fail "clickthrough: the comma key did not open settings"
-    rows_run_under "$(ipc settingsCardRect)" "the settings card"
     local section centre cx cy wx wy
     for section in keys menus display; do
+        rows_run_under "$(ipc settingsCardRect)" "the settings card"
         centre=$(ipc settingsRailRowCentre "$section")
         [[ -n "$centre" ]] || fail "clickthrough: the settings rail has no $section row"
         read -r cx cy <<< "$centre"
