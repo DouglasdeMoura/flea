@@ -9,6 +9,8 @@ Item {
     id: root
 
     property bool opened: false
+    // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
+    readonly property alias titleItem: title
     property string name: ""
     property Item focusHolder: null
 
@@ -86,6 +88,13 @@ Item {
         border.color: Theme.color.muted
         radius: Style.cornerRadius
 
+        // The strip toggle's handler takes a passive grab, so without this sink its press fell
+        // through the card to the ground below, which closed the dialog on release.
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
+
         Column {
             id: body
             width: parent.width
@@ -93,6 +102,7 @@ Item {
             spacing: 0
 
             Text {
+                id: title
                 x: Theme.spacing.rowPaddingX
                 width: parent.width - 2 * Theme.spacing.rowPaddingX
                 bottomPadding: Theme.spacing.gap

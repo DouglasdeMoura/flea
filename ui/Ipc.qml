@@ -104,6 +104,8 @@ QtObject {
         // One row per line, kind|label|value, so a test reads what the panel draws without OCR and
         // the stored value behind each control is assertable from the same string.
         function settingsRows(): string { return root.settingsPanel ? root.settingsPanel.rowsText() : "" }
+        // The panel's own title, a spot on the card with no control under it: a click there must leave the panel open.
+        function settingsTitleCentre(): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.titleItem) : "" }
         // A menu row's own centre, so a driven click lands on the row a test named rather than on a
         // pixel derived from a row count the Menus settings section can change under it.
         function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
@@ -233,6 +235,7 @@ QtObject {
         function keymapSheetRows(): string { return root.keymapSheet ? root.keymapSheet.rows() : "" }
         function convertFormat(): string { return root.convertDialog ? root.convertDialog.format : "" }
         function convertStrip(): bool { return root.convertDialog ? root.convertDialog.strip : false }
+        function convertTitleCentre(): string { return root.convertDialog ? root.fleaWindow.centreOf(root.convertDialog.titleItem) : "" }
         // The preview column's own table and state, so a test asserts the canvas's rows without OCR.
         function previewFacts(): string { return root.columns ? root.columns.factsLine() : "" }
         function previewColumnState(): string { return root.columns ? root.columns.previewStateName() : "" }

@@ -27,6 +27,8 @@ Item {
     // less this margin, and the pane scrolls inside that while the rail stays put.
     readonly property int clampMargin: 8
     readonly property real groundOpacity: 0.5
+    // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
+    readonly property alias titleItem: title
 
     readonly property var rows: Settings.rows(root.section, {
         textSize: ViewState.textSize,
@@ -186,6 +188,13 @@ Item {
         radius: Style.cornerRadius
         clip: true
 
+        // The control handlers above take passive grabs, so without this sink a press on a row fell
+        // through the card to the ground below, which closed the panel on release.
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
+
         // The board's border-box panel: the card's own border is the two outer hairlines, so the
         // 558 they leave is what the chrome, the rail and the pane are laid out inside.
         Item {
@@ -200,6 +209,7 @@ Item {
                 height: Theme.chromeHeight
 
                 Text {
+                    id: title
                     anchors.left: parent.left
                     anchors.leftMargin: Theme.spacing.rowPaddingX
                     anchors.verticalCenter: parent.verticalCenter

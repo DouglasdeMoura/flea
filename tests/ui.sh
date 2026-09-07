@@ -2352,6 +2352,14 @@ case_operations() {
     [[ "$(ipc convertFormat)" == "jpg" ]] || fail "operations: the popup opened on $(ipc convertFormat)"
     [[ "$(ipc convertStrip)" == "false" ]] \
         || fail "operations: remove-metadata started ticked, which is not least surprise"
+    # Same fall-through as the settings panel: a click on the card's title must not close the popup.
+    local cwx cwy ctx cty
+    read -r cwx cwy _ _ < <(window_box)
+    read -r ctx cty <<< "$(ipc convertTitleCentre)"
+    [[ -n "$cty" ]] || fail "operations: the convert popup has no title to click"
+    omarchy-drive click "$((cwx + ctx))" "$((cwy + cty))" left >/dev/null
+    settle
+    [[ "$(ipc convertOpen)" == "true" ]] || fail "operations: a click on the popup's own title closed it"
     shot operations-convert
     key -k Return >/dev/null
     for _ in $(seq 1 40); do [[ -s "$dir/shot (converted).jpg" ]] && break; sleep 0.25; done
@@ -5691,6 +5699,14 @@ settings_doors() {
     omarchy-drive click "$((wx + bx))" "$((wy + by))" left >/dev/null
     settle
     [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the sliders button did not open the panel"
+    # The Twitter report: a click on the card fell through to the dimmed ground and closed the panel,
+    # and the next click landed on the listing. The title has no control on it, so it is the plainest spot.
+    local tx ty
+    read -r tx ty <<< "$(ipc settingsTitleCentre)"
+    [[ -n "$ty" ]] || fail "settings: the panel has no title to click"
+    omarchy-drive click "$((wx + tx))" "$((wy + ty))" left >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: a click on the card's own title closed the panel"
     key -k Escape >/dev/null
     settle
 
