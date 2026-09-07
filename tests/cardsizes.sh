@@ -81,8 +81,9 @@ at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered noth
 # section_fits <id>: at a full tile the card keeps the tallest section's height, so the section shown scrolls nothing.
 # Sample answer: 913|406 (contentHeight|height); a content height of 0 is a section not laid out, not one that fits.
 section_fits() {
+  [ "$size" = tiled ] || return 0
   local sh svh; IFS='|' read -r sh svh <<<"$(at settingsScroll)"
-  [ "$size" = tiled ] && check "$size the $1 section fits the card whole" "$([ "${sh:-0}" -gt 0 ] && [ "$sh" -le "${svh:-0}" ] 2>/dev/null && echo fits || echo "clipped (${sh:-none} > ${svh:-none})")" "fits"
+  check "$size the $1 section fits the card whole" "$([ "${sh:-0}" -gt 0 ] && [ "$sh" -le "${svh:-0}" ] 2>/dev/null && echo fits || echo "clipped (${sh:-none} > ${svh:-none})")" "fits"
 }
 # Opens the network dialog from wherever the focus is: the rail's a key, reached by Tab only from the list.
 open_network() { [ "$(ipc focusView)" = rail ] || { key -k Tab; sleep 0.3; }; key a; sleep 0.7; }
@@ -111,14 +112,15 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # Settings: one title height for every section, the card inside the window.
   key ,; sleep 0.6
   check "$size settings opens" "$(ipc settingsOpen)" "true"
+  check "$size settings opens on display" "$(ipc settingsSection)" "display"
   display=$(at settingsTitleCentre); section_fits display
   key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(at settingsTitleCentre)
   check "$size the rail walked to keys" "$(ipc settingsSection)" "keys"; section_fits keys
   key j; sleep 0.3; key j; sleep 0.3; menus=$(at settingsTitleCentre)
   check "$size and on to menus" "$(ipc settingsSection)" "menus"; section_fits menus
   check "$size settings title height is the same on keys, display and menus" "$keys|$menus" "$display|$display"
-  set -- $(at settingsCardRect); settings_h=$4
-  rect_inside "$size settings card" "$1 $2 $3 $4"
+  settings_rect=$(at settingsCardRect)
+  rect_inside "$size settings card" "$settings_rect"
   omarchy-drive shot "$evidence_dir/settings-$size.png" flea >/dev/null 2>&1
   key -k Escape; sleep 0.4
   check "$size settings closed" "$(ipc settingsOpen)" "false"
@@ -135,9 +137,10 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
     [ "$(ipc networkChipCentre SMB)" = "$base" ] || moved="$moved $p:$(ipc networkChipCentre SMB)"
   done
   check "$size the chip row held its height through every protocol" "${moved:-still}" "still"
-  set -- $(at networkCardRect)
-  rect_inside "$size network card" "$1 $2 $3 $4"
-  case "$size" in *x688|560x400) check "$size the settings card clamps to the network card's height" "$settings_h" "$4";; esac
+  network_rect=$(at networkCardRect)
+  rect_inside "$size network card" "$network_rect"
+  # The last field of each rect is its height, or the distinct dead sentinel, so two dead reads never agree.
+  case "$size" in *x688|560x400) check "$size the settings card clamps to the network card's height" "${settings_rect##* }" "${network_rect##* }";; esac
   omarchy-drive shot "$evidence_dir/network-$size.png" flea >/dev/null 2>&1
   scroll=$(ipc networkScroll)
   check "$size the network body reports its scroll" "$([ -n "$scroll" ] && echo yes || echo no)" "yes"
