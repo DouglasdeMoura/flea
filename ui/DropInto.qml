@@ -11,11 +11,16 @@ DropArea {
     property string dest: ""
     // The destination's filesystem when it is known, 0 when it is not, which makes the drop a copy.
     property int destDev: 0
+    // A tab takes every drag that carries paths, because resting on it is navigation: a drop the
+    // directory would refuse, its own rows lifted back onto it, is still refused by dropInto below.
+    property bool switchesOnHover: false
 
     keys: [DragOps.ROWS_MIME, "text/uri-list"]
 
     onEntered: function (drag) {
-        if (!DragOps.canDropInto(drag.getDataAsString(DragOps.ROWS_MIME), drag.urls, root.dest))
+        var carrying = DragOps.hasPaths(drag.urls)
+        if (!(root.switchesOnHover && carrying)
+                && !DragOps.canDropInto(drag.getDataAsString(DragOps.ROWS_MIME), drag.urls, root.dest))
             drag.accepted = false
     }
     onDropped: function (drop) {

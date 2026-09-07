@@ -126,15 +126,19 @@ pub fn run_transfer(
         let src = PathBuf::from(raw);
         let name = base_name(&src);
         let dst = dest.join(&name);
+        // Both guards compare resolved paths: a destination reached through a symlinked directory names
+        // the same inode under another string, and the string compare alone let it through.
+        let src_real = src.canonicalize().unwrap_or_else(|_| src.clone());
+        let dest_real = dest.canonicalize().unwrap_or_else(|_| dest.clone());
         // A folder into itself or its own subtree: copy_dir would read its own fresh copy until the disk
         // is full, so the refusal ui/js/Drag.js canDropInto makes is made again here, per item.
-        if dest.starts_with(&src) {
+        if dest_real.starts_with(&src_real) {
             failed += 1;
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: INTO_ITSELF.to_string() });
             continue;
         }
         // An item dropped into the folder it already lives in: copy_file would truncate it onto itself.
-        if dst == src {
+        if dst == src || dest_real.join(&name) == src_real {
             failed += 1;
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: ALREADY_THERE.to_string() });
             continue;
@@ -313,20 +317,53 @@ mod tests {
         assert_eq!(std::fs::read_to_string(sibling.join("x/a.txt")).unwrap(), "body");
     }
 
+    // The refused item's own sentence, so a test pins the branch and not only the count.
+    fn refusal(rx: Receiver<OpMsg>) -> (usize, usize, Vec<Step>, String) {
+        let mut err = String::new();
+        let mut done = None;
+        for msg in rx.iter() {
+            match msg {
+                OpMsg::Item { ok: false, err: e, .. } => err = e,
+                OpMsg::TransferDone { ok, failed, entry, .. } => done = Some((ok, failed, entry.steps)),
+                _ => {}
+            }
+        }
+        let (ok, failed, steps) = done.expect("a terminal line");
+        (ok, failed, steps, err)
+    }
+
     #[test]
     fn a_file_dropped_into_its_own_folder_is_refused_with_its_bytes_intact() {
         let d = TestDir::new("alreadythere");
         let file = d.file("a.txt", "body");
         let (tx, rx) = channel();
         run_transfer(1, false, vec![file.to_string_lossy().to_string()], d.path().to_path_buf(), Arc::new(AtomicBool::new(false)), tx);
-        let (ok, failed, _, _, entry) = done_line(rx);
+        let (ok, failed, steps, err) = refusal(rx);
         assert_eq!((ok, failed), (0, 1), "a copy onto itself is one refused item");
-        assert!(entry.steps.is_empty(), "and nothing was journalled");
+        assert_eq!(err, ALREADY_THERE, "and it is this refusal, not the folder-into-itself one");
+        assert!(steps.is_empty(), "and nothing was journalled");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "body", "the bytes were never opened for writing");
         let (tx, rx) = channel();
         run_transfer(2, true, vec![file.to_string_lossy().to_string()], d.path().to_path_buf(), Arc::new(AtomicBool::new(false)), tx);
-        assert_eq!(done_line(rx).1, 1, "a move onto itself is refused the same way");
+        assert_eq!(refusal(rx).3, ALREADY_THERE, "a move onto itself is refused the same way");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "body");
+    }
+
+    #[test]
+    fn the_same_folder_reached_through_a_symlink_is_still_itself() {
+        let d = TestDir::new("symlinkedself");
+        let real = d.dir("real");
+        let file = d.file("real/a.txt", "body");
+        let link = d.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let (tx, rx) = channel();
+        run_transfer(1, false, vec![file.to_string_lossy().to_string()], link.clone(), Arc::new(AtomicBool::new(false)), tx);
+        let (_, failed, _, err) = refusal(rx);
+        assert_eq!((failed, err.as_str()), (1, ALREADY_THERE), "a file into its own folder through a link is a copy onto itself");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "body");
+        let (tx, rx) = channel();
+        run_transfer(2, false, vec![real.to_string_lossy().to_string()], link.join("deep"), Arc::new(AtomicBool::new(false)), tx);
+        assert_eq!(refusal(rx).3, INTO_ITSELF, "and a folder into its own subtree through a link is still into itself");
     }
 
     #[test]

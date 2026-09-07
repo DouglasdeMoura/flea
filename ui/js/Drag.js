@@ -197,7 +197,8 @@ function canDropInto(marker, urls, dest) {
             return false
         }
         // An item into the folder it already lives in, which a foreign drag can ask for: a copy onto itself.
-        if (paths[i].substring(0, paths[i].lastIndexOf("/")) === dest) {
+        var slash = paths[i].lastIndexOf("/")
+        if ((slash === 0 ? "/" : paths[i].substring(0, slash)) === dest) {
             return false
         }
     }

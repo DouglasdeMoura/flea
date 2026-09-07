@@ -110,6 +110,7 @@ function run(check) {
     // A foreign drag of a file into the folder it already lives in would copy it onto itself.
     check("a file from another window cannot land in its own folder", Drag.canDropInto("", ["file:///d/a.txt"], "/d"), false)
     check("but the same file can land one folder down", Drag.canDropInto("", ["file:///d/a.txt"], "/d/omarchy"), true)
+    check("and a file straight under the root cannot land in the root", Drag.canDropInto("", ["file:///a.txt"], "/"), false)
     // Which route a drop takes: paths whenever the drag carries them, the row index only for a
     // selection too wide to carry paths, and then only on the listing it was lifted from.
     check("hasPaths reads the uri-list", Drag.hasPaths(urls), true)

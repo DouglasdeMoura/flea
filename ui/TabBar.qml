@@ -83,6 +83,7 @@ Item {
                 Flea.DropInto {
                     anchors.fill: parent
                     pane: root.pane
+                    switchesOnHover: true
                     dest: Tabs.pathAt(root.tabs, root.currentIndex, tab.index, root.path)
                     destDev: Tabs.devAt(root.tabs, root.currentIndex, tab.index,
                                         root.pane && root.pane.backend ? root.pane.backend.dirDev : 0)
