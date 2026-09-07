@@ -23,11 +23,13 @@ mkdir -p "$evidence_dir"
 SB=$FIXTURE_ROOT/flea-cardsizes-$$
 pass=0
 fail=0
-# A failure raised inside a command substitution runs in a subshell, so it is counted through a file
-# the summary reads, never through the variable that subshell cannot reach.
+# A failure raised inside a command substitution runs in a subshell: its line goes to the script's
+# own stdout through fd 3, never into the captured value, and it is counted through a file the
+# summary reads, never through the variable that subshell cannot reach.
+exec 3>&1
 fails_file=$(mktemp)
 ok()  { printf 'ok   %s\n' "$*"; pass=$((pass+1)); }
-bad() { printf 'FAIL %s\n' "$*"; fail=$((fail+1)); echo "$*" >> "$fails_file"; }
+bad() { printf 'FAIL %s\n' "$*" >&3; fail=$((fail+1)); echo "$*" >> "$fails_file"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got [$2], expected [$3])"; fi; }
 
 cleanup() {
@@ -187,6 +189,8 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
 done
 echo
 # Failures raised inside command substitutions were counted in the file, not in the variable.
-lost=$(grep -c . "$fails_file" 2>/dev/null || echo 0); fail=$(( fail > lost ? fail : lost ))
+# grep -c prints 0 and exits 1 on an empty file, so its status is dropped rather than turned into text.
+lost=$(grep -c . "$fails_file" || true)
+[ "${lost:-0}" -gt "$fail" ] && fail=$lost
 echo "$((pass + fail)) checks, $fail failed"
 [ "$fail" = 0 ] || exit 1
