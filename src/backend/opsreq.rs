@@ -103,6 +103,7 @@ fn base_name(p: &Path) -> String {
 }
 
 pub const INTO_ITSELF: &str = "cannot move or copy a folder into itself";
+pub const ALREADY_THERE: &str = "already in that folder";
 
 // Copy or move, one top-level item at a time, reporting each item's own terminal line as it lands.
 pub fn run_transfer(
@@ -130,6 +131,12 @@ pub fn run_transfer(
         if dest.starts_with(&src) {
             failed += 1;
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: INTO_ITSELF.to_string() });
+            continue;
+        }
+        // An item dropped into the folder it already lives in: copy_file would truncate it onto itself.
+        if dst == src {
+            failed += 1;
+            let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: ALREADY_THERE.to_string() });
             continue;
         }
         match one_item(id, index, &name, moving, &src, &dst, &cancel, &tx, &mut steps) {
@@ -304,6 +311,22 @@ mod tests {
         run_transfer(3, false, paths, sibling.clone(), Arc::new(AtomicBool::new(false)), tx);
         assert_eq!(done_line(rx).0, 1, "x2 is not inside x, so the copy lands");
         assert_eq!(std::fs::read_to_string(sibling.join("x/a.txt")).unwrap(), "body");
+    }
+
+    #[test]
+    fn a_file_dropped_into_its_own_folder_is_refused_with_its_bytes_intact() {
+        let d = TestDir::new("alreadythere");
+        let file = d.file("a.txt", "body");
+        let (tx, rx) = channel();
+        run_transfer(1, false, vec![file.to_string_lossy().to_string()], d.path().to_path_buf(), Arc::new(AtomicBool::new(false)), tx);
+        let (ok, failed, _, _, entry) = done_line(rx);
+        assert_eq!((ok, failed), (0, 1), "a copy onto itself is one refused item");
+        assert!(entry.steps.is_empty(), "and nothing was journalled");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "body", "the bytes were never opened for writing");
+        let (tx, rx) = channel();
+        run_transfer(2, true, vec![file.to_string_lossy().to_string()], d.path().to_path_buf(), Arc::new(AtomicBool::new(false)), tx);
+        assert_eq!(done_line(rx).1, 1, "a move onto itself is refused the same way");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "body");
     }
 
     #[test]
