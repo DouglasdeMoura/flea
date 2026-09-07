@@ -301,7 +301,7 @@ release; sleep 0.6
 wait_for "$HOMEDIR/aaa/r1b.txt" present
 check "the lifted file landed in the folder under the drop" \
       "$([ -e "$HOMEDIR/aaa/r1b.txt" ] && echo aaa || echo missing)" "aaa"
-check "and no other file moved" "$(ls -A "$HOMEDIR/aaa" | grep -vx r1b.txt | tr '\n' ' ')" "$aaa_before"
+check "and no other file moved" "$(ls -A "$HOMEDIR/aaa" | grep -vxF r1b.txt | tr '\n' ' ')" "$aaa_before"
 check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
 echo
 echo "$((pass + fail)) checks, $fail failed"

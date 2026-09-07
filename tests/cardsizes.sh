@@ -165,7 +165,7 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # The convert popup, from the png row's context menu; the png is row 0, scrolled back on screen first.
   key -k Home; sleep 0.3
   check "$size the list is still on the fixture" "$(ipc path)|$(ipc focusView)" "$SB|list"
-  idx=$(rowidx 0-shot.png) || idx=""
+  idx=$(rowidx 0-shot.png) || { bad "$size 0-shot.png is not among the loaded rows"; idx=0; }
   set -- $(at rowCentre "${idx:-0}"); click_win "$1" "$2" right; sleep 0.5
   entries=$(ipc contextMenuEntries); target=-1; i=0; IFS='|'; for label in $entries; do [ "$label" = "Convert" ] && { target=$i; break; }; i=$((i+1)); done; unset IFS
   for _ in $(seq 1 14); do [ "$(ipc contextMenuCursor)" = "$target" ] && break; key -k Down; sleep 0.1; done
