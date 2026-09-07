@@ -113,6 +113,8 @@ QtObject {
         function settingsCardRect(): string { return root.settingsPanel ? root.fleaWindow.rectOf(root.settingsPanel.cardItem) : "" }
         function networkCardRect(): string { return root.networkDialog ? root.fleaWindow.rectOf(root.networkDialog.cardItem) : "" }
         function networkScroll(): string { return root.networkDialog ? root.networkDialog.bodyScroll() : "" }
+        // The clipping viewport inside the card, so a field's on-screen check is against what the body shows.
+        function networkBodyRect(): string { return root.networkDialog ? root.fleaWindow.rectOf(root.networkDialog.bodyItem) : "" }
         function keymapCardRect(): string { return root.keymapSheet ? root.fleaWindow.rectOf(root.keymapSheet.cardItem) : "" }
         function convertCardRect(): string { return root.convertDialog ? root.fleaWindow.rectOf(root.convertDialog.cardItem) : "" }
         // A menu row's own centre, so a driven click lands on the row a test named rather than on a

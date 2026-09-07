@@ -146,9 +146,9 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
     for i in $(seq 1 14); do key -k Tab; sleep 0.15; [ "$(ipc networkFocus)" = "Password" ] && break; done
     IFS='|' read -r sy3 _ _ <<<"$(ipc networkScroll)"
     check "$size Tab reaches the password field" "$(ipc networkFocus)" "Password"
-    # The field is on screen when its eye sits inside the card; only a window too short for the form scrolls to get it there.
-    set -- $(at networkCardRect) $(at networkPasswordEyeCentre)
-    [ "$6" -ge "$2" ] && [ "$6" -le $(( $2 + $4 )) ] && ok "$size and the password field is inside the card (eye y $6 in $2..$(( $2 + $4 )), contentY $sy3)" || bad "$size the password field sits outside the card (eye y $6, card $1 $2 $3 $4, contentY $sy3)"
+    # The field is on screen when its eye sits inside the clipping body; only a window too short for the form scrolls to get it there.
+    set -- $(at networkBodyRect) $(at networkPasswordEyeCentre)
+    [ "$6" -ge "$2" ] && [ "$6" -le $(( $2 + $4 )) ] && ok "$size and the password field is inside the body (eye y $6 in $2..$(( $2 + $4 )), contentY $sy3)" || bad "$size the password field sits outside the body (eye y $6, body $1 $2 $3 $4, contentY $sy3)"
   else
     ok "$size the network body fits ($sh <= $svh), nothing to scroll"
   fi

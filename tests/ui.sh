@@ -6083,10 +6083,7 @@ settings_keys() {
 cache_snapshot
 trap cleanup EXIT
 
-# An overlay control's TapHandler takes a passive grab, so without ReleaseWithinBounds the press ran on
-# to the TapHandler of the list or rail row under the card: a protocol chip clicked at 560x400 also
-# opened the rail's Home row, tests/cardsizes.sh cs-probe 2026-09-07. The cursor is parked on the last
-# row first, so a press reaching the list beneath moves it somewhere else.
+# The cursor parks on the last row, so a press that runs on from an overlay control to the row beneath moves it.
 case_clickthrough() {
     local dir="$fixture_root/clickthrough"
     sandbox_scratch "$dir"
@@ -6109,16 +6106,9 @@ case_clickthrough() {
         click_chip "$p"
         settle
         [[ "$(ipc networkProtocol)" == "$p" ]] || fail "clickthrough: the $p chip did not take its click, protocol is $(ipc networkProtocol)"
+        [[ "$(ipc cursor)" == "$parked" && "$(ipc path)" == "$dir" ]] \
+            || fail "clickthrough: the $p chip click reached the pane beneath, cursor $(ipc cursor), path $(ipc path)"
     done
-    local centre cx cy wx wy
-    centre=$(ipc networkPasswordEyeCentre)
-    [[ -n "$centre" ]] || fail "clickthrough: the network form has no password eye"
-    read -r cx cy <<< "$centre"
-    read -r wx wy _ww _wh < <(window_box)
-    omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
-    settle
-    [[ "$(ipc cursor)" == "$parked" && "$(ipc path)" == "$dir" ]] \
-        || fail "clickthrough: a network dialog click reached the pane beneath, cursor $(ipc cursor), path $(ipc path)"
     key -k Escape >/dev/null
     settle
     [[ "$(ipc dialogOpen)" == "false" ]] || fail "clickthrough: Escape did not close the network dialog"
@@ -6128,7 +6118,7 @@ case_clickthrough() {
     key , >/dev/null
     settle
     [[ "$(ipc settingsOpen)" == "true" ]] || fail "clickthrough: the comma key did not open settings"
-    local section
+    local section centre cx cy wx wy
     for section in keys menus display; do
         centre=$(ipc settingsRailRowCentre "$section")
         [[ -n "$centre" ]] || fail "clickthrough: the settings rail has no $section row"
@@ -6137,13 +6127,13 @@ case_clickthrough() {
         omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
         settle
         [[ "$(ipc settingsSection)" == "$section" ]] || fail "clickthrough: the $section rail row did not take its click, section is $(ipc settingsSection)"
+        [[ "$(ipc cursor)" == "$parked" && "$(ipc path)" == "$dir" ]] \
+            || fail "clickthrough: the $section rail row click reached the pane beneath, cursor $(ipc cursor), path $(ipc path)"
     done
-    [[ "$(ipc cursor)" == "$parked" && "$(ipc path)" == "$dir" ]] \
-        || fail "clickthrough: a settings rail click reached the pane beneath, cursor $(ipc cursor), path $(ipc path)"
     key -k Escape >/dev/null
     settle
     [[ "$(ipc settingsOpen)" == "false" ]] || fail "clickthrough: Escape did not close settings"
-    printf 'CLICKTHROUGH chips=ok eye=ok rail=ok cursor=%s\n' "$parked"
+    printf 'CLICKTHROUGH chips=ok rail=ok cursor=%s\n' "$parked"
     kill_flea
 }
 

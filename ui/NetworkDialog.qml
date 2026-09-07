@@ -23,6 +23,7 @@ Item {
     readonly property int clampMargin: 8
     // var, not Item: BorderSurface is a qs.Ui type qmllint cannot resolve, and Item would read as incompatible.
     readonly property var cardItem: card
+    readonly property var bodyItem: body
 
     signal closed()
     // Sidebar's own bookmarksFile FileView never watched a directory absent at its own
