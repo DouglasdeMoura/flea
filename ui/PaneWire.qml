@@ -16,6 +16,18 @@ Item {
     id: root
 
     property var pane: null
+
+    // The listing's floor as a drop target, under the rows: a drop past the last row, or one a file
+    // row refused, lands in the directory being shown. Declared first in ui/Pane.qml, so it sits below.
+    Flea.DropInto {
+        x: root.pane ? root.pane.listSlot.x : 0
+        y: root.pane ? root.pane.listSlot.y : 0
+        width: root.pane ? root.pane.listSlot.width : 0
+        height: root.pane ? root.pane.listSlot.height : 0
+        pane: root.pane
+        dest: root.pane ? root.pane.path : ""
+        destDev: root.pane && root.pane.backend ? root.pane.backend.dirDev : 0
+    }
     // The new folder has no row until the refresh lands, so the editor is opened on the rows reply
     // that carries it rather than on the made line that asked for it. Holds that folder's full path.
     property string renameOnArrival: ""

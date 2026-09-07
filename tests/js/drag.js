@@ -58,6 +58,43 @@ function run(check) {
     var copied = []
     Drag.drop(pane(copied, [], rows), [2], 1, true)
     check("under ctrl it is a copy", copied.length === 1 ? copied[0].op + " " + copied[0].dest : "nothing sent", "copy /d/flea")
+
+    // The marker carries where the rows were lifted from, so a drop after the listing changed can
+    // resolve by path, and the wire carries the same paths as plain text for a terminal.
+    var lifted = pane([], [], rows)
+    lifted.backend.dirDev = 42
+    var wire = Drag.mimeFor(lifted, [2, 3], false)
+    check("the marker names the source directory", Drag.markerSource(wire[Drag.ROWS_MIME]), "/d")
+    check("and its filesystem", Drag.markerDev(wire[Drag.ROWS_MIME]), 42)
+    check("a marker from before this shape reads as no source", Drag.markerSource("x\n1\nmove"), "")
+    check("and as an unknown filesystem", Drag.markerDev("x\n1\nmove"), 0)
+    check("the same listing is the by-index case", Drag.sameListing(wire[Drag.ROWS_MIME], "/d"), true)
+    check("another directory is not", Drag.sameListing(wire[Drag.ROWS_MIME], "/d/flea"), false)
+    check("nor is a foreign drag, whatever its source", Drag.sameListing("other\n1\nmove\n/d\n42", "/d"), false)
+    check("plain text is the absolute paths, one a line", wire["text/plain"], "/d/a.txt\n/d/b.txt")
+    check("a wide selection offers no plain text either", Drag.mimeFor(lifted, [2, 9], false)["text/plain"], undefined)
+
+    // A drop by path: into the floor of another tab's listing, or a folder reached after a switch.
+    var urls = ["file:///d/a.txt", "file:///d/b.txt"]
+    check("rows dropped where they already live are refused", Drag.canDropInto(wire[Drag.ROWS_MIME], urls, "/d"), false)
+    check("and taken into another directory", Drag.canDropInto(wire[Drag.ROWS_MIME], urls, "/e"), true)
+    check("a drag carrying no paths is refused", Drag.canDropInto(wire[Drag.ROWS_MIME], [], "/e"), false)
+    var moved = []
+    check("same filesystem, no ctrl: a move", Drag.dropInto(pane(moved, [], rows), wire[Drag.ROWS_MIME], urls, "/e", 42), true)
+    check("of those paths into that directory", JSON.stringify(moved),
+          JSON.stringify([{ c: "transfer", op: "move", paths: ["/d/a.txt", "/d/b.txt"], dest: "/e" }]))
+    var crossed = []
+    Drag.dropInto(pane(crossed, [], rows), wire[Drag.ROWS_MIME], urls, "/e", 7)
+    check("another filesystem copies", crossed[0].op, "copy")
+    var unknown = []
+    Drag.dropInto(pane(unknown, [], rows), wire[Drag.ROWS_MIME], urls, "/e", 0)
+    check("and so does a destination whose filesystem is unknown", unknown[0].op, "copy")
+    var foreign = []
+    Drag.dropInto(pane(foreign, [], rows), "", urls, "/e", 42)
+    check("a foreign drag copies whatever the devices say", foreign[0].op, "copy")
+    var refused = []
+    check("a refused drop sends nothing", Drag.dropInto(pane(refused, [], rows), wire[Drag.ROWS_MIME], urls, "/d", 42), false)
+    check("and nothing reached the backend", refused.length, 0)
     var refused = []
     check("a drop of a folder onto itself sends nothing", Drag.drop(pane(refused, [], rows), [0, 2], 0, false), false)
     check("and nothing went out", refused.length, 0)
@@ -81,17 +118,14 @@ function run(check) {
 
     var external = []
     check("an external drop on a folder sends one transfer",
-          Drag.dropExternal(pane(external, [], rows), ["file:///x/a.txt", "file:///x/b.txt"], 0), true)
+          Drag.dropInto(pane(external, [], rows), "", ["file:///x/a.txt", "file:///x/b.txt"], "/d/omarchy", 0), true)
     check("and it is a copy of those paths into that folder",
           JSON.stringify(external),
           JSON.stringify([{ c: "transfer", op: "copy", paths: ["/x/a.txt", "/x/b.txt"], dest: "/d/omarchy" }]))
+    // A file row and a row not loaded are refused before any drop by ui/List.qml's own canDrop above.
     var extRefused = []
-    check("an external drop on a file sends nothing",
-          Drag.dropExternal(pane(extRefused, [], rows), ["file:///x/a.txt"], 3), false)
-    check("an external drop on a row that is not loaded sends nothing",
-          Drag.dropExternal(pane(extRefused, [], rows), ["file:///x/a.txt"], 9), false)
     check("an external drop carrying no local file sends nothing",
-          Drag.dropExternal(pane(extRefused, [], rows), ["https://example.com/a.txt"], 0), false)
+          Drag.dropInto(pane(extRefused, [], rows), "", ["https://example.com/a.txt"], "/d/omarchy", 0), false)
     check("and nothing went out from any of them", extRefused.length, 0)
 
     // What the drag puts on the wire, and the marker that tells Flea's own drag from a foreign one.
@@ -184,7 +218,7 @@ function run(check) {
                        Drag.markerCopying("some-other-flea\n0,2\nmove"), 56, 56), "copy")
 
     var fromOtherFlea = []
-    Drag.dropExternal(pane(fromOtherFlea, [], rows), ["file:///x/a.txt"], 0)
+    Drag.dropInto(pane(fromOtherFlea, [], rows), "some-other-flea\n0\nmove\n/x\n56", ["file:///x/a.txt"], "/d/omarchy", 56)
     check("a drop from another Flea window copies, like any other foreign source",
           fromOtherFlea.length === 1 ? fromOtherFlea[0].op : "nothing sent", "copy")
 }

@@ -233,6 +233,34 @@ release; sleep 0.8
 check "a release over empty space transfers nothing" \
       "$([ -e "$HOMEDIR/r1b.txt" ] && echo kept || echo GONE)" "kept"
 
+# ---------------------------------------------------------------- R5
+echo
+echo "== R5: a drag resting on a tab selects it, and the drop lands on that tab's floor =="
+# GM's ruling. The second tab is walked into bbb through the path bar, the first tab is shown again,
+# then r1a.txt is lifted, rested on the second tab past ui/TabBar.qml's hoverSwitchMs, and released
+# on the empty floor under the rows. The marker resolves the drop by path, because after the switch
+# the row indices name bbb's own rows; a same-filesystem move is what a plain drag means.
+export PATH="$HOME/.local/bin:$PATH"
+omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.5
+omarchy-drive key --window flea : >/dev/null 2>&1; sleep 0.3
+omarchy-drive key --window flea "$HOMEDIR/bbb" >/dev/null 2>&1; sleep 0.2
+omarchy-drive key --window flea -k Return >/dev/null 2>&1; sleep 0.6
+check "the second tab shows bbb" "$(ipc path)" "$HOMEDIR/bbb"
+omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.6
+check "and the first tab is the home listing again" "$(ipc path)" "$HOMEDIR"
+set -- $(screen_centre r1a.txt); sx=$1; sy=$2
+set -- $(ipc tabCentre 1); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+warp "$sx" "$sy"; sleep 0.4
+press; sleep 0.3
+glide_to "$tx" "$ty"; sleep 1.0
+check "resting on the second tab selected it" "$(ipc tabIndex)" "1"
+glide_to "$tx" $(( WY + 700 )); sleep 0.6
+release; sleep 0.6
+wait_for "$HOMEDIR/bbb/r1a.txt" present
+check "the file landed on the second tab's floor" \
+      "$([ -e "$HOMEDIR/bbb/r1a.txt" ] && echo bbb || echo missing)" "bbb"
+check "as a move, so the source is gone" \
+      "$([ -e "$HOMEDIR/r1a.txt" ] && echo still-there || echo moved)" "moved"
 echo
 echo "$((pass + fail)) checks, $fail failed"
 [ "$fail" = 0 ] || exit 1

@@ -24,6 +24,9 @@ Item {
         return Math.round(Math.max(minW, Math.min(maxW, avail / n)))
     }
 
+    // How long a drag rests on a tab before the tab is selected: long enough to cross it on the way elsewhere.
+    readonly property int hoverSwitchMs: 400
+
     visible: root.open
     implicitHeight: Theme.chromeHeight
     height: visible ? implicitHeight : 0
@@ -74,6 +77,23 @@ Item {
                 Accessible.onPressAction: if (pane) Tabs.selectAt(pane, tab.index)
 
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
+
+                // GM's ruling: a drag resting on a tab selects it so the drop can land in that tab's
+                // listing, and a drop on the tab itself lands there too, by path, see ui/DropInto.qml.
+                Flea.DropInto {
+                    anchors.fill: parent
+                    pane: root.pane
+                    dest: Tabs.pathAt(root.tabs, root.currentIndex, tab.index, root.path)
+                    destDev: tab.current && root.pane && root.pane.backend ? root.pane.backend.dirDev : 0
+                    onEntered: hoverSwitch.restart()
+                    onExited: hoverSwitch.stop()
+                    onDropped: hoverSwitch.stop()
+                }
+                Timer {
+                    id: hoverSwitch
+                    interval: root.hoverSwitchMs
+                    onTriggered: if (root.pane && !tab.current) Tabs.selectAt(root.pane, tab.index)
+                }
 
                 Rectangle {
                     anchors.fill: parent

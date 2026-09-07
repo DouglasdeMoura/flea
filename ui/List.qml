@@ -123,7 +123,9 @@ ListView {
             // external drag on its mime types, so naming the type here is the whole of accepting one.
             keys: [root.dragKey, "text/uri-list"]
             onEntered: function (drag) {
-                if (!DragOps.canDrop(root.dragRows, cell.listingIndex, cell.row)) {
+                // Rows lifted from another listing carry indices that mean nothing here, so none is excluded.
+                var carried = DragOps.sameListing(drag.getDataAsString(root.dragKey), root.pane.path) ? root.dragRows : []
+                if (!DragOps.canDrop(carried, cell.listingIndex, cell.row)) {
                     drag.accepted = false
                     return
                 }
@@ -145,15 +147,14 @@ ListView {
                 // application and not the process, so another Flea window matched it, resolved its
                 // indices against this listing's own empty selection, and dropped nothing at all.
                 var marker = drop.getDataAsString(root.dragKey)
-                if (DragOps.isOwnDrag(marker)) {
+                if (DragOps.sameListing(marker, root.pane.path)) {
                     root.dropped(cell.listingIndex, root.verbAt(marker, cell.row) === "copy")
                     drop.accept(Qt.CopyAction)
                     return
                 }
-                // Another Flea window is a foreign source like any other: it arrives by path, never
-                // by row, and it copies. Both branches accept a copy and never the proposed action,
-                // so no source deletes its own file on the strength of this drop.
-                DragOps.dropExternal(root.pane, drop.urls, cell.listingIndex)
+                // Rows lifted before a tab switch changed this listing, another Flea window and any other
+                // application all arrive by path; ui/js/Drag.js dropInto decides the verb from the marker.
+                DragOps.dropInto(root.pane, marker, drop.urls, root.pane.join(root.pane.path, cell.row.n), cell.row.v)
                 root.dropIndex = -1
                 root.dragCopy = false
                 drop.accept(Qt.CopyAction)

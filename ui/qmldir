@@ -29,6 +29,7 @@ RenameField 1.0 RenameField.qml
 EmptyState 1.0 EmptyState.qml
 DeviceMounts 1.0 DeviceMounts.qml
 DropboxMark 1.0 DropboxMark.qml
+DropInto 1.0 DropInto.qml
 Glyph 1.0 Glyph.qml
 GridTile 1.0 GridTile.qml
 GridArea 1.0 GridArea.qml
