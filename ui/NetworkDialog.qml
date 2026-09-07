@@ -40,6 +40,8 @@ Item {
         root.statusText = ""
         root.retrying = false
         root.failedConnect = false
+        // The card is kept between opens, so a body scrolled last time would open scrolled.
+        body.contentY = 0
         form.reset()
         root.checkDropbox()
         root.opened = true
@@ -48,6 +50,7 @@ Item {
     }
 
     function openLocation(uri, label, password, reason, failed) {
+        body.contentY = 0
         form.load(root.valuesFor(uri, label, password))
         root.statusText = reason || ""
         root.retrying = true

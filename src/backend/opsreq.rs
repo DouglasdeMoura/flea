@@ -354,6 +354,7 @@ mod tests {
         let d = TestDir::new("symlinkedself");
         let real = d.dir("real");
         let file = d.file("real/a.txt", "body");
+        d.dir("real/deep");
         let link = d.join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let (tx, rx) = channel();
