@@ -14,9 +14,8 @@ Flickable {
     property var values: ({})
     property int cursor: 0
     property string side: "pane"
-    // The median section's rows, which is the height the card keeps for every section: half the
-    // sections fit whole and the rest scroll, and no section sits in a card mostly empty.
-    property real typical: 0
+    // The tallest section's rows, the height the card keeps for every section the way the network dialog keeps its tallest form's.
+    property real tallest: 0
 
     signal activated(int index)
     signal stepped(int index, int direction)
@@ -46,14 +45,13 @@ Flickable {
     }
 
     function remeasure() {
-        var heights = []
+        var tallest = 0
         for (var i = 0; i < sections.count; i++) {
             var column = sections.itemAt(i)
-            if (column)
-                heights.push(column.implicitHeight)
+            if (column && column.implicitHeight > tallest)
+                tallest = column.implicitHeight
         }
-        heights.sort(function (a, b) { return a - b })
-        root.typical = heights.length > 0 ? heights[Math.floor(heights.length / 2)] : 0
+        root.tallest = tallest
     }
 
     Repeater {

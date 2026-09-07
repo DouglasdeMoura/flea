@@ -177,7 +177,7 @@ Item {
         // Each side carries its own inset, above the first row and below the last, the way
         // Settings.dc.html gives the rail column a 10 of its own and the pane the row padding.
         height: Math.min(root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
-                                                          pane.typical + 2 * Theme.spacing.rowPaddingY),
+                                                          pane.tallest + 2 * Theme.spacing.rowPaddingY),
                          root.height - root.clampMargin)
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
