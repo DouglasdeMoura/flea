@@ -287,8 +287,10 @@ check "so aaa is no longer row 0 on this tab" "$([ "$(rowidx aaa)" -gt 0 ] && ec
 set -- $(screen_centre aaa); fx=$1; fy=$2
 omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
 check "and the home tab does not" "$(rowidx .r0hidden || echo none)" "none"
-# A selection the tab restore brought back would ride along with the lift, so it is cleared first.
+# A selection the tab restore brought back would ride along with the lift, so it is cleared first,
+# and aaa's listing is read now: R2 already moved a file into it, so the drop is judged by the delta.
 omarchy-drive key --window flea -k Escape >/dev/null 2>&1; sleep 0.3
+aaa_before=$(ls "$HOMEDIR/aaa" | tr '\n' ' ')
 set -- $(screen_centre r1b.txt); sx=$1; sy=$2
 set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
 warp "$sx" "$sy"; sleep 0.4
@@ -300,7 +302,7 @@ release; sleep 0.6
 wait_for "$HOMEDIR/aaa/r1b.txt" present
 check "the lifted file landed in the folder under the drop" \
       "$([ -e "$HOMEDIR/aaa/r1b.txt" ] && echo aaa || echo missing)" "aaa"
-check "and no other file moved" "$(ls "$HOMEDIR/aaa" | tr '\n' ' ')" "r1b.txt "
+check "and no other file moved" "$(ls "$HOMEDIR/aaa" | tr '\n' ' ')" "${aaa_before}r1b.txt "
 check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
 echo
 echo "$((pass + fail)) checks, $fail failed"
