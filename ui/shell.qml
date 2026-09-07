@@ -132,11 +132,40 @@ ShellRoot {
                 pane: pane
             }
 
+            // The Omarchy mark's one placement: over the list area alone, so the rail stays live.
+            // In the columns view that area is all three columns, so the mark takes the middle one:
+            // an empty current directory is that column's answer, not the parent column's.
+            // listArea is measured inside pane, which starts below the chrome bar, so pane's own y is added; pane.x is zero.
+            // Declared before the pane, so it paints under the pane's own context menu and over this
+            // Rectangle's ground: a negative z put it under that ground and hid it outright.
+            Flea.EmptyState {
+                id: emptyState
+                x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
+                y: pane.y + pane.listArea.y
+                width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listArea.width
+                height: pane.listArea.height
+                visible: pane.listingState === "empty"
+                // The design's no-match answer: the search mark over the query it could not find.
+                caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery : ""
+                mark: "search"
+                // A search that found nothing keeps its own way out, because that sentence is the
+                // state's answer and not an advertisement. The empty directory's next move is a
+                // shortcut, so it draws only with the Menus section's hints row on.
+                hint: pane.searchMode === "results" ? "Press Escape to clear."
+                    : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""
+            }
+
+            // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.
+            Flea.LoadingState {
+                x: pane.listArea.x
+                y: pane.y + pane.listArea.y
+                width: pane.listArea.width
+                height: pane.listArea.height
+                visible: pane.listingState === "loading"
+            }
+
             Flea.Pane {
                 id: pane
-                // Above the empty and loading marks below, so its own context menu paints over them; a
-                // negative z on the marks put them under this Rectangle's own paint and hid them outright.
-                z: 1
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: tabBar.bottom
@@ -250,37 +279,6 @@ ShellRoot {
                 function onNetworkRetryRequested(uri, label, password, reason, failedConnect) {
                     networkDialog.openLocation(uri, label, password, reason, failedConnect)
                 }
-            }
-
-            // The Omarchy mark's one placement: over the list area alone, so the rail stays live.
-            // In the columns view that area is all three columns, so the mark takes the middle one:
-            // an empty current directory is that column's answer, not the parent column's.
-            // listArea is measured inside pane, which starts below the chrome bar, so pane's own y is added; pane.x is zero.
-            // Below the pane: its context menu is the pane's child, and the caption was painted over it.
-            Flea.EmptyState {
-                id: emptyState
-                x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
-                y: pane.y + pane.listArea.y
-                width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listArea.width
-                height: pane.listArea.height
-                visible: pane.listingState === "empty"
-                // The design's no-match answer: the search mark over the query it could not find.
-                caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery : ""
-                mark: "search"
-                // A search that found nothing keeps its own way out, because that sentence is the
-                // state's answer and not an advertisement. The empty directory's next move is a
-                // shortcut, so it draws only with the Menus section's hints row on.
-                hint: pane.searchMode === "results" ? "Press Escape to clear."
-                    : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""
-            }
-
-            // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.
-            Flea.LoadingState {
-                x: pane.listArea.x
-                y: pane.y + pane.listArea.y
-                width: pane.listArea.width
-                height: pane.listArea.height
-                visible: pane.listingState === "loading"
             }
 
             // A bare Network entry's own shares, same listArea placement as EmptyState above.

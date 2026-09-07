@@ -272,18 +272,21 @@ echo
 echo "== R6: a tab on the same directory re-lists under the drag, and the drop still names the lifted file =="
 # The second tab shows hidden files, so .r0hidden takes index 0 and every row below it shifts by one.
 # A drop resolved by the lifted index would move the row now sitting there; by path it moves r1b.txt.
-omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.5
-omarchy-drive key --window flea . >/dev/null 2>&1; sleep 0.6
-check "the second tab shows the hidden file" "$(rowidx .r0hidden)" "0"
-omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.6
+omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.8
+omarchy-drive key --window flea . >/dev/null 2>&1
+for i in $(seq 1 40); do [ "$(ipc showHidden)" = "true" ] && [ -n "$(rowidx .r0hidden)" ] && break; sleep 0.1; done
+# Directories sort first, so the dotfile lands after aaa and bbb and shifts every text file by one.
+check "the second tab shows the hidden file after the folders" "$(rowidx .r0hidden)" "2"
+omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
 check "and the first tab does not" "$(rowidx .r0hidden || echo none)" "none"
+# aaa is row 0 in both tabs, so its centre is read here, before the drag's nested loop and re-list.
+set -- $(screen_centre aaa); fx=$1; fy=$2
 set -- $(screen_centre r1b.txt); sx=$1; sy=$2
 set -- $(ipc tabCentre 1); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
 glide_to "$tx" "$ty"; sleep 1.2
 check "resting on the same-directory tab selected it" "$(ipc tabIndex)" "1"
-set -- $(screen_centre aaa); fx=$1; fy=$2
 glide_to "$fx" "$fy"; sleep 0.6
 release; sleep 0.6
 wait_for "$HOMEDIR/aaa/r1b.txt" present
