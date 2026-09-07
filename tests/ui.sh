@@ -5731,9 +5731,15 @@ settings_doors() {
 # until Flea is told otherwise, that an override takes one of seven stops and not a free number, and
 # that the monitor scale is read-only. Every stop is walked and its whole token row is read back off
 # the live seam against the board's own layout table, because the table is the contract.
+# The title's centre with the Display section up: GM's ruling is that the card keeps one place and
+# one height whichever section is up, so the two other sections are read against this.
+settings_title_on_display=""
+
 settings_display() {
     key , >/dev/null
     settle
+    settings_title_on_display=$(ipc settingsTitleCentre)
+    [[ -n "$settings_title_on_display" ]] || fail "settings: the panel has no title to measure"
     local omarchy_base
     omarchy_base=$(token_of baseSize)
     [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
@@ -5880,6 +5886,8 @@ settings_menus() {
     key , >/dev/null
     settle
     settings_section menus
+    [[ "$(ipc settingsTitleCentre)" == "$settings_title_on_display" ]] \
+        || fail "settings: the card moved when Menus came up, title at $(ipc settingsTitleCentre) against $settings_title_on_display"
     [[ "$(ipc settingsRows)" == *"master|All basic file actions|6 of 6"* ]] \
         || fail "settings: the master row does not start at six of six, got $(ipc settingsRows)"
     shot settings-menus
@@ -5988,6 +5996,8 @@ settings_keys() {
     key , >/dev/null
     settle
     settings_section keys
+    [[ "$(ipc settingsTitleCentre)" == "$settings_title_on_display" ]] \
+        || fail "settings: the card moved when Keys came up, title at $(ipc settingsTitleCentre) against $settings_title_on_display"
     # The shipped preset is "default", which ui/js/Settings.js labels Default and PRESET_KEYS gives
     # ctrl-1 to ctrl-3; a window that starts anywhere else is not the one this checks the toggle on.
     [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Default"* ]] \
