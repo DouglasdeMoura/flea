@@ -111,6 +111,9 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   key j; sleep 0.3; key j; sleep 0.3; menus=$(at settingsTitleCentre)
   check "$size and on to menus" "$(ipc settingsSection)" "menus"
   check "$size settings title height is the same on keys, display and menus" "$keys|$menus" "$display|$display"
+  # Menus is the tallest section, and the card keeps its height, so at a full tile nothing of it scrolls.
+  IFS='|' read -r _ sh svh <<<"$(at settingsScroll)"
+  [ "$size" = tiled ] && check "$size the tallest section fits the card whole" "$([ "${sh:-x}" -le "${svh:-0}" ] 2>/dev/null && echo fits || echo "clipped (${sh:-none} > ${svh:-none})")" "fits"
   rect_inside "$size settings card" "$(ipc settingsCardRect)"
   omarchy-drive shot "$evidence_dir/settings-$size.png" flea >/dev/null 2>&1
   key -k Escape; sleep 0.4

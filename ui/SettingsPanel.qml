@@ -153,6 +153,7 @@ Item {
 
     function showCursor() { pane.showCursor(root.cursor) }
     function railItemFor(id) { return rail.itemFor(id) }
+    function paneScroll() { return Math.round(pane.contentY) + "|" + Math.round(pane.contentHeight) + "|" + Math.round(pane.height) }
 
     anchors.fill: parent
     visible: root.opened
@@ -178,7 +179,7 @@ Item {
         // Settings.dc.html gives the rail column a 10 of its own and the pane the row padding.
         height: Math.min(root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
                                                           pane.tallest + 2 * Theme.spacing.rowPaddingY),
-                         root.height - root.clampMargin)
+                         root.height - 2 * root.clampMargin)
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: Theme.color.muted

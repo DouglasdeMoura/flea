@@ -6085,15 +6085,20 @@ trap cleanup EXIT
 
 # rows_run_under "<x y w h>" <label>: rows other than the parked row 0 lie under the whole card, so a press that runs on moves the cursor.
 rows_run_under() {
-    local card="$1" label="$2" cx cy cw ch visible last first
+    local card="$1" label="$2" cx cy cw ch visible last first second
+    [[ "$card" =~ ^[0-9]+\ [0-9]+\ [0-9]+\ [0-9]+$ ]] || fail "clickthrough: no card rect for $label, ipc answered [$card]"
     read -r cx cy cw ch <<< "$card"
     visible=$(ipc visibleRows)
-    [[ "$ch" =~ ^[0-9]+$ && "$visible" =~ ^[1-9][0-9]*$ ]] || fail "clickthrough: no geometry for $label (card rect [$card], visibleRows [$visible])"
+    [[ "$visible" =~ ^[1-9][0-9]*$ ]] || fail "clickthrough: no visible row count for $label, ipc answered [$visible]"
     last=$(ipc rowCentre $(( visible - 1 )))
     first=$(ipc rowCentre 0)
-    [[ "$last" =~ ^[0-9]+\ [0-9]+$ && "$first" =~ ^[0-9]+\ [0-9]+$ ]] || fail "clickthrough: no row centres for $label (row $(( visible - 1 )) [$last], row 0 [$first])"
+    second=$(ipc rowCentre 1)
+    [[ "$last" =~ ^[0-9]+\ [0-9]+$ && "$first" =~ ^[0-9]+\ [0-9]+$ && "$second" =~ ^[0-9]+\ [0-9]+$ ]] \
+        || fail "clickthrough: no row centres for $label (row $(( visible - 1 )) [$last], row 0 [$first], row 1 [$second])"
     [[ "${last#* }" -gt $(( cy + ch )) ]] || fail "clickthrough: the list does not run under $label (last visible row centre y ${last#* }, card bottom $(( cy + ch )))"
-    [[ "${first#* }" -lt "$cy" ]] || fail "clickthrough: the parked row 0 reaches under $label (row 0 centre y ${first#* }, card top $cy)"
+    # The seam between rows 0 and 1 is the bottom of the parked row, and it must clear the card's top edge.
+    [[ $(( (${first#* } + ${second#* }) / 2 )) -lt "$cy" ]] \
+        || fail "clickthrough: the parked row 0 reaches under $label (rows 0 and 1 centres y ${first#* } ${second#* }, card top $cy)"
 }
 
 # The cursor parks on row 0 above the card, so a press that runs on from an overlay control to any row beneath moves it.
