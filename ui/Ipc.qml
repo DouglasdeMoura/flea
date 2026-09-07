@@ -209,7 +209,7 @@ QtObject {
         function emptyShown(): bool { return root.pane.listingState === "empty" }
         // "x y width height" of the empty mark in window pixels, for a painted-pixel count: the state
         // flag above cannot see a mark drawn under its own parent's paint.
-        function emptyMarkRect(): string { return root.fleaWindow.rectOf(root.emptyState) }
+        function emptyMarkRect(): string { return root.emptyState ? root.fleaWindow.rectOf(root.emptyState.markItem) : "" }
         function rowAt(i: int): string {
             var item = root.pane.itemFor(i)
             return item ? item.describe() : "loading"
