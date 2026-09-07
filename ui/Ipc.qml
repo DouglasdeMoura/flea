@@ -109,7 +109,7 @@ QtObject {
         function settingsTitleCentre(): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.titleItem) : "" }
         // A rail row's centre, clicked over the list by tests/ui.sh clickthrough to prove the press stops at the panel.
         function settingsRailRowCentre(id: string): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.railItemFor(id)) : "" }
-        // contentY|contentHeight|height of the settings pane, so the battery can require the tallest section to fit whole.
+        // contentHeight|height of the settings pane, so the battery can require every section to fit the card whole at a tile.
         function settingsScroll(): string { return root.settingsPanel ? root.settingsPanel.paneScroll() : "" }
         // Each card's rectangle, so the window-size battery asserts every overlay stays on screen.
         function settingsCardRect(): string { return root.settingsPanel ? root.fleaWindow.rectOf(root.settingsPanel.cardItem) : "" }

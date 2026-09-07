@@ -153,7 +153,7 @@ Item {
 
     function showCursor() { pane.showCursor(root.cursor) }
     function railItemFor(id) { return rail.itemFor(id) }
-    function paneScroll() { return Math.round(pane.contentY) + "|" + Math.round(pane.contentHeight) + "|" + Math.round(pane.height) }
+    function paneScroll() { return Math.round(pane.contentHeight) + "|" + Math.round(pane.height) }
 
     anchors.fill: parent
     visible: root.opened
