@@ -11,7 +11,7 @@
 // The orders the backend can actually produce, in the order s steps through them, and the only keys
 // that may move the recorded order. It is not the list of what gets refused: docs/protocol.md "sort"
 // refuses every other key by name, and the backend is the one that says so, see ui/js/Errors.js.
-var ORDERS = ["name", "size", "mtime"]
+var ORDERS = ["name", "size", "mtime", "kind"]
 
 // ui/Header.qml's click. The column already sorted reverses; any other column starts ascending,
 // which is the order the canvas's own header draws beside "Name". Only ORDERS may leave this file.

@@ -128,6 +128,11 @@ Item {
         target: pane.backend
 
         function onListed(total, readMs, sortMs) {
+            if (!pane.listInFlight && pane.searchMode.length === 0) {
+                ViewState.changeLeaf("sort", { key: pane.backend.sortBy === "mtime" ? "date" : pane.backend.sortBy,
+                                             reverse: pane.backend.sortDesc })
+                pane.appliedListingPreferences = pane.listingPreferences
+            }
             if (pane.listInFlight) {
                 pane.listedSeen = true
             }

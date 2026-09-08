@@ -29,7 +29,7 @@ FocusScope {
     property string stateMessage: ""
     property int lockedMode: 0
     // Off by default: dotfiles stay out of every listing until the context menu or "." turns them on.
-    property bool showHidden: false
+    property bool showHidden: ViewState.state.hidden === true
     // Issue 27's state-file key: with it on a cursor step past an end comes round; ui/js/Focus.js step is the only reader.
     readonly property bool wrapAtEnds: ViewState.state.wrapAtEnds === true
     // When the first d of the dd pair landed; ui/js/Focus.js reads it and Nav's reset clears it.
@@ -130,9 +130,34 @@ FocusScope {
     readonly property string home: Quickshell.env("HOME") || ""
 
     // "list", "columns" or "grid"; the chrome's own buttons write it and the views read it.
-    property string viewMode: "list"
+    property string viewMode: ViewState.state.view || "list"
     // Only the list view draws a filter, so leaving it takes the filter with it.
-    onViewModeChanged: Filter.close(root)
+    onViewModeChanged: {
+        Filter.close(root)
+        ViewState.changeKey("view", root.viewMode)
+    }
+    readonly property string listingPreferences: JSON.stringify([ViewState.state.hidden, ViewState.state.sort,
+        ViewState.state.foldersFirst, ViewState.state.groupByKind])
+    property string appliedListingPreferences: ""
+    onListingPreferencesChanged: preferences.restart()
+    onListInFlightChanged: if (!root.listInFlight) preferences.restart()
+    Timer {
+        id: preferences
+        interval: 0
+        onTriggered: {
+            var desired = ViewState.state.view || "list"
+            if (root.viewMode !== desired) root.viewMode = desired
+            if (!root.path || root.listInFlight || root.searchMode.length > 0
+                    || root.appliedListingPreferences === root.listingPreferences) return
+            root.showHidden = ViewState.state.hidden === true
+            root.openWithoutHistory(root.path)
+        }
+    }
+    Connections {
+        target: ViewState
+        function onStateChanged() { preferences.restart() }
+    }
+
 
     // Directories already visited, newest last, so the chrome's back arrow has somewhere to go.
     // Deliberately not a forward stack: the canvas draws one arrow, not two.
@@ -179,6 +204,7 @@ FocusScope {
     // Re-listing also clears the cursor and selection, the same as opening any other directory.
     function toggleHidden() {
         root.showHidden = !root.showHidden
+        ViewState.changeKey("hidden", root.showHidden)
         root.open(root.path)
     }
 
@@ -316,6 +342,7 @@ FocusScope {
         active: root.viewMode === "grid" || root.gridBuilt
         focus: root.viewMode === "grid"
         anchors { top: filterStrip.bottom; left: sidebar.right; right: parent.right; bottom: parent.bottom }
+        anchors.rightMargin: selectionPreview.width
         Component.onCompleted: setSource("GridArea.qml", { pane: root, menu: menu })
         onLoaded: { root.gridBuilt = true; item.visible = Qt.binding(function () { return root.viewMode === "grid" }) }
     }
@@ -333,8 +360,29 @@ FocusScope {
         function onDirSizesCancelled() { root.dirSizeState = DirSizes.cancelled(root.dirSizeState) }
     }
 
+    Loader {
+        id: selectionPreview
+        active: ViewState.previewColumn && root.viewMode !== "columns"
+        visible: active
+        anchors.top: filterStrip.bottom
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        width: active ? Math.floor((root.width - sidebar.width) / 3) : 0
+        sourceComponent: Flea.SelectionPreview {
+            pane: root
+            onThumbsApplied: function (work) { root.thumbState = Thumbs.applied(root.thumbState, work) }
+        }
+    }
+    readonly property int previewIndex: selectionPreview.item ? selectionPreview.item.loadedIndex : -1
+    function loadSelectionPreview() {
+        if (!ViewState.previewColumn) ViewState.changeLeaf("preview", { column: true })
+        if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()
+        else if (selectionPreview.item) selectionPreview.item.loadSelection()
+    }
+
     Flea.List {
         id: list
+        anchors.rightMargin: selectionPreview.width
         visible: root.viewMode === "list"
         focus: root.viewMode === "list"
         anchors.top: filterStrip.bottom

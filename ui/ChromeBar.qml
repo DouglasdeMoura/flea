@@ -201,9 +201,23 @@ Item {
         // The tail identifies the directory, so a path too long for the bar loses its head: the row
         // slides left inside a clipped slot, which is the left elision the single Text drew, made of
         // pieces a click can land on.
+        Text {
+            anchors.fill: parent
+            visible: !root.editing && ViewState.addressBar === "path"
+            text: root.home && (root.path === root.home || root.path.indexOf(root.home + "/") === 0)
+                  ? "~" + root.path.substring(root.home.length) : root.path
+            color: Theme.color.foreground
+            font.family: Theme.font.family
+            font.pixelSize: Theme.font.caption
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideLeft
+            textFormat: Text.PlainText
+            TapHandler { onDoubleTapped: root.startEdit() }
+        }
+
         Item {
             id: crumbSlot
-            visible: !root.editing
+            visible: !root.editing && ViewState.addressBar === "breadcrumb"
             anchors.fill: parent
             clip: true
 

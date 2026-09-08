@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
+import qs.Commons
 import "js/Icons.js" as Icons
 
 // One row or sidebar mark, chosen by name. Lucide's grid is 24 units at stroke 2, scaled to the slot.
@@ -34,8 +35,8 @@ Item {
             fillColor: "transparent"
             strokeWidth: root.strokeWidth
             // The Omarchy cut: square caps and mitered joins, the edge of the brand spiral; Icons.js paths are redrawn sharp to match.
-            capStyle: ShapePath.SquareCap
-            joinStyle: ShapePath.MiterJoin
+            capStyle: ViewState.hyprlandIcons && Style.cornerRadius > 0 ? ShapePath.RoundCap : ShapePath.SquareCap
+            joinStyle: ViewState.hyprlandIcons && Style.cornerRadius > 0 ? ShapePath.RoundJoin : ShapePath.MiterJoin
             // A mark with more than one stroke is one multi-subpath SVG string; see Icons.js "Lucide path data".
             PathSvg { path: Icons.pathFor(root.name) }
         }

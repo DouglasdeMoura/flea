@@ -64,10 +64,12 @@ Singleton {
         readonly property int caption: root.overridden ? TextSize.caption(root.baseSize) : Style.font.caption
     }
 
+    readonly property real densityRatio: ViewState.density === "compact" ? 0.5 : ViewState.density === "comfortable" ? 1.5 : 1
+
     readonly property QtObject spacing: QtObject {
         readonly property int hairline: Style.spacing.hairline
         readonly property int rowPaddingX: Math.round(Style.spacing.rowPaddingX * root.sizeRatio)
-        readonly property int rowPaddingY: Math.round(Style.spacing.controlPaddingY * root.sizeRatio)
+        readonly property int rowPaddingY: Math.round(Style.spacing.controlPaddingY * root.sizeRatio * root.densityRatio)
         readonly property int gap: Math.round(Style.spacing.rowGap * root.sizeRatio)
     }
 
@@ -98,7 +100,7 @@ Singleton {
     // The icon slot is the row's text line box, so an icon can never change the row height.
     readonly property int iconSize: root.rowHeight - 2 * root.spacing.rowPaddingY
     // A mark is sized from the type scale, never from its slot: 19, the canvas's own M.mark, is the row and menu one.
-    readonly property int markSize: Math.round(root.font.bodySmall * 1.45)
+    readonly property real markSize: root.font.bodySmall * 1.45
     // A mark standing alone takes its own step of the same scale: States.dc.html draws Locked and Error at 40.
     readonly property int stateMarkSize: Math.round(root.font.bodySmall * 3.1)
     // The brand moment, the empty hero and the loading crawl: 48, which is 6/5 of stateMarkSize on the same board.

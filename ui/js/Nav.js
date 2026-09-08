@@ -86,6 +86,7 @@ function openWithoutHistory(pane, newPath) {
     pane.lockedMode = 0
     pane.clearSelection()
     pane.listArea.primeSettle()
+    pane.appliedListingPreferences = pane.listingPreferences
     pane.backend.list(newPath, pane.windowSize, pane.showHidden)
     // One statfs per directory, not per row: the bar's right half only changes when the pane moves.
     pane.backend.askFsInfo()

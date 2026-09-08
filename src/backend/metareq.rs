@@ -374,7 +374,7 @@ mod tests {
     // The real path a meta request takes: run.rs hands spawn these arguments and reads back one OpMsg.
     fn answered(path: &std::path::Path) -> Option<String> {
         let (tx, rx) = std::sync::mpsc::channel();
-        spawn(7, path.to_path_buf(), true, false, None, tx);
+        spawn(7, path.to_path_buf(), true, false, None, 0, tx);
         match rx.recv_timeout(BOUND) {
             Ok(OpMsg::Meta { line }) => Some(line),
             _ => None,

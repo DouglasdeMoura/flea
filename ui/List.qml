@@ -336,7 +336,8 @@ ListView {
         // A filtered viewport covers a set and not a run, so the run it spans is what the planner
         // gets and Filter.cut takes back every row inside that run the filter is hiding.
         var span = Filter.span(root.pane.shown, view.first, view.last)
-        var work = Filter.cut(Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, span.first, span.last), root.pane.shown)
+        var work = Filter.cut(Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, span.first, span.last, ViewState.thumbnailMode), root.pane.shown)
+        work.drop = work.drop.filter(function (index) { return index !== root.pane.previewIndex })
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
         // The short first settle latches to the fling debounce only once a request has actually gone out.
@@ -346,7 +347,7 @@ ListView {
     }
 
     function thumbFor(index) {
-        return Thumbs.fileFor(root.pane.thumbState, index)
+        return Thumbs.allowed(root.pane.rowFor(index), ViewState.thumbnailMode) ? Thumbs.fileFor(root.pane.thumbState, index) : ""
     }
 
     function dirSizeFor(index) {
@@ -360,7 +361,7 @@ ListView {
         // Thumbs.viewport() is reused: it takes no thumb-specific state, only geometry.
         var view = Thumbs.viewport(root.contentY, Theme.rowHeight, root.pane.visibleRows, root.pane.shownTotal)
         var span = Filter.span(root.pane.shown, view.first, view.last)
-        var ask = Filter.keep(DirSizes.plan(root.pane.dirSizeState, root.pane.rows, root.pane.held, span.first, span.last), root.pane.shown)
+        var ask = Filter.keep(DirSizes.plan(root.pane.dirSizeState, root.pane.rows, root.pane.held, span.first, span.last, ViewState.thumbnailMode), root.pane.shown)
         if (ask.length > 0) {
             root.pane.backend.dirsize(ask)
             settle.interval = root.pane.settleMs
