@@ -76,15 +76,18 @@ drain_wait_s=30
 # Hard rule 9 covers writes, not only deletes: an overridable path that is truncated or written into
 # is the same hazard as one that is deleted, so both of these are pinned rather than taken from the
 # environment. Neither override had a caller.
-evidence_dir=/tmp/flea-ui-evidence
+run_root=$(mktemp -d /tmp/flea-ui-run.XXXXXXXX) || fail "cannot create native evidence sandbox"
+printf 'flea native evidence\n' > "$run_root/.flea-test-sandbox"
+evidence_dir="$run_root/evidence"
 # Quickshell truncates nothing, so each case gets a fresh log and every log lands in the run log.
-flea_log=/tmp/flea.log
-run_log=/tmp/flea-ui-run.log
+flea_log="$run_root/flea.log"
+run_log="$run_root/run.log"
 # One case's own output, re-read for the refusal check rather than piped. Pid-scoped like every
 # fixture root here, because two runs sharing it would read each other's output, and truncated before
 # each case because a failed redirect would otherwise leave the previous case's bytes for the
 # refusal grep to find and report a refusal for a case that never ran.
-case_log=/tmp/flea-ui-case-$$.log
+case_log="$run_root/case.log"
+printf 'NATIVE_EVIDENCE_ROOT=%s\n' "$run_root"
 
 # Ten bursts of twelve clicks moved the 100k viewport about eleven rows when measured.
 scroll_bursts=10
@@ -237,7 +240,6 @@ cleanup() {
     for root in "$fixture_root" "$thumb_fixture" "$hash_fixture" "$stale_fixture"; do
         sandbox_remove "$root"
     done
-    rm -f "$case_log"
     cache_restore
     if [[ "$wedged" -eq 1 ]]; then
         printf 'FAIL drain at exit\n'

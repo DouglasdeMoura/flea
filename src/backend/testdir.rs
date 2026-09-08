@@ -104,10 +104,8 @@ mod tests {
         // A relative path can be anything the caller's cwd makes it, so it never qualifies.
         assert!(!removable(Path::new("flea-test-relative")));
         // Right shape, right place, no marker.
-        let bare = std::env::temp_dir().join(format!("{}bare-{}", PREFIX, std::process::id()));
-        std::fs::create_dir_all(&bare).expect("bare");
+        let bare = outside.dir(&format!("{}bare", PREFIX));
         assert!(!removable(&bare));
-        std::fs::remove_dir(&bare).expect("bare cleanup");
     }
 
     #[test]
