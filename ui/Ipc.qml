@@ -201,6 +201,7 @@ QtObject {
         function rowRect(i: int): string { return root.fleaWindow.rectOf(root.pane.visibleItemFor(i)) }
         // Ready is the decoded image on screen; a path alone is not a thumbnail, see GridTile.thumbDrawn.
         function rowThumbReady(i: int): bool { var item = root.pane.visibleItemFor(i); return item && item.iconStatus !== undefined ? item.iconStatus === Image.Ready : false }
+        function columnPlayerLoaded(): bool { return root.columns ? root.columns.playerLoaded() : false }
         function columnFrameRect(): string { return root.columns ? root.fleaWindow.rectOf(root.columns.frameItem()) : "" }
         function columnChildEmpty(): string { var e = root.columns ? root.columns.childEmptyItem() : null; return e ? e.visible + " " + e.opacity.toFixed(2) + " " + e.markItem.opacity.toFixed(2) : "" }
         function columnChildMarkRect(): string { var e = root.columns ? root.columns.childEmptyItem() : null; return e ? root.fleaWindow.rectOf(e.markItem) : "" }

@@ -111,6 +111,7 @@ Item {
     function childItemAt(index) { return childColumn.itemAtIndex(index) }
     function childEmptyItem() { return childColumn.emptyItem }
     function frameItem() { return preview.frameItem }
+    function playerLoaded() { return preview.playerLoaded() }
 
     function activateNeighbour(base, name, isDir) {
         var target = root.pane.join(base, name)

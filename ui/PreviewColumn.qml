@@ -115,7 +115,8 @@ Item {
                 id: playerLoader
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.hairline
-                active: root.wantsPlayback
+                // Its life is the strip's: a state that hides the strip (a multi-selection, a directory) tears the player down.
+                active: root.wantsPlayback && mediaLoader.active
                 visible: active && root.previewState === Facts.VIDEO
                 source: "PreviewMedia.qml"
                 onLoaded: {
@@ -274,6 +275,8 @@ Item {
             height: active ? Theme.chromeHeight : 0
             active: root.previewState === Facts.VIDEO || root.previewState === Facts.AUDIO
             sourceComponent: mediaTransport
+            // Play is a fresh press after the strip returns, never a player that survived its absence.
+            onActiveChanged: if (!active) root.wantsPlayback = false
         }
 
         // corner: a filename is arbitrary text, so PlainText, the same rule every name on this surface follows.
@@ -333,6 +336,8 @@ Item {
     function mediaPlaying() { return mediaLoader.item ? mediaLoader.item.playing : false }
     function mediaPosition() { return mediaLoader.item ? mediaLoader.item.position : 0 }
     function mediaStripItem() { return mediaLoader.item ? mediaLoader.item.strip : null }
+    // Whether a player object exists at all, for the teardown check; playing false alone would mask one that survived.
+    function playerLoaded() { return playerLoader.item !== null }
 
     // A multi-selection describes a count, not a file, so it names the count instead of a name.
     function nameText() {
