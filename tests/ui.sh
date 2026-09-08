@@ -2788,6 +2788,42 @@ case_stale() {
         || fail "the backend never regenerated the thumbnail, so the screen below has nothing new to show"
     (( blue_after > 0 )) || fail "the regenerated thumbnail drew no blue pixel, so the row is showing the old frame"
     (( red_after == 0 )) || fail "the row still draws $red_after red pixels of the thumbnail it replaced"
+
+    # The columns view draws the slot with its own Image, so the same regeneration runs once more under it, back to red.
+    local col_crop red_cols blue_cols
+    switch_view columns
+    for _attempt in $(seq 1 50); do
+        [[ "$(ipc rowThumbReady 0)" == "true" ]] && break
+        sleep 0.1
+    done
+    [[ "$(ipc rowThumbReady 0)" == "true" ]] || fail "columns: the row never decoded its thumbnail"
+    read -r cx cy cw ch <<< "$(ipc rowThumbRect 0)"
+    col_crop="${cw}x${ch}+${cx}+${cy}"
+    shot stale-columns-before
+    blue_cols=$(count_pixels "$evidence_dir/stale-columns-before.png" "$col_crop" "$icon_blue")
+    (( blue_cols > 0 )) || fail "columns: the row draws no blue pixel of the current thumbnail in $col_crop"
+    cp "$src/before.jpg" "$pics/one.jpg"
+    touch -d "@$(( $(date +%s) - 2 * stale_mtime_back_s ))" "$pics/one.jpg"
+    key h >/dev/null
+    wait_path "$stale_fixture/tree"
+    wait_listing 1
+    click_row 0 left --double
+    wait_path "$pics"
+    wait_listing 1
+    for _attempt in $(seq 1 50); do
+        [[ "$(ipc rowThumbReady 0)" == "true" && "$(ipc thumbFile 0)" == "$first_file" ]] && break
+        sleep 0.1
+    done
+    read -r cx cy cw ch <<< "$(ipc rowThumbRect 0)"
+    col_crop="${cw}x${ch}+${cx}+${cy}"
+    shot stale-columns-after
+    red_cols=$(count_pixels "$evidence_dir/stale-columns-after.png" "$col_crop" "$icon_red")
+    blue_cols=$(count_pixels "$evidence_dir/stale-columns-after.png" "$col_crop" "$icon_blue")
+    printf 'STALE columns file=%q red=%s blue=%s\n' "$(ipc thumbFile 0)" "$red_cols" "$blue_cols"
+    [[ "$(ipc thumbFile 0)" == "$first_file" ]] || fail "columns: the regenerated thumbnail landed at a new path, $(ipc thumbFile 0)"
+    (( red_cols > 0 )) || fail "columns: the regenerated thumbnail drew no red pixel, so the row is showing the old frame"
+    (( blue_cols == 0 )) || fail "columns: the row still draws $blue_cols blue pixels of the thumbnail it replaced"
+    switch_view list
     kill_flea
     sandbox_make "$stale_fixture"
 }
@@ -6369,7 +6405,7 @@ case_views() {
     local root="$fixture_root" pass mode dir r lit fx fy fw fh cx cy wx wy p1 p2 p3 p4 changed before
     for pass in grid list columns again; do views_fixture "$root/views-$pass"; done
     launch "$root"
-    wait_listing 4
+    wait_listing "$(ls "$root" | wc -l)"
     for pass in grid list columns again; do
         dir="$root/views-$pass"
         mode=$pass
