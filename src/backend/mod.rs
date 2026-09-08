@@ -33,6 +33,7 @@ pub mod peek;
 pub mod proto;
 pub mod permissions;
 pub mod menu_actions;
+mod menu_registry;
 pub mod trashbrowse;
 pub mod trashdelete;
 pub mod trashmanifest;

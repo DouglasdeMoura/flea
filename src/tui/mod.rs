@@ -61,6 +61,10 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     Err(e) => return Err(io::Error::other(e)),
                 }
             }
+            if model.menu_action == "openWaiting" && model.pending.is_none() {
+                model.menu_action = "open".into();
+                wire.send(vec![("c", wire::word("menuaction")), ("op", wire::word("validate")), ("id", wire::number(model.action_id)), ("action", wire::word("open"))])?;
+            }
             preview::load(&mut model, false);
             preview::poll(&mut model);
             preview::request(&mut model, &mut wire)?;
@@ -69,7 +73,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             if let Some(result) = model.taildrop.sent.take() {
                 match result {
                     Ok(message) => model.say(message),
-                    Err(error) => model.error = error,
+                    Err(error) => model.fail(error),
                 }
             }
             if let Some(completion) = model.completer.poll() {
@@ -169,7 +173,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                                 model.player = Some(player);
                             }
                             Err(e) => {
-                                model.error = format!("Media preview: {}", e);
+                                model.fail(format!("Media preview: {}", e));
                                 model.preview_failed = Some(path.clone());
                             }
                         }
@@ -228,25 +232,25 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             if let (Some(path), Some(pixels)) = (&model.image_file, pixels) {
                 graphics.request(path.clone(), geometry.0, geometry.1, pixels);
             }
-            if visible && !graphics_ready && (is_media || is_pdf || model.image_file.is_some()) {
-                model.error =
-                    "Inline preview unavailable: terminal did not report pixel dimensions".into();
+            if visible && !graphics_ready && (is_media || is_pdf || model.image_file.is_some()) && model.preview_failed != current {
+                model.fail("Inline preview unavailable: terminal did not report pixel dimensions".into());
+                model.preview_failed = current.clone();
             }
             if graphics.accept() {
                 frame.clear();
             }
             if !graphics.error.is_empty() {
-                model.error = format!("Image preview: {}", std::mem::take(&mut graphics.error));
+                model.fail(format!("Image preview: {}", std::mem::take(&mut graphics.error)));
             }
             if let Some(player) = &mut model.player {
                 player.poll();
                 if !player.error.is_empty() {
-                    model.error = player.error.clone();
                     model.preview_failed = Some(player.path.clone());
                 }
             }
             if model.player.as_ref().is_some_and(|p| !p.error.is_empty()) {
-                model.player = None;
+                let error = model.player.take().unwrap().error.clone();
+                model.fail(error);
             }
             if let Some(pdf) = &mut model.pdf {
                 if (pdf.columns, pdf.rows) != (geometry.0, geometry.1) || pdf.pixels != pixel_extent
@@ -259,9 +263,10 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 if pdf.poll() {
                     frame.clear();
                 }
-                if !pdf.error.is_empty() {
-                    model.error = std::mem::take(&mut pdf.error);
-                }
+            }
+            if let Some(pdf) = &mut model.pdf {
+                let error = std::mem::take(&mut pdf.error);
+                if !error.is_empty() { model.fail(error); }
             }
             let changed = render::draw(
                 &model,
@@ -291,7 +296,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             let bytes = terminal.read()?;
             for key in decoder.feed(&bytes, bytes.is_empty()) {
                 if let Err(e) = actions::key(&mut model, &key, &map, &mut wire) {
-                    model.error = e.to_string();
+                    model.fail(e.to_string());
                 }
             }
             if decoder.sixel && graphics.protocol == graphics::Protocol::None {

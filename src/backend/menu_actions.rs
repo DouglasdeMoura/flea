@@ -1,5 +1,7 @@
 // Menu snapshots own selected identities; registry work runs only after an explicit menu action.
 use crate::backend::opsreq::OpMsg;
+use super::menu_registry::{self, Registry};
+use super::trashmanifest::Cancellation;
 use crate::json::{escape, field_str, field_usize};
 use std::fs::{Metadata, OpenOptions};
 use std::os::unix::fs::MetadataExt;
@@ -8,30 +10,38 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{sync_channel, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct MenuActions {
-    requests: SyncSender<(String, Vec<String>)>,
+    requests: SyncSender<(String, Vec<String>, Cancellation)>,
     replies: Sender<OpMsg>,
     snapshot: Arc<Mutex<Snapshot>>,
+    cancellation: Mutex<Cancellation>,
+    registry: Registry,
+    requested_id: AtomicUsize,
 }
 impl MenuActions {
     pub fn new(replies: Sender<OpMsg>) -> Self {
         // One pending request bounds repeated activation while an application registry query runs.
-        let (requests, receiver) = sync_channel::<(String, Vec<String>)>(1);
+        let (requests, receiver) = sync_channel::<(String, Vec<String>, Cancellation)>(1);
         let output = replies.clone();
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
         let published = Arc::clone(&snapshot);
+        let registry = Registry::default();
+        let queries = registry.clone();
         std::thread::spawn(move || {
-            while let Ok((line, paths)) = receiver.recv() {
+            while let Ok((line, paths, cancel)) = receiver.recv() {
                 let mut state = published.lock().unwrap().clone();
-                let reply = state.handle(&line, paths);
-                if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close")) {
+                let reply = if cancel.check().is_ok() {
+                    state.handle_request(&line, paths, &queries, &cancel)
+                } else { response(&line, Err("Menu request cancelled.".into())) };
+                if cancel.check().is_ok() && matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close")) {
                     *published.lock().unwrap() = state;
                 }
                 if output.send(OpMsg::Meta { line: reply }).is_err() { break; }
             }
         });
-        Self { requests, replies, snapshot }
+        Self { requests, replies, snapshot, cancellation: Mutex::new(Cancellation::default()), registry, requested_id: AtomicUsize::new(0) }
     }
     pub(crate) fn selection(&self, id: usize) -> Result<Vec<Selected>, String> {
         let snapshot = self.snapshot.lock().map_err(|_| "The menu service stopped; reopen this window.")?;
@@ -41,7 +51,27 @@ impl MenuActions {
         Ok(snapshot.items.clone())
     }
     pub fn request(&self, line: String, paths: Vec<String>) {
-        if let Err(error) = self.requests.try_send((line, paths)) {
+        let op = field_str(&line, "op").unwrap_or_default();
+        let mut cancellation = self.cancellation.lock().unwrap();
+        if op == "snapshot" || op == "close" {
+            let id = field_usize(&line, "id").unwrap_or(0);
+            if op == "close" && self.requested_id.load(Ordering::Relaxed) != id {
+                let _ = self.replies.send(OpMsg::Meta { line: response(&line, Ok(String::new())) });
+                return;
+            }
+            *cancellation = cancellation.next();
+            self.requested_id.store(if op == "snapshot" { id } else { 0 }, Ordering::Relaxed);
+            *self.snapshot.lock().unwrap() = Snapshot::default();
+            if let Err(error) = self.registry.cancel() {
+                let _ = self.replies.send(OpMsg::Meta { line: response(&line, Err(error)) });
+                return;
+            }
+            if op == "close" {
+                let _ = self.replies.send(OpMsg::Meta { line: response(&line, Ok(String::new())) });
+                return;
+            }
+        }
+        if let Err(error) = self.requests.try_send((line, paths, cancellation.clone())) {
             let (request, reason) = match error {
                 TrySendError::Full(request) => (request, "A menu request is still running; try again when it finishes."),
                 TrySendError::Disconnected(request) => (request, "The menu service stopped; reopen this window."),
@@ -49,6 +79,13 @@ impl MenuActions {
             let reply = response(&request.0, Err(reason.into()));
             let _ = self.replies.send(OpMsg::Meta { line: reply });
         }
+    }
+}
+
+impl Drop for MenuActions {
+    fn drop(&mut self) {
+        self.cancellation.lock().unwrap().next();
+        if let Err(error) = self.registry.cancel() { eprintln!("flea: {}", error); }
     }
 }
 
@@ -83,7 +120,7 @@ impl Selected {
 }
 impl Snapshot {
     // Sample input: {"c":"menuaction","op":"snapshot","id":3}; paths are resolved from the active listing by run.rs.
-    fn handle(&mut self, line: &str, paths: Vec<String>) -> String {
+    fn handle_request(&mut self, line: &str, paths: Vec<String>, registry: &Registry, cancel: &Cancellation) -> String {
         let id = field_usize(line, "id").unwrap_or(0);
         let op = field_str(line, "op").unwrap_or_default();
         let result = if op == "snapshot" {
@@ -102,11 +139,11 @@ impl Snapshot {
             if self.id == id { self.id = 0; self.items.clear(); }
             Ok(String::new())
         } else {
-            self.perform(id, &op, line)
+            self.perform(id, &op, line, registry, cancel)
         };
         response(line, result)
     }
-    fn perform(&self, id: usize, op: &str, line: &str) -> Result<String, String> {
+    fn perform(&self, id: usize, op: &str, line: &str, registry: &Registry, cancel: &Cancellation) -> Result<String, String> {
         if id == 0 || id != self.id || self.items.is_empty() {
             return Err("Menu selection expired; reopen the menu.".into());
         }
@@ -132,13 +169,13 @@ impl Snapshot {
                     meta.len(), meta.mtime(), meta.mode() & 0o7777, escape(&super::owner::name(meta.uid())), meta.uid(), meta.gid()))
             }
             "applications" => {
-                let apps = applications(&item.path)?;
+                let apps = menu_registry::applications(registry, &item.path, cancel)?;
                 let entries: Vec<String> = apps.iter().map(|a| format!(r#"{{"id":"{}","label":"{}"}}"#, escape(&a.id), escape(&a.label))).collect();
                 Ok(format!(r#""applications":[{}]"#, entries.join(",")))
             }
             "openWith" => {
                 let requested = field_str(line, "application").unwrap_or_default();
-                let app = applications(&item.path)?.into_iter().find(|a| a.id == requested)
+                let app = menu_registry::applications(registry, &item.path, cancel)?.into_iter().find(|a| a.id == requested)
                     .ok_or("That application is no longer registered for the selected item.")?;
                 item.current()?;
                 launch(&app.path, &item.path)?;
@@ -146,6 +183,10 @@ impl Snapshot {
             }
             _ => Err("Unknown menu operation.".into()),
         }
+    }
+    #[cfg(test)]
+    fn handle(&mut self, line: &str, paths: Vec<String>) -> String {
+        self.handle_request(line, paths, &Registry::default(), &Cancellation::default())
     }
 }
 
@@ -168,73 +209,6 @@ pub fn create_file(parent: &Path, name: &str) -> Result<(PathBuf, super::undo::I
         .map_err(|e| format!("Could not create {}: {}.", path.display(), e))?;
     let meta = file.metadata().map_err(|e| format!("Created {}, but could not record its identity: {}.", path.display(), e))?;
     Ok((path, super::undo::ItemIdentity::record(&meta)))
-}
-
-struct Application { id: String, label: String, path: PathBuf }
-
-fn gio(args: &[&std::ffi::OsStr]) -> Result<String, String> {
-    let output = Command::new("gio").args(args).env("LC_ALL", "C").stdin(Stdio::null()).output()
-        .map_err(|e| format!("Could not query GIO application registry: {}.", e))?;
-    if !output.status.success() { return Err("GIO could not inspect registered applications for this item.".into()); }
-    String::from_utf8(output.stdout).map_err(|_| "GIO returned invalid application registry text.".into())
-}
-
-fn applications(path: &Path) -> Result<Vec<Application>, String> {
-    let info = gio(&["info".as_ref(), "--nofollow-symlinks".as_ref(), "--attributes=standard::content-type".as_ref(), path.as_os_str()])?;
-    // Sample GIO info attribute: "  standard::content-type: text/plain".
-    let mime = info.lines().find_map(|line| line.trim().strip_prefix("standard::content-type: "))
-        .filter(|m| !m.is_empty()).ok_or("GIO did not report the selected item's content type.")?;
-    let output = gio(&["mime".as_ref(), mime.as_ref()])?;
-    let mut apps = Vec::new();
-    // Sample GIO mime registry row: "  org.gnome.TextEditor.desktop".
-    for line in output.lines().filter(|line| line.starts_with("  ")) {
-        let id = line.trim();
-        if !id.ends_with(".desktop") || id.contains('/') || id.contains('\0') || apps.iter().any(|a: &Application| a.id == id) { continue; }
-        if let Some(path) = desktop_file(id) {
-            let label = desktop_label(&path).unwrap_or_else(|| id.trim_end_matches(".desktop").into());
-            apps.push(Application { id: id.into(), label, path });
-        }
-    }
-    Ok(apps)
-}
-
-fn desktop_file(id: &str) -> Option<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(home) = std::env::var_os("XDG_DATA_HOME").filter(|p| !p.is_empty()) {
-        roots.push(PathBuf::from(home));
-    } else if let Some(home) = std::env::var_os("HOME") {
-        roots.push(PathBuf::from(home).join(".local/share"));
-    }
-    roots.extend(std::env::split_paths(&std::env::var_os("XDG_DATA_DIRS").filter(|p| !p.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".into())));
-    for root in roots.into_iter().filter(|root| root.is_absolute()) {
-        let apps = root.join("applications");
-        let direct = apps.join(id);
-        if direct.is_file() { return Some(direct); }
-        let mut pending = vec![apps.clone()];
-        while let Some(dir) = pending.pop() {
-            let Ok(entries) = std::fs::read_dir(dir) else { continue; };
-            for entry in entries.flatten() {
-                let Ok(kind) = entry.file_type() else { continue; };
-                let path = entry.path();
-                if kind.is_dir() { pending.push(path); }
-                else if path.strip_prefix(&apps).ok()?.to_string_lossy().replace('/', "-") == id && path.is_file() { return Some(path); }
-            }
-        }
-    }
-    None
-}
-
-// Sample Desktop Entry: "[Desktop Entry]\nName=Text Editor\nExec=editor %U"; GIO alone interprets Exec.
-fn desktop_label(path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let mut entry = false;
-    for line in text.lines() {
-        if line.starts_with('[') { entry = line == "[Desktop Entry]"; }
-        if entry {
-            if let Some(name) = line.strip_prefix("Name=") { return Some(name.replace("\\s", " ").replace("\\n", " ")); }
-        }
-    }
-    None
 }
 
 fn launch(desktop: &Path, path: &Path) -> Result<(), String> {

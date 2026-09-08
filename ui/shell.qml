@@ -447,6 +447,7 @@ ShellRoot {
     Flea.Ipc {
         fleaWindow: fleaWindow
         pane: view.currentPane
+        panes: [primaryPane, secondPane.item ? secondPane.item.pane : null]
         bar: bar
         backend: view.currentPane.backend
         chrome: chrome

@@ -23,6 +23,8 @@ def scope_overlap(a, b):
 
 
 def caps(mods, key):
+    if mods == 'text':
+        return key
     prefix = {'none': '', 'text': '', 'ctrlshift': 'ctrl-shift-',
               'supershift': 'super-shift-', 'superalt': 'super-alt-'}.get(mods, mods + '-')
     name = {'Return': 'enter', 'BracketLeft': '[', 'BracketRight': ']', 'Period': '.'}.get(key, key.lower())
@@ -58,7 +60,7 @@ def generate(data):
             if key in seen:
                 fail(f'shared listing key {caps(mods, key)} claims {seen[key]} and {row["action"]}')
             seen[key] = row['action']
-            shared.append(dict(name='all', mods=mods, key=key, keys=caps(mods, key),
+            shared.append(dict(name='all', mods=mods, key=key, keys=row.get('keys', caps(mods, key)),
                                action=row['action'], context='listing', frontend='all'))
     lines = ['.pragma library', '', '// Generated from keys.toml by tools/flea-keymap-gen. Do not edit.']
     def emit(name, value):

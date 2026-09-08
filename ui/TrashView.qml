@@ -41,6 +41,7 @@ FocusScope {
     property bool confirmingSelectionAll: false
     property int confirmingSelectionToken: 0
     property var confirmingIdentities: []
+    property int confirmingToken: 0
     readonly property bool confirmationOpen: confirmation.opened
     readonly property var confirmationItem: confirmation
     readonly property int windowRows: Math.max(1, Math.min(350, Math.ceil(listing.height / Theme.fileRowHeight) + 2))
@@ -72,7 +73,7 @@ FocusScope {
         first = 0; rows = []; total = 0; errorText = ""; bytesReady = false
         confirming = false; confirmation.close(); refreshPending = false
         initialAction = action || ""
-        send("list", {start: 0, count: windowRows})
+        send("list", {start: 0, count: windowRows, recover: true})
         forceActiveFocus()
     }
     function close() {
@@ -93,7 +94,7 @@ FocusScope {
         if (confirmation.opened) confirmation.close()
         if (busy) { refreshPending = true; return }
         refreshPending = false
-        if (confirming) send("prepare", {all: confirmingSelectionAll, emptyTrash: confirmingAll, uris: confirmingUris, exclude: confirmingExcluded, identities: confirmingIdentities, selectionToken: confirmingSelectionToken})
+        if (confirming) send("prepare", {all: confirmingSelectionAll, emptyTrash: confirmingAll, uris: confirmingUris, exclude: confirmingExcluded, identities: confirmingIdentities, selectionToken: confirmingSelectionToken, refreshToken: confirmingToken})
         else refresh()
     }
     function ensureWindow() {
@@ -113,13 +114,14 @@ FocusScope {
         return false
     }
     function selectAll() {
-        if (busy || confirming || total === 0) return
+        if (operationActive || confirming || pendingOp === "select" || total === 0) return
         allSelected = false; selectionToken = 0; selectionCount = 0
         selected = ({}); selectionIdentities = ({})
         send("select")
     }
     function choose(index, extend) {
-        if (total === 0 || confirming) return
+        if (total === 0 || confirming || operationActive) return
+        if (pendingOp === "select") send("cancel", {clearSelection: true})
         cursor = Math.max(0, Math.min(total - 1, index))
         listing.positionViewAtIndex(cursor, ListView.Contain)
         var item = rowAt(cursor)
@@ -156,6 +158,7 @@ FocusScope {
     function prepare(all) {
         if (busy || (all ? total === 0 : selectedCount === 0)) return
         confirming = true
+        confirmingToken = 0
         confirmingAll = all
         confirmingSelectionAll = all
         confirmingSelectionToken = !all && allSelected ? selectionToken : 0
@@ -190,6 +193,10 @@ FocusScope {
             }
             cursor = Math.max(0, Math.min(cursor, total - 1))
             if (message.op === "list") {
+                if ((message.recoveryErrors || []).length > 0)
+                    operationResult("Interrupted file operation needs attention", message.recoveryErrors.join("\n"), true)
+                else if (message.recoveredCount > 0)
+                    operationResult("Recovered " + message.recoveredCount + " interrupted file operations", "", false)
                 errorText = ""
                 var kept = ({})
                 var keptIdentities = ({})
@@ -216,7 +223,10 @@ FocusScope {
             totalBytes = message.bytes
             bytesPartial = message.partial
             bytesReady = true
-        } else if (message.op === "prepare" && confirming && !refreshPending) confirmation.open(message)
+        } else if (message.op === "prepare" && confirming) {
+            confirmingToken = message.token
+            if (!refreshPending) confirmation.open(message)
+        }
         else if (message.op === "check" && !message.valid) {
             sourceChanged()
         } else if (message.op === "cancel") {
@@ -225,7 +235,12 @@ FocusScope {
             var failed = message.failed || 0
             var next = ({})
             var failures = message.failures || []
-            for (var i = 0; i < failures.length; i++) next[failures[i].uri] = true
+            var identities = ({})
+            for (var i = 0; i < failures.length; i++) {
+                next[failures[i].uri] = true
+                if (failures[i].identity) identities[failures[i].uri] = failures[i].identity
+            }
+            selectionIdentities = identities
             allSelected = false; selectionToken = 0; selectionCount = 0; selected = next
             var text = (message.op === "restore" ? "Restored " : "Deleted ") + message.done + " of " + (message.done + failed)
             if (failed) text += " · " + failed + " failed"

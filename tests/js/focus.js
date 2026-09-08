@@ -9,6 +9,7 @@ function pane(preview, viewMode) {
     return {
         focusView: "list",
         viewMode: viewMode ? viewMode : "list",
+        chooseView: function (mode) { this.viewMode = mode },
         searchMode: "",
         preview: preview
     }

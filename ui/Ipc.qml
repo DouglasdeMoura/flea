@@ -9,6 +9,7 @@ QtObject {
 
     property var fleaWindow: null
     property var pane: null
+    property var panes: []
     property var bar: null
     property var backend: null
     property var chrome: null
@@ -48,6 +49,15 @@ QtObject {
         function railCursor(): int { return root.pane.railCursor }
         function railCount(): int { return root.pane.railCount }
         function path(): string { return root.pane.path }
+        function dualState(): string {
+            return JSON.stringify({active: ViewState.state.view === "dual",
+                focused: root.panes.indexOf(root.pane), panes: root.panes.map(function(pane) {
+                    return pane ? {path: pane.path, total: pane.total, cursor: pane.cursorIndex,
+                        loading: pane.listInFlight, selected: pane.selectedIndices(),
+                        focused: pane.activeFocus || pane.listArea.activeFocus,
+                        listRequests: pane.backend.listRequests} : null
+                })})
+        }
         function lastMessage(): string { return root.bar.transient_ }
         function statusPrimary(): string { return root.bar.rightText() }
         function statusColor(): string { return String(root.bar.rightColor()) }
@@ -167,6 +177,7 @@ QtObject {
         // only honest answer for either; "" means no PDF is loaded, which is not zoom 1 or false.
         function previewPdfPage(): int { var p = root.pane.preview.pdfItem; return p ? p.page : -1 }
         function previewPdfZoom(): string { var p = root.pane.preview.pdfItem; return p ? String(p.zoom) : "" }
+        function previewPdfFocus(): int { var p = root.pane.preview.pdfItem; return p ? p.pdfControlIndex : -1 }
         function previewExpanded(): string { var p = root.pane.preview.pdfItem; return p ? String(p.expanded) : "" }
         function rowNameColor(i: int): string {
             var item = root.pane.itemFor(i)

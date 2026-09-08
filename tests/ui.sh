@@ -5695,6 +5695,66 @@ case_places() {
     kill_flea
 }
 
+case_dual() {
+    local dir="$fixture_root/dual" state="$fixture_root/dual-state" before
+    sandbox_scratch "$dir"
+    sandbox_scratch "$state"
+    mkdir -p "$dir/left/nested" "$dir/right" "$state/flea"
+    printf 'left\n' > "$dir/left/a.txt"
+    printf 'left\n' > "$dir/left/b.txt"
+    printf 'nested\n' > "$dir/left/nested/one.txt"
+    printf 'right\n' > "$dir/right/c.txt"
+    printf 'right\n' > "$dir/right/d.txt"
+    export XDG_STATE_HOME="$state"
+    jq -n --arg left "$dir/left" --arg right "$dir/right" \
+        '{view:"list",keys:"default",dual:{paths:[$left,$right],focus:0}}' > "$state/flea/ui.json"
+    launch "$dir/left"
+    wait_listing 3
+    click_chrome dual
+    settle
+    ipc dualState | jq -e '.active and .focused == 0' >/dev/null || fail "dual: chrome did not enter dual mode"
+    key -k Tab >/dev/null
+    wait_listing 2
+    [[ "$(ipc path)" == "$dir/right" ]] || fail "dual: Tab did not focus independent right listing"
+    key j >/dev/null
+    settle
+    [[ "$(ipc cursor)" == 1 ]] || fail "dual: right cursor did not move"
+    key -M ctrl -k Tab -m ctrl >/dev/null
+    settle
+    ipc dualState | jq -e '.focused == 1' >/dev/null || fail "dual: single-pane preview chord moved dual focus"
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc cursor)" == 0 && "$(ipc path)" == "$dir/left" ]] || fail "dual: left state was overwritten"
+    key l >/dev/null
+    wait_listing 1
+    [[ "$(ipc path)" == "$dir/left/nested" ]] || fail "dual: left navigation did not enter nested folder"
+    key -k Tab >/dev/null
+    settle
+    [[ "$(ipc path)" == "$dir/right" && "$(ipc cursor)" == 1 ]] || fail "dual: left navigation changed right state"
+    printf 'external\n' > "$dir/left/nested/two.txt"
+    local attempt
+    for attempt in $(seq 1 40); do
+        if ipc dualState | jq -e '.panes[0].total == 2 and (.panes[0].loading | not)' >/dev/null; then break; fi
+        sleep 0.1
+    done
+    ipc dualState | jq -e '.panes[0].total == 2 and .panes[1].cursor == 1' >/dev/null \
+        || fail "dual: independent watch refresh did not preserve right cursor"
+    shot dual-right-focused
+    before=$(ipc dualState)
+    kill_flea
+    launch "$dir/left"
+    wait_listing 2
+    [[ "$(ipc path)" == "$dir/right" ]] || fail "dual: focused pane did not survive restart"
+    ipc dualState | jq -e --arg path "$dir/left/nested" '.active and .focused == 1 and .panes[0].path == $path' >/dev/null \
+        || fail "dual: independent paths did not survive restart"
+    shot dual-reopened
+    click_chrome list
+    settle
+    ipc dualState | jq -e '(.active | not) and .focused == 0' >/dev/null || fail "dual: leaving dual did not restore primary focus"
+    kill_flea
+    printf 'DUAL navigation=ok focus=ok watch=ok restart=ok before=%s\n' "$before"
+}
+
 case_settings() {
     local dir="$fixture_root/settings"
     local config="$fixture_root/settings-config"
@@ -6047,6 +6107,10 @@ settings_read_refused() {
     # defaults, so a patch that went ahead would rename a full default document over every key in it.
     key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
     settle
+    [[ "$(ipc lastMessage)" == "Your saved settings could not be read, so these are the defaults." ]] \
+        || fail "settings: a second failure acknowledged the unreadable-settings error"
+    key -k Escape >/dev/null
+    settle
     [[ "$(ipc lastMessage)" == "That setting could not be saved." ]] \
         || fail "settings: a save onto an unreadable state file was not reported, the status bar says $(ipc lastMessage)"
     kill_flea
@@ -6055,6 +6119,20 @@ settings_read_refused() {
         || fail "settings: a save onto an unreadable state file spent the operator's bytes"
     [[ "$(stat -c '%i' "$stored")" == "$before_ino" ]] \
         || fail "settings: a save onto an unreadable state file renamed a new file over it"
+}
+
+case_settingsrefused() {
+    local dir="$fixture_root/settingsrefused" state="$fixture_root/settingsrefused-state"
+    sandbox_scratch "$dir"
+    sandbox_scratch "$state"
+    local old_state="${XDG_STATE_HOME:-}" stored="$state/flea/ui.json"
+    mkdir -p "$state/flea"
+    printf '{"view":"list"}\n' > "$stored"
+    printf 'a\n' > "$dir/a.txt"
+    printf 'b\n' > "$dir/b.txt"
+    export XDG_STATE_HOME="$state"
+    settings_read_refused "$stored" "$dir"
+    if [[ -n "$old_state" ]]; then export XDG_STATE_HOME="$old_state"; else unset XDG_STATE_HOME; fi
 }
 
 # A failed write is reported, never swallowed. The state directory is made unwritable, so the temp
@@ -6405,8 +6483,8 @@ settings_keys() {
     # ctrl-1 to ctrl-3; a window that starts anywhere else is not the one this checks the toggle on.
     [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Default"* ]] \
         || fail "settings: the preset row does not start on Default, got $(ipc settingsRows)"
-    [[ "$(ipc settingsRows)" == *"fact|list view|ctrl-1"* ]] \
-        || fail "settings: the Default preset lists none of its own chords"
+    ipc settingsModel | jq -e 'map(select(.id == "keyPreview"))[0].items | length == 6' >/dev/null \
+        || fail "settings: Default must show six binding examples"
     shot settings-keys
     # PRESETS is default, vim, mac, windows, so Windows is three steps along and not one.
     key l >/dev/null
@@ -6415,8 +6493,8 @@ settings_keys() {
     settle
     [[ "$(ipc settingsRows)" == *"choice|Keybinding preset|Windows"* ]] \
         || fail "settings: three steps of l did not reach Windows"
-    [[ "$(ipc settingsRows)" == *"fact|hidden files|ctrl-h"* ]] \
-        || fail "settings: the Windows preset lists none of its own chords"
+    ipc settingsModel | jq -e 'map(select(.id == "keyPreview"))[0].items | length == 6 and any(.[]; .keys == "ctrl-c" and .label == "copy")' >/dev/null \
+        || fail "settings: Windows binding examples must include its live copy chord"
     key -k Escape >/dev/null
     settle
 

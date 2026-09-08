@@ -44,6 +44,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     model.menu_top = 0;
                 } else {
                     model.menu = false;
+                    model.menu_action.clear();
                 }
             }
             "cursorDown" | "cursorUp" => {
@@ -63,20 +64,21 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     }
                     if let Some(peer) = model.taildrop.peers.get(model.menu_cursor) {
                         model.taildrop_target = Some(peer.clone());
-                        wire.send(vec![("c", word("paths")), ("rows", model.indices())])?;
+                        model.menu_action = "taildrop".into();
+                        wire.send(vec![("c", word("menuaction")), ("op", word("validate")), ("id", super::wire::number(model.action_id)), ("action", word("taildrop"))])?;
                         model.menu = false;
                     }
                     return Ok(());
                 }
                 if model.menu_cursor == 2 {
                     if model.taildrop.peers.is_empty() {
-                        model.error = if model.taildrop.loading() {
+                        model.fail(if model.taildrop.loading() {
                             "Taildrop is still loading".into()
                         } else if !model.taildrop.error.is_empty() {
                             model.taildrop.error.clone()
                         } else {
                             "No reachable Taildrop devices".into()
-                        };
+                        });
                     } else if model.rows.contains_key(&model.cursor) {
                         model.taildrop.submenu = true;
                         model.menu_cursor = 0;
@@ -88,15 +90,12 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     return Ok(());
                 }
                 model.menu = false;
-                return act(
-                    model,
-                    if model.menu_cursor == 0 {
-                        "open"
-                    } else {
-                        "toggleHidden"
-                    },
-                    wire,
-                );
+                if model.menu_cursor == 0 {
+                    model.menu_action = "open".into();
+                    return wire.send(vec![("c", word("menuaction")), ("op", word("validate")), ("id", super::wire::number(model.action_id)), ("action", word("open"))]);
+                }
+                model.menu_action.clear();
+                return act(model, "toggleHidden", wire);
             }
             _ => {}
         }
@@ -260,6 +259,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
     act(model, &action, wire)
 }
 fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
+    if !m.menu_action.is_empty() && m.menu_action != "menu" && !matches!(action, "quit" | "escape") { return Ok(()); }
     if m.pending.is_some() && !matches!(action, "quit" | "escape" | "keymapSheet") {
         return Ok(());
     }
@@ -269,7 +269,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             "paste" | "movePaste" | "duplicate" | "trash" | "trashArm" | "rename" | "copy" | "cut"
         )
     {
-        m.error = "Wait for search to settle before a file operation".into();
+        m.fail("Wait for search to settle before a file operation".into());
         return Ok(());
     }
     if !m.rows.contains_key(&m.cursor)
@@ -316,7 +316,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
                 if m.rows.get(&m.cursor).is_some_and(|r| r.directory) {
                     navigate(m, path, w)?;
                 } else if crate::open::open(&path.to_string_lossy()) != 0 {
-                    m.error = "Could not open selected file".into();
+                    m.fail("Could not open selected file".into());
                 }
             }
         }
@@ -345,7 +345,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         "search" => m.editor = Some(Editor::new("search", String::new(), m.path.clone())),
         "rename" => {
             if m.selected.len() > 1 {
-                m.error = "Select one item to rename".into();
+                m.fail("Select one item to rename".into());
             } else if let Some(row) = m.rows.get(&m.cursor) {
                 m.editor = Some(Editor::rename(
                     row.name.clone(),
@@ -404,6 +404,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             m.editor = Some(Editor::new("newfile", "New File".into(), m.path.clone()));
         }
         "sortNext" | "sortReverse" => {
+            m.restore_path = m.current_path();
             if action == "sortReverse" {
                 m.reverse = !m.reverse;
             } else {
@@ -473,6 +474,17 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             m.menu_top = 0;
             m.taildrop.submenu = false;
             m.taildrop.refresh();
+            m.menu_ready = false;
+            m.menu_path = m.current_path().unwrap_or_default();
+            m.menu_directory = m.rows.get(&m.cursor).is_some_and(|row| row.directory);
+            let mut rows: Vec<usize> = if m.selected.is_empty() { m.rows.contains_key(&m.cursor).then_some(m.cursor).into_iter().collect() } else { m.selected.iter().copied().collect() };
+            m.menu_count = rows.len();
+            if !m.menu_path.as_os_str().is_empty() && !rows.contains(&m.cursor) { rows.push(m.cursor); }
+            if !rows.is_empty() {
+                m.action_id = m.action_id.wrapping_add(1).max(1);
+                m.menu_action = "menu".into();
+                w.send(vec![("c", word("menuaction")), ("op", word("snapshot")), ("id", super::wire::number(m.action_id)), ("rows", Json::Arr(rows.into_iter().map(super::wire::number).collect()))])?;
+            }
         }
         "keymapSheet" => {
             m.properties = None;
@@ -481,7 +493,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         }
         "properties" => {
             if m.selected.len() > 1 {
-                m.error = "Properties requires one selected item".into();
+                m.fail("Properties requires one selected item".into());
             } else if m.current_path().is_some() {
                 m.action_id = m.action_id.wrapping_add(1).max(1);
                 m.sheet = true;
@@ -502,10 +514,12 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             }
         }
         "escape" => {
-            if !m.filter.is_empty() {
+            m.menu_action.clear();
+            m.taildrop_target = None;
+            if !m.error.is_empty() {
+                m.dismiss_error();
+            } else if !m.filter.is_empty() {
                 m.apply_filter(String::new());
-            } else if !m.error.is_empty() {
-                m.error.clear();
             } else if m.searching {
                 w.send(vec![("c", word("searchcancel"))])?;
             } else if !m.search.is_empty() {
@@ -574,6 +588,7 @@ fn pointer_key(
             }
         } else if !inside && !pointer.motion && pointer.button == 0 {
             m.menu = false;
+            m.menu_action.clear();
             m.sheet = false;
         }
         return Ok(());
@@ -619,13 +634,8 @@ fn pointer_key(
     }
     if pointer.y == 1 && pointer.button == 0 && !pointer.motion {
         let mut x = 1;
-        for (i, entry) in m.tabs.iter().enumerate() {
-            let label = format!(
-                "{} {}",
-                i + 1,
-                entry.path.file_name().unwrap_or_default().to_string_lossy()
-            );
-            let width = super::render::text_width(&label) + 2;
+        for (i, label) in super::render::tab_layout(m, m.columns) {
+            let width = super::render::text_width(&label);
             if pointer.x >= x && pointer.x < x + width {
                 return tab(m, i, w);
             }
@@ -729,7 +739,7 @@ fn pointer_key(
     m.remember_selection();
     Ok(())
 }
-fn navigate(m: &mut Model, path: PathBuf, w: &mut Wire) -> io::Result<()> {
+pub(super) fn navigate(m: &mut Model, path: PathBuf, w: &mut Wire) -> io::Result<()> {
     if m.pending.is_some() {
         return Ok(());
     }
@@ -780,7 +790,7 @@ fn save(key: &str, value: Json, m: &mut Model) {
     if let Err(e) =
         crate::uistore::Store::user().and_then(|s| s.update(&Json::Obj(vec![(key.into(), value)])))
     {
-        m.error = format!("Could not save settings: {}", e);
+        m.fail(format!("Could not save settings: {}", e));
     }
 }
 fn save_preview_column(m: &mut Model) {

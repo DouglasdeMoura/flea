@@ -242,8 +242,19 @@ function runPresets(check) {
         var section = Settings.rows("keys", { preset: preset })
         var table = Keymap.bindingRows(preset, "gui")
         check(preset + " section uses its selected label", section[1].value, Settings.PRESET_LABELS[preset])
-        check(preset + " section has every effective action", section.filter(function (r) { return r.kind === "fact" }).length,
-              Keymap.sheetFor(preset, "gui").length)
+        var preview = find(section, "keyPreview")
+        check(preset + " section shows the six board examples", preview.items.length, 6)
+        check(preset + " examples never take keyboard focus", Settings.focusable(preview), false)
+        var primary = { default: "y,p,dd", vim: "yy,pp,D", mac: "super-c,super-v,delete", windows: "ctrl-c,ctrl-v,delete" }
+        check(preset + " preview uses its primary bindings", preview.items.slice(3).map(function (r) { return r.keys }).join(","), primary[preset])
+        check(preset + " enter label follows its actual action", preview.items[1].label,
+              Keymap.lookupFor(preset, Qt.Key_Return, "", 0, "listing", "gui"))
+        for (var p = 3; p < preview.items.length; p++) {
+            var item = preview.items[p]
+            check(preset + " preview chord exists: " + item.keys, table.some(function (r) {
+                return r.keys === item.keys && Keymap.actionGroup(r.action) === item.label
+            }), true)
+        }
         check(preset + " section contains actual bindings", table.length > 20, true)
         for (var j = 0; j < table.length; j++) {
             var row = table[j]

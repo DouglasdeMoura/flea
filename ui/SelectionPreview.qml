@@ -14,12 +14,15 @@ Flea.PreviewColumn {
     property string loadedIdentity: ""
     property int pendingToken: 0
     signal thumbsApplied(var work)
+    onExpandRequested: if (root.row && root.pane) root.pane.preview.open(root.path, root.row.i, root.row.s)
 
     Keys.onPressed: function(event) {
         var context = root.rowState === Facts.PDF ? "pdf"
             : root.rowState === Facts.VIDEO || root.rowState === Facts.AUDIO ? "media" : "preview"
         var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
         if (action === "escape" || action === "focusPreview") root.pane.listArea.forceActiveFocus()
+        else if (action === "loadPreview") root.loadSelection()
+        else if (root.rowState === Facts.PDF) PreviewKeys.pdfAction(action, root)
         else if (action === "preview") {
             var strip = root.mediaStripItem()
             if (strip) strip.toggled()

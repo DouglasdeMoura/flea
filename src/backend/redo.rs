@@ -64,6 +64,9 @@ impl Replay {
     pub fn rebase(&mut self, old: &ItemIdentity, new: &ItemIdentity) {
         for saved in &mut self.steps {
             if saved.input.as_ref() == Some(old) { saved.input = Some(new.clone()); }
+            if let Some((_, identity)) = &mut saved.parent {
+                if identity.same_item(old) { *identity = new.clone(); }
+            }
             let mut entry = Entry { op: String::new(), steps: vec![saved.step.clone()] };
             entry.rebase(old, new);
             saved.step = entry.steps.remove(0);
@@ -200,6 +203,31 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&renamed).unwrap(), "keep this payload");
             assert_eq!(std::fs::read_to_string(&original).unwrap(), "keep this payload");
         }
+    }
+
+    #[test]
+    fn recreated_parent_rebinds_child_destination_without_accepting_a_foreign_parent() {
+        let sandbox = TestDir::new("redo-parent");
+        let mut journal = Journal::new();
+        let (parent, steps) = ops::mkdir(sandbox.path(), "parent").unwrap();
+        journal.push(Entry { op: "mkdir".into(), steps });
+        let (child, steps) = ops::mkdir(&parent, "child").unwrap();
+        journal.push(Entry { op: "mkdir".into(), steps });
+        guard(&sandbox, &[&parent, &child]);
+        journal.undo().unwrap();
+        guard(&sandbox, &[&parent, &child]);
+        journal.undo().unwrap();
+        redo(&mut journal).unwrap();
+        redo(&mut journal).unwrap();
+        assert!(child.is_dir());
+        guard(&sandbox, &[&parent, &child]);
+        journal.undo().unwrap();
+        let moved = sandbox.join("old-parent");
+        guard(&sandbox, &[&parent, &moved]);
+        std::fs::rename(&parent, &moved).unwrap();
+        std::fs::create_dir(&parent).unwrap();
+        assert!(redo(&mut journal).unwrap_err().msg.contains("replaced"));
+        assert!(!child.exists());
     }
 
     #[test]

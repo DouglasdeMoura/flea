@@ -297,8 +297,8 @@ fn handle_line(
         Request::Undo => do_undo(out, ops),
         Request::Redo => start_redo(out, ops),
         // Never touches st.listing, which is the whole point: a column is not the pane's own listing.
-        Request::Peek { path, first, hidden } =>
-            say(out, &peek_line(&path, first, hidden, &tb.mime, &tb.icons)),
+        Request::Peek { path, first, hidden, focus } =>
+            say(out, &peek_line(&path, first, hidden, &focus, &tb.mime, &tb.icons)),
         // A compress names absolute paths and no path; an extract names the one archive in path.
         Request::Archive { op, paths, path, dest, format } => start_archive(
             out, ops, Arc::clone(&tb.formats), &op,

@@ -1,6 +1,6 @@
 use super::wire::{count, flag, number, text, word, Wire};
 use crate::jsondoc::Json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::path::PathBuf;
 
@@ -61,6 +61,7 @@ pub struct Model {
     pub tabs: Vec<Tab>,
     pub tab: usize,
     pub error: String,
+    pub errors: VecDeque<String>,
     pub message: String,
     pub message_at: std::time::Instant,
     pub search: String,
@@ -93,6 +94,11 @@ pub struct Model {
     pub menu: bool,
     pub menu_cursor: usize,
     pub menu_top: usize,
+    pub menu_ready: bool,
+    pub menu_action: String,
+    pub menu_path: PathBuf,
+    pub menu_directory: bool,
+    pub menu_count: usize,
     pub editor: Option<super::editor::Editor>,
     pub preset: String,
     pub player: Option<super::media::Player>,
@@ -162,6 +168,7 @@ impl Model {
             }],
             tab: 0,
             error: String::new(),
+            errors: VecDeque::new(),
             message: String::new(),
             message_at: std::time::Instant::now(),
             search: String::new(),
@@ -197,6 +204,11 @@ impl Model {
             menu: false,
             menu_cursor: 0,
             menu_top: 0,
+            menu_ready: false,
+            menu_action: String::new(),
+            menu_path: PathBuf::new(),
+            menu_directory: false,
+            menu_count: 0,
             editor: None,
             preset: match text(settings, "keys") {
                 "vim" => "vim",
@@ -241,6 +253,10 @@ impl Model {
     pub fn open(&mut self, path: PathBuf, wire: &mut Wire) -> io::Result<()> {
         if self.pending.is_some() {
             return Ok(());
+        }
+        if path == self.path && self.navigation_before.is_none() {
+            self.restore_cursor.get_or_insert(self.cursor);
+            if self.restore_path.is_none() { self.restore_path = self.current_path(); }
         }
         self.pending = Some(path.clone());
         let result = wire.send(vec![
@@ -288,17 +304,25 @@ impl Model {
         self.rows.get(&self.cursor).map(|row| self.row_path(row))
     }
     pub fn menu_enabled(&self, index: usize) -> bool {
-        if self.taildrop.submenu { return index < self.taildrop.peers.len(); }
+        if self.taildrop.submenu { return self.menu_ready && index < self.taildrop.peers.len(); }
         match index {
-            0 => self.rows.contains_key(&self.cursor),
+            0 => self.menu_ready && !self.menu_path.as_os_str().is_empty(),
             1 => true,
-            2 => self.rows.contains_key(&self.cursor) && !self.taildrop.peers.is_empty(),
+            2 => self.menu_ready && self.menu_count > 0 && !self.taildrop.peers.is_empty(),
             _ => false,
         }
     }
     pub fn say(&mut self, message: String) {
         self.message = message;
         self.message_at = std::time::Instant::now();
+    }
+    pub fn fail(&mut self, error: String) {
+        if error.is_empty() { return; }
+        if self.error.is_empty() { self.error = error; }
+        else if error != self.error && !self.errors.contains(&error) { self.errors.push_back(error); }
+    }
+    pub fn dismiss_error(&mut self) {
+        self.error = self.errors.pop_front().unwrap_or_default();
     }
     pub fn shown(&self) -> Vec<usize> {
         self.rows
@@ -417,6 +441,7 @@ impl Model {
                 wire.send(vec![
                     ("c", word("peek")),
                     ("path", word(&parent)),
+                    ("focus", word(&self.path.file_name().unwrap_or_default().to_string_lossy())),
                     ("first", number(self.height)),
                     ("hidden", Json::Bool(self.hidden)),
                 ])?;
@@ -595,7 +620,7 @@ impl Model {
                 if let Some(peer) = self.taildrop_target.take() {
                     match self.taildrop.send(&peer, &paths) {
                         Ok(()) => self.say(format!("Sending to {}", peer.label)),
-                        Err(e) => self.error = format!("Taildrop: {}", e),
+                        Err(e) => self.fail(format!("Taildrop: {}", e)),
                     }
                 }
                 if self.pending_clipboard {
@@ -658,7 +683,7 @@ impl Model {
             }
             "transferitem" => {
                 if !flag(&value, "ok") {
-                    self.error = format!("{}: {}", text(&value, "name"), text(&value, "err"));
+                    self.fail(format!("{}: {}", text(&value, "name"), text(&value, "err")));
                 }
             }
             "transferdone" | "trashed" | "undone" | "redone" | "renamed" | "made"
@@ -707,7 +732,7 @@ impl Model {
                     ),
                 });
                 if count(&value, "failed") > 0 {
-                    self.error = format!("{} failed", count(&value, "failed"));
+                    self.fail(format!("{} failed", count(&value, "failed")));
                 }
                 if matches!(operation, "renamed" | "made" | "duplicated") {
                     self.restore_path = Some(PathBuf::from(text(&value, "path")));
@@ -733,6 +758,43 @@ impl Model {
                     editor.error = text(&value, "error").into();
                 }
             }
+            "menuaction" if !self.menu_action.is_empty() && count(&value, "id") == self.action_id => {
+                if !flag(&value, "ok") {
+                    self.fail(text(&value, "error").into());
+                    self.menu_action.clear();
+                    self.menu = false;
+                    self.taildrop_target = None;
+                } else if text(&value, "op") == "snapshot" && self.menu_action == "menu" {
+                    self.menu_ready = true;
+                } else if text(&value, "op") == "validate" && text(&value, "action") == self.menu_action {
+                    let paths: Vec<String> = value.get("paths").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(str::to_owned).collect();
+                    let action = std::mem::take(&mut self.menu_action);
+                    if action == "open" {
+                        if !paths.iter().any(|path| PathBuf::from(path) == self.menu_path) {
+                            self.fail("Open failed: the validated selection omitted the selected path".into());
+                        } else if self.menu_directory {
+                            if self.pending.is_some() { self.menu_action = "openWaiting".into(); }
+                            else {
+                                let path = self.menu_path.clone();
+                                super::actions::navigate(self, path, wire)?;
+                            }
+                        } else if crate::open::open(&self.menu_path.to_string_lossy()) != 0 {
+                            self.fail("Could not open selected file".into());
+                        }
+                    } else if action == "taildrop" {
+                        if let Some(peer) = self.taildrop_target.take() {
+                            if self.menu_count == 0 || paths.len() < self.menu_count {
+                                self.fail("Taildrop failed: the validated selection is incomplete".into());
+                                return Ok(());
+                            }
+                            match self.taildrop.send(&peer, &paths[..self.menu_count]) {
+                                Ok(()) => self.say(format!("Sending to {}", peer.label)),
+                                Err(error) => self.fail(format!("Taildrop: {}", error)),
+                            }
+                        }
+                    }
+                }
+            }
             "menuaction" if self.sheet && self.properties.is_some() && count(&value, "id") == self.action_id => {
                 if !flag(&value, "ok") {
                     self.properties = Some(vec![text(&value, "error").into()]);
@@ -753,7 +815,7 @@ impl Model {
                 }
             }
             "error" => {
-                self.error = format!("{}: {}", text(&value, "where"), text(&value, "msg"));
+                self.fail(format!("{}: {}", text(&value, "where"), text(&value, "msg")));
                 if let Some(editor) = &mut self.editor {
                     if text(&value, "where") == editor.kind {
                         editor.pending = false;
@@ -777,5 +839,40 @@ impl Model {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_survive_until_each_is_acknowledged() {
+        let mut model = Model::new(PathBuf::from("/"), &Json::Null);
+        model.fail("Copy failed".into());
+        model.fail("Preview failed".into());
+        model.fail("Copy failed".into());
+        model.fail("Preview failed".into());
+        model.fail(String::new());
+        assert_eq!(model.error, "Copy failed");
+        assert_eq!(model.errors.len(), 1);
+        model.dismiss_error();
+        assert_eq!(model.error, "Preview failed");
+        model.dismiss_error();
+        assert!(model.error.is_empty());
+    }
+
+    #[test]
+    fn menu_requires_a_ready_identity_snapshot() {
+        let mut model = Model::new(PathBuf::from("/"), &Json::Null);
+        model.menu_path = PathBuf::from("/selected");
+        model.menu_count = 1;
+        assert!(!model.menu_enabled(0));
+        assert!(model.menu_enabled(1));
+        model.menu_ready = true;
+        assert!(model.menu_enabled(0));
+        assert!(!model.menu_enabled(2));
+        model.menu_path.clear();
+        assert!(!model.menu_enabled(0));
     }
 }

@@ -436,6 +436,7 @@ action = "paste"
 [[text]]
 char = "d"
 action = "trashArm"
+keys = "dd"
 
 [[text]]
 char = "r"
@@ -1087,7 +1088,7 @@ context = "listing"
 name = "vim"
 mods = "text"
 key = "D"
-keys = "d"
+keys = "D"
 action = "trash"
 label = "move to Trash"
 frontend = "all"

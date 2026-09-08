@@ -123,6 +123,10 @@ function run(check) {
     Keymap.setPreset("unknown")
     check("unknown stored preset resolves to Default", Keymap.preset, "default")
     check("Default Copy hint remains y", Keymap.hintFor("copy"), "y")
+    check("Default Trash hint advertises both required presses", Keymap.hintFor("trash"), "dd")
+    check("Default sheet never advertises a lone destructive d", Keymap.sheetFor("default", "gui").filter(function (row) {
+        return row.action === "trash"
+    })[0].keys.split(" / ").indexOf("d"), -1)
     check("menu-only actions invent no shortcut", Keymap.hintFor("emptyTrash"), "")
     check("sheet is populated from effective current bindings", Keymap.SHEET.length > 30, true)
     check("pointer contract remains populated", Keymap.POINTER.length > 10, true)

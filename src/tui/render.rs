@@ -87,6 +87,37 @@ pub fn fit(text: &str, limit: usize) -> String {
     result.push_str(&" ".repeat(limit - used));
     result
 }
+fn display_path(m: &Model) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !home.is_empty() && m.path.starts_with(&home) {
+        format!("~{}", &m.path.to_string_lossy()[home.len()..])
+    } else { m.path.to_string_lossy().into_owned() }
+}
+fn header_title(m: &Model) -> String {
+    format!("{} · {} {}", display_path(m), m.sort, if m.reverse { "▾" } else { "▴" })
+}
+pub fn tab_layout(m: &Model, columns: usize) -> Vec<(usize, String)> {
+    let available = columns.saturating_sub(text_width(&header_title(m)).min(columns / 2));
+    let label = |index: usize| format!("{} {}  ", index + 1, m.tabs[index].path.file_name().unwrap_or_default().to_string_lossy());
+    let mut first = m.tab;
+    let mut used = text_width(&label(m.tab)).min(available);
+    while first > 0 {
+        let width = text_width(&label(first - 1));
+        if used + width > available { break; }
+        used += width;
+        first -= 1;
+    }
+    used = 0;
+    let mut tabs = Vec::new();
+    for index in first..m.tabs.len() {
+        let text = label(index);
+        let width = text_width(&text).min(available.saturating_sub(used));
+        if width == 0 { break; }
+        tabs.push((index, fit(&text, width)));
+        used += width;
+    }
+    tabs
+}
 pub fn bytes(n: usize) -> String {
     const BYTES_PER_UNIT: f64 = 1000.0;
     const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
@@ -206,30 +237,12 @@ pub fn draw(
     let details_start = body.saturating_sub(2 + details + usize::from(m.pdf.is_some()));
     let base = format!("\x1b[0m{}{}", theme.background, theme.foreground);
     let mut out = format!("\x1b[H{}", base);
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = if !home.is_empty() && m.path.starts_with(&home) {
-        format!("~{}", &m.path.to_string_lossy()[home.len()..])
-    } else {
-        m.path.to_string_lossy().into_owned()
-    };
-    let title = format!(
-        "{} · {} {}",
-        path,
-        m.sort,
-        if m.reverse { "▾" } else { "▴" }
-    );
+    let path = display_path(m);
+    let title = header_title(m);
     let title_width = text_width(&title).min(columns / 2);
     let mut used = 0;
-    for (i, tab) in m.tabs.iter().enumerate() {
-        let label = format!(
-            "{} {}  ",
-            i + 1,
-            tab.path.file_name().unwrap_or_default().to_string_lossy()
-        );
+    for (i, label) in tab_layout(m, columns) {
         let width = text_width(&label);
-        if used + width > columns.saturating_sub(title_width) {
-            break;
-        }
         out.push_str(if i == m.tab {
             &theme.accent
         } else {
@@ -360,52 +373,6 @@ pub fn draw(
         out.push_str(&base);
     }
     out.push_str(&format!("\x1b[{};1H{}", lines, base));
-    let filter_note = filtered.as_ref().map(|rows| format!("Filter {} · {} matches in {} loaded rows", m.filter, rows.len(), m.rows.len())).unwrap_or_default();
-    let status = if m.editor.is_some() {
-        String::new()
-    } else {
-        let primary = if !m.error.is_empty() {
-            &m.error
-        } else if !m.transfer.is_empty() {
-            &m.transfer
-        } else if !m.search.is_empty() {
-            &m.search
-        } else if !m.message.is_empty() {
-            &m.message
-        } else {
-            &filter_note
-        };
-        let mut secondary = if !m.search.is_empty() && primary != &m.search {
-            format!(" · {}", m.search)
-        } else {
-            String::new()
-        };
-        if !filter_note.is_empty() && primary != &filter_note { secondary.push_str(&format!(" · {}", filter_note)); }
-        let progress = if !m.transfer.is_empty() && primary == &m.transfer {
-            const FRAMES: [&str; 3] = ["░▒▓", "▒▓░", "▓░▒"];
-            format!(
-                " {}",
-                FRAMES[(elapsed.as_millis() / 200) as usize % FRAMES.len()]
-            )
-        } else {
-            String::new()
-        };
-        format!(
-            "{}{} items  {}{}{}  ? keys",
-            if m.selected.is_empty() {
-                String::new()
-            } else {
-                format!("V {}  ", m.selected.len())
-            },
-            m.total,
-            primary,
-            progress,
-            secondary
-        )
-    };
-    if !m.error.is_empty() {
-        out.push_str(&theme.error);
-    }
     if let Some(editor) = &m.editor {
         if editor.kind == "rename" {
             let notice = if !editor.error.is_empty() { editor.error.as_str() }
@@ -440,7 +407,7 @@ pub fn draw(
         out.push_str(&editor.line(&prefix, &suffix, columns, &base, &theme.muted));
         }
     } else {
-        out.push_str(&fit(&status, columns));
+        out.push_str(&footer(m, theme, columns, elapsed));
     }
     if m.sheet {
         let sheet = panel_rows(m, map);
@@ -480,6 +447,49 @@ pub fn draw(
         return Ok(true);
     }
     Ok(false)
+}
+fn footer(m: &Model, theme: &Theme, columns: usize, elapsed: std::time::Duration) -> String {
+    let base = format!("\x1b[0m{}{}", theme.background, theme.foreground);
+    let help = "? keys";
+    let available = columns.saturating_sub(text_width(help) + 2);
+    let mut parts = Vec::new();
+    let chip = format!("{}\x1b[7m", theme.accent);
+    if !m.selected.is_empty() { parts.push((chip.as_str(), format!(" V {} ", m.selected.len()))); }
+    parts.push((theme.foreground.as_str(), format!("{} items", m.total)));
+    if !m.error.is_empty() {
+        let queued = if m.errors.is_empty() { String::new() } else { format!(" (+{})", m.errors.len()) };
+        parts.push((theme.error.as_str(), format!("{}{} · Esc dismisses", m.error, queued)));
+    }
+    if !m.transfer.is_empty() {
+        const FRAMES: [&str; 3] = ["░▒▓", "▒▓░", "▓░▒"];
+        const FRAME_MILLIS: u128 = 200;
+        parts.push((theme.foreground.as_str(), format!("{} {}", m.transfer, FRAMES[(elapsed.as_millis() / FRAME_MILLIS) as usize % FRAMES.len()])));
+    }
+    if !m.search.is_empty() { parts.push((theme.foreground.as_str(), m.search.clone())); }
+    if m.error.is_empty() && m.transfer.is_empty() && m.search.is_empty() && !m.message.is_empty() {
+        parts.push((theme.foreground.as_str(), m.message.clone()));
+    }
+    if !m.filter.is_empty() {
+        parts.push((theme.foreground.as_str(), format!("Filter {} · {} matches in {} loaded rows", m.filter, m.shown().len(), m.rows.len())));
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for (color, text) in parts {
+        if used >= available { break; }
+        if used > 0 {
+            let gap = 2.min(available - used);
+            out.push_str(&" ".repeat(gap));
+            used += gap;
+        }
+        let width = text_width(&text).min(available - used);
+        out.push_str(color);
+        out.push_str(&fit(&text, width));
+        out.push_str(&base);
+        used += width;
+    }
+    out.push_str(&" ".repeat(columns.saturating_sub(used + text_width(help))));
+    out.push_str(help);
+    out
 }
 fn selection_line(m: &Model, y: usize, columns: usize) -> String {
     if y == 0 {
@@ -587,6 +597,34 @@ fn overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn active_tab_remains_in_the_same_visible_hit_map() {
+        let mut model = Model::new(std::path::PathBuf::from("/tab-one"), &crate::jsondoc::Json::Null);
+        for index in 2..=12 {
+            model.tabs.push(super::super::model::Tab { path: format!("/tab-{index}").into(), cursor: 0, back: Vec::new(), forward: Vec::new() });
+        }
+        model.tab = 11;
+        for columns in [12, 40, 80, 200] {
+            let tabs = tab_layout(&model, columns);
+            assert!(tabs.iter().any(|(index, _)| *index == model.tab));
+            assert!(tabs.iter().map(|(_, label)| text_width(label)).sum::<usize>() <= columns);
+        }
+    }
+    #[test]
+    fn footer_separates_error_color_and_preserves_secondary_progress() {
+        let mut model = Model::new(std::path::PathBuf::from("/"), &crate::jsondoc::Json::Null);
+        model.fail("Denied".into());
+        model.fail("Missing".into());
+        model.transfer = "Copying 2 of 5".into();
+        model.search = "Searching 12 matches".into();
+        let theme = Theme::from_text("");
+        let output = footer(&model, &theme, 120, std::time::Duration::ZERO);
+        assert!(output.contains(&format!("{}Denied (+1) · Esc dismisses\\x1b[0m", theme.error)));
+        assert!(output.find("Denied").unwrap() < output.find("Copying").unwrap());
+        assert!(output.find("Copying").unwrap() < output.find("Searching").unwrap());
+        assert!(output.ends_with("? keys"));
+        assert_eq!(output.matches(&theme.error).count(), 1);
+    }
     #[test]
     fn unsafe_names_cannot_emit_terminal_commands() {
         assert_eq!(clean("a\x1b]52;c;evil\x07\u{202e}b"), "a]52;c;evilb");

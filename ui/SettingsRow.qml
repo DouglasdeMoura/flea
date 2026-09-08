@@ -25,6 +25,7 @@ Item {
     readonly property bool isHint: root.kind === "hint"
     readonly property bool isFavourite: root.kind === "favourite" || root.kind === "favouriteActions"
     readonly property bool isHero: root.kind === "hero"
+    readonly property bool isKeyPreview: root.kind === "keyPreview"
     readonly property bool isLock: root.kind === "lock"
     readonly property bool isRuler: root.kind === "ruler"
     readonly property bool hasBox: root.kind === "check" || root.kind === "master"
@@ -41,7 +42,70 @@ Item {
         : (root.row.on === true ? "check" : "")
 
     height: root.isFavourite ? favourite.implicitHeight : root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
+            : root.isKeyPreview ? keyPreview.implicitHeight + 2 * Theme.spacing.rowPaddingY
             : root.isHint ? hint.implicitHeight + 2 * Theme.spacing.rowPaddingY : Theme.rowHeight
+
+    Grid {
+        id: keyPreview
+        visible: root.isKeyPreview
+        x: Theme.spacing.rowPaddingX
+        y: Theme.spacing.rowPaddingY
+        width: parent.width - 2 * Theme.spacing.rowPaddingX
+        columns: 2
+        spacing: Theme.spacing.gap
+        Repeater {
+            model: root.isKeyPreview ? root.row.items : []
+            delegate: Item {
+                id: binding
+                required property var modelData
+                width: (keyPreview.width - keyPreview.spacing) / 2
+                height: Theme.hitMin
+                Rectangle {
+                    id: cap
+                    width: Math.min(capText.implicitWidth + Theme.spacing.gap, parent.width)
+                    height: parent.height
+                    color: "transparent"
+                    border.width: Theme.spacing.hairline
+                    border.color: Theme.color.muted
+                    Text {
+                        id: capText
+                        anchors.fill: parent
+                        anchors.margins: Theme.spacing.hairline
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        text: binding.modelData.keys
+                        font.family: Theme.font.family
+                        font.pixelSize: Theme.font.caption
+                        color: Theme.color.foreground
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                    }
+                }
+                Flea.Glyph {
+                    id: bindingMark
+                    x: cap.width + Theme.spacing.gap
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !!binding.modelData.glyph
+                    width: visible ? Theme.chromeMarkSize : 0
+                    height: width
+                    name: binding.modelData.glyph || "file"
+                    color: Theme.color.muted
+                }
+                Text {
+                    x: bindingMark.x + bindingMark.width + (bindingMark.visible ? Theme.spacing.gap : 0)
+                    width: Math.max(0, parent.width - x)
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                    text: binding.modelData.label
+                    font.family: Theme.font.family
+                    font.pixelSize: Theme.font.caption
+                    color: Theme.color.foreground
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                }
+            }
+        }
+    }
 
     Flea.SettingsFavourite {
         id: favourite
@@ -137,7 +201,7 @@ Item {
     // is the pattern, brand marks included, and the slot sets the label's indent the same way.
     Item {
         id: markSlot
-        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite
+        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite && !root.isKeyPreview
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
@@ -183,7 +247,7 @@ Item {
     }
 
     Text {
-        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite && !root.isRuler
+        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite && !root.isRuler && !root.isKeyPreview
         anchors.left: markSlot.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: trailing.left
@@ -227,6 +291,7 @@ Item {
             visible: root.hasSegment
             options: root.hasSegment ? root.row.options : []
             value: root.row.value || ""
+            glyphs: root.row.id === "view" ? root.row.values : []
             onPicked: function (i) { root.stopPicked(i) }
         }
 

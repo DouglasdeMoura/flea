@@ -241,23 +241,41 @@ function menuRows(hidden, keyHints) {
     return out
 }
 
-// The chord rows come from keys.toml through the generated Keymap.PRESET_KEYS, so a preset cannot
-// advertise a binding it does not have; the caller passes the table in rather than importing it,
-// which keeps this file free of the generated one.
+// Settings shows six examples; the keyboard sheet retains the complete generated inventory.
+function keyPreview(preset) {
+    var bindings = Keymap.bindingRows(preset, "gui")
+    var enter = Keymap.lookupFor(preset, Qt.Key_Return, "", 0, "listing", "gui")
+    var items = [
+        { keys: "arrows", label: preset === "mac" ? "move, open, up" : "move cursor", glyph: "" },
+        { keys: "enter", label: enter, glyph: "" },
+        { keys: "space", label: "quick look", glyph: "" }
+    ]
+    var actions = ["copy", "paste", "trash"]
+    for (var i = 0; i < actions.length; i++) {
+        var action = actions[i]
+        var mods = preset === "mac" ? "super" : preset === "windows" ? "ctrl" : "text"
+        if (action === "trash" && (preset === "mac" || preset === "windows")) mods = "none"
+        for (var j = 0; j < bindings.length; j++) {
+            var binding = bindings[j]
+            if (Keymap.actionGroup(binding.action) === action && binding.mods === mods) {
+                items.push({ keys: binding.keys, label: action, glyph: action === "trash" ? "" : GLYPHS[action] })
+                break
+            }
+        }
+    }
+    return items
+}
+
 function keyRows(state) {
     var out = [
         { kind: "group", label: "Preset" },
         { kind: "choice", id: "preset", label: "Keybinding preset", glyph: "keyboard",
           options: PRESETS.map(function (p) { return PRESET_LABELS[p] }),
           value: PRESET_LABELS[state.preset] || state.preset },
-        { kind: "hint", label: "Default, Vim, Mac and Windows, over the one key table. Every other "
-                               + "binding is shared, and the change lands in this window at once." },
-        { kind: "group", label: "This preset" }
+        { kind: "hint", label: "Default \u00b7 Vim \u00b7 Mac \u00b7 Windows" },
+        { kind: "group", label: "This preset" },
+        { kind: "keyPreview", id: "keyPreview", items: keyPreview(state.preset) }
     ]
-    var table = Keymap.sheetFor(state.preset, "gui")
-    for (var i = 0; i < table.length; i++) {
-        out.push({ kind: "fact", label: table[i].label, value: table[i].keys })
-    }
     out.push({ kind: "hint", label: "Press ? for the keyboard sheet." })
     return out
 }

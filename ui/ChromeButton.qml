@@ -9,6 +9,7 @@ Item {
 
     property string glyph: "file"
     property bool active: false
+    property bool keyboardFocused: false
 
     signal activated()
 
@@ -40,6 +41,16 @@ Item {
     Accessible.name: root.accessName
     Accessible.onPressAction: if (root.enabled) root.activated()
 
+    Rectangle {
+        anchors.centerIn: parent
+        width: Theme.hitMin
+        height: Theme.hitMin
+        visible: root.keyboardFocused
+        color: "transparent"
+        border.width: Theme.spacing.hairline
+        border.color: Theme.color.accent
+    }
+
     Behavior on scale {
         enabled: !Theme.reducedMotion
         NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
@@ -50,7 +61,7 @@ Item {
         width: Theme.chromeMarkSize
         height: Theme.chromeMarkSize
         name: root.glyph
-        color: root.active ? Theme.color.accent : Theme.color.muted
+        color: root.active || root.keyboardFocused ? Theme.color.accent : Theme.color.muted
         opacity: root.enabled ? 1 : root.disabledOpacity
     }
 

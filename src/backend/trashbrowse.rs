@@ -34,6 +34,8 @@ struct Confirmation {
     items: Manifest,
     trees: Manifest,
     listing: Vec<Item>,
+    targets: Manifest,
+    all: bool,
 }
 struct Selection {
     token: usize,
@@ -225,9 +227,17 @@ fn load_detail(text: &str, trees: &Manifest) -> Result<Detail, String> {
         backing: Some(Reviewed::from_saved(&field_str(text, "backing").ok_or("Missing Trash backing review.")?, trees)?),
     })
 }
-fn failure(item: &Item, error: &str) -> String {
-    format!(r#"{{"uri":"{}","name":"{}","error":"{}"}}"#,
-        escape(&item.uri), escape(item.original.rsplit('/').next().unwrap_or(&item.original)), escape(error))
+fn failure(item: &Item, expected: &str, error: &str) -> String {
+    format!(r#"{{"uri":"{}","name":"{}","identity":"{}","error":"{}"}}"#,
+        escape(&item.uri), escape(item.original.rsplit('/').next().unwrap_or(&item.original)), escape(expected), escape(error))
+}
+fn surviving_identity(item: &Detail) -> String {
+    if let Ok(current) = detail(&item.item) {
+        if let (Some(old), Some(new)) = (&item.backing, &current.backing) {
+            if old.same_item(new) { return selection_identity(&current); }
+        }
+    }
+    selection_identity(item)
 }
 
 impl Session {
@@ -255,6 +265,9 @@ impl Session {
         self.cancellation.check()?;
         match op {
             "list" => {
+                let recovery = if field_bool(line, "recover") {
+                    crate::backend::trashdelete::recover(&crate::backend::trashdelete::recovery_root()?)?
+                } else { crate::backend::trashdelete::RecoveryReport::default() };
                 self.items = list()?;
                 let window = self.window(
                     field_usize(line, "start").unwrap_or(0),
@@ -263,7 +276,8 @@ impl Session {
                 let selected: HashSet<_> = field_str_array(line, "uris").into_iter().collect();
                 let present = self.items.iter().filter(|item| selected.contains(&item.uri))
                     .map(|item| format!("\"{}\"", escape(&item.uri))).collect::<Vec<_>>();
-                Ok(format!("{},\"present\":[{}]", window, present.join(",")))
+                Ok(format!("{},\"present\":[{}],\"recoveredCount\":{},\"recoveryErrors\":[{}]", window, present.join(","),
+                    recovery.recovered, recovery.failures.iter().map(|error| format!("\"{}\"", escape(error))).collect::<Vec<_>>().join(",")))
             }
             "summary" => self.summary(),
             "select" => self.select_all(),
@@ -274,9 +288,6 @@ impl Session {
             "prepare" => self.prepare(line),
             "check" => {
                 let valid = self.valid(field_usize(line, "token").unwrap_or(0))?;
-                if !valid {
-                    self.confirmation = None;
-                }
                 Ok(format!(r#""valid":{}"#, valid))
             }
             "cancel" => {
@@ -287,7 +298,6 @@ impl Session {
             "restore" => self.restore(line),
             "delete" => {
                 if !self.valid(field_usize(line, "token").unwrap_or(0))? {
-                    self.confirmation = None;
                     return Err(STALE_CONFIRMATION.into());
                 }
                 let confirmation = self
@@ -299,9 +309,9 @@ impl Session {
                 let mut offset = 0;
                 while let Some(bytes) = confirmation.items.records().next(&mut offset)? {
                     let item = load_detail(&record_text(bytes)?, &confirmation.trees)?;
-                    match item.backing.as_ref().ok_or("Trash backing identity is unavailable.".to_string()).and_then(Reviewed::delete) {
+                    match item.backing.as_ref().ok_or("Trash backing identity is unavailable.".to_string()).and_then(|reviewed| reviewed.delete(&crate::backend::trashdelete::recovery_root()?)) {
                         Ok(()) => done += 1,
-                        Err(error) => failures.push(failure(&item.item, &error)),
+                        Err(error) => failures.push(failure(&item.item, &surviving_identity(&item), &error)),
                     }
                 }
                 Ok(format!(
@@ -352,6 +362,7 @@ impl Session {
             self.items.len(), start, rows.join(","), if stale { 0 } else { token }, selected_count, stale))
     }
     fn select_all(&mut self) -> Result<String, String> {
+        if self.confirmation.is_some() { return Err("Finish or cancel the Trash confirmation before selecting items.".into()); }
         self.selection = None;
         self.items = list()?;
         let mut records = Manifest::new(&self.scratch)?;
@@ -439,13 +450,34 @@ impl Session {
                     escape(uri), escape(&item.original), escape(expected)).as_bytes())?;
             }
         }
-        if targets.len() == 0 { return Err("Select at least one Trash item.".into()); }
+        if targets.len() == 0 { return Err(if all { "Trash is empty." } else { "Select at least one Trash item." }.into()); }
+        Ok(targets)
+    }
+    fn refreshed_targets(&self, previous: &Confirmation) -> Result<Manifest, String> {
+        if previous.all { return self.targets(r#"{"all":true}"#); }
+        let mut targets = Manifest::new(&self.scratch)?;
+        let mut cursor = 0;
+        while let Some(bytes) = previous.targets.records().next(&mut cursor)? {
+            self.cancellation.check()?;
+            let old = record_item(&record_text(bytes)?)?;
+            if let Some(current) = self.items.iter().find(|item| item.uri == old.uri) {
+                targets.append(format!(r#"{{"uri":"{}","original":"{}","identity":""}}"#,
+                    escape(&current.uri), escape(&current.original)).as_bytes())?;
+            }
+        }
+        if targets.len() == 0 { return Err("The selected Trash items are no longer present.".into()); }
         Ok(targets)
     }
     fn prepare(&mut self, line: &str) -> Result<String, String> {
-        self.confirmation = None;
+        let refresh_token = field_usize(line, "refreshToken").unwrap_or(0);
         self.items = list()?;
-        let targets = self.targets(line)?;
+        let previous = self.confirmation.take();
+        let all = field_bool(line, "all");
+        let targets = if refresh_token > 0 {
+            let previous = previous.as_ref().filter(|previous| previous.token == refresh_token && previous.all == all)
+                .ok_or("Trash confirmation expired; start the action again.")?;
+            self.refreshed_targets(previous)?
+        } else { self.targets(line)? };
         let mut items = Manifest::new(&self.scratch)?;
         let mut trees = Manifest::new(&self.scratch)?;
         let mut cursor = 0;
@@ -455,7 +487,7 @@ impl Session {
             self.cancellation.check()?;
             let text = record_text(record)?;
             let mut current = detail(&record_item(&text)?)?;
-            if !field_bool(line, "all") {
+            if !all && refresh_token == 0 {
                 require_selected_identity(&current, &field_str(&text, "identity").unwrap_or_default())?;
             }
             if current.identity.is_empty() { return Err("The Trash provider did not report a stable item identity.".into()); }
@@ -466,7 +498,7 @@ impl Session {
             count += 1;
         }
         self.next_token += 1;
-        self.confirmation = Some(Confirmation { token: self.next_token, items, trees, listing: self.items.clone() });
+        self.confirmation = Some(Confirmation { token: self.next_token, items, trees, listing: self.items.clone(), targets, all });
         if !self.valid(self.next_token)? {
             self.confirmation = None;
             return Err("Trash changed while reviewing its contents; try the action again.".into());
@@ -500,16 +532,19 @@ impl Session {
         while let Some(bytes) = targets.records().next(&mut cursor)? {
             let text = record_text(bytes)?;
             let item = record_item(&text)?;
+            let mut retained = field_str(&text, "identity").unwrap_or_default();
             let restored = detail(&item).and_then(|current| {
                 if !field_bool(line, "all") {
                     require_selected_identity(&current, &field_str(&text, "identity").unwrap_or_default())?;
                 }
-                current.backing.as_ref().ok_or("Trash backing identity is unavailable; restore is unavailable.")?
-                    .restore(&PathBuf::from(&item.original))
+                let result = current.backing.as_ref().ok_or("Trash backing identity is unavailable; restore is unavailable.")?
+                    .restore(&PathBuf::from(&item.original), &crate::backend::trashdelete::recovery_root()?);
+                if result.is_err() { retained = surviving_identity(&current); }
+                result
             });
             match restored {
                 Ok(_) => done += 1,
-                Err(error) => failures.push(failure(&item, &error)),
+                Err(error) => failures.push(failure(&item, &retained, &error)),
             }
         }
         self.confirmation = None;
@@ -576,6 +611,34 @@ mod tests {
         assert_eq!(record_item(&record).unwrap().original, "/original/a");
         assert!(targets.records().next(&mut offset).unwrap().is_none());
         assert!(session.targets(r#"{"selectionToken":7,"exclude":["trash:///a"]}"#).is_err());
+    }
+    #[test]
+    fn refreshed_confirmation_keeps_its_uri_set_without_rewriting_selection() {
+        let d = crate::backend::testdir::TestDir::new("trash-confirm-refresh");
+        let mut targets = Manifest::new(d.path()).unwrap();
+        targets.append(br#"{"uri":"trash:///a","original":"/old/a","identity":"old-inode"}"#).unwrap();
+        targets.append(br#"{"uri":"trash:///gone","original":"/old/gone","identity":"gone-inode"}"#).unwrap();
+        let confirmation = Confirmation { token: 3, items: Manifest::new(d.path()).unwrap(),
+            trees: Manifest::new(d.path()).unwrap(), listing: Vec::new(), targets, all: false };
+        let session = Session { items: parse_list("trash:///a\t/new/a\ntrash:///new\t/new\n").unwrap(),
+            scratch: d.path().to_path_buf(), ..Session::default() };
+        let refreshed = session.refreshed_targets(&confirmation).unwrap();
+        let mut offset = 0;
+        let text = record_text(refreshed.records().next(&mut offset).unwrap().unwrap()).unwrap();
+        assert_eq!(record_item(&text).unwrap().original, "/new/a");
+        assert_eq!(field_str(&text, "identity").unwrap(), "");
+        assert!(refreshed.records().next(&mut offset).unwrap().is_none());
+        let mut offset = 0;
+        let held = record_text(confirmation.targets.records().next(&mut offset).unwrap().unwrap()).unwrap();
+        assert_eq!(field_str(&held, "identity").unwrap(), "old-inode");
+    }
+    #[test]
+    fn named_failure_keeps_its_retry_identity() {
+        let item = Item { uri: "trash:///a".into(), original: "/original/a".into() };
+        let message = failure(&item, "held-identity", "Permission denied");
+        assert_eq!(field_str(&message, "identity").unwrap(), "held-identity");
+        assert_eq!(field_str(&message, "name").unwrap(), "a");
+        assert_eq!(field_str(&message, "error").unwrap(), "Permission denied");
     }
     #[test]
     fn expired_confirmation_never_reaches_provider() {
