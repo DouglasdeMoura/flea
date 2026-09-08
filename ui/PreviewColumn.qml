@@ -68,6 +68,8 @@ Item {
     readonly property bool thumbDrawn: root.thumb.length > 0 ? frameThumb.status !== Image.Error
                                                              : frameThumb.status === Image.Ready
     readonly property bool thumbShown: root.wantsThumb && root.thumbDrawn
+    // For ui/Ipc.qml's columnFrameRect: the box a playing video's pixels must change inside.
+    readonly property Item frameItem: frame
     // The two states whose picture is the thumbnail; audio's mark is what that state draws when it works.
     readonly property bool picturesFromThumb: root.previewState === Facts.IMAGE || root.previewState === Facts.VIDEO
 
@@ -82,8 +84,6 @@ Item {
 
         Rectangle {
             id: frame
-            // For ui/Ipc.qml's columnFrameRect: the box a playing video's pixels must change inside.
-            readonly property Item frameItem: frame
             width: parent.width
             height: Math.round(width * root.frameRatio)
             color: Theme.color.background
