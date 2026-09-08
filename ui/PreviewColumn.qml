@@ -82,6 +82,8 @@ Item {
 
         Rectangle {
             id: frame
+            // For ui/Ipc.qml's columnFrameRect: the box a playing video's pixels must change inside.
+            readonly property Item frameItem: frame
             width: parent.width
             height: Math.round(width * root.frameRatio)
             color: Theme.color.background
@@ -97,7 +99,7 @@ Item {
                 id: frameThumb
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.hairline
-                visible: root.thumbShown
+                visible: root.thumbShown && !playerLoader.visible
                 source: root.frameSource()
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
@@ -106,6 +108,24 @@ Item {
                 // which can be the whole camera file, takes the ceiling ui/PreviewImage.qml sets.
                 sourceSize.width: root.thumb.length > 0 ? 0 : Math.max(1, Math.round(width))
                 sourceSize.height: root.thumb.length > 0 ? 0 : Math.max(1, Math.round(height))
+            }
+
+            // The player, in the frame it paints into; built by the first press of play and not before, and by source rather than type, because QtMultimedia costs 20 MB on import alone.
+            Loader {
+                id: playerLoader
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.hairline
+                active: root.wantsPlayback
+                visible: active && root.previewState === Facts.VIDEO
+                source: "PreviewMedia.qml"
+                onLoaded: {
+                    item.path = Qt.binding(function () { return root.path })
+                    item.kind = Qt.binding(function () {
+                        return root.previewState === Facts.VIDEO ? "video" : "audio"
+                    })
+                    // It exists because play was pressed, so it starts.
+                    item.autoStart = true
+                }
             }
 
             // The kind's mark, and the one line saying why it is standing in. A frame with neither is
@@ -282,26 +302,7 @@ Item {
             readonly property real position: playerLoader.item ? playerLoader.item.position : 0
             readonly property var strip: strip
 
-            // Built by the first press of play and not before, so QtMultimedia is never imported by
-            // browsing alone. The probe's duration is what gives the strip a scale until then.
-            Loader {
-                id: playerLoader
-                anchors.fill: parent
-                visible: false
-                active: root.wantsPlayback
-                // source, not sourceComponent: QtMultimedia costs 20 MB on import alone, and naming
-                // the type here would load it whether or not play was ever pressed.
-                source: "PreviewMedia.qml"
-                onLoaded: {
-                    item.path = Qt.binding(function () { return root.path })
-                    item.kind = Qt.binding(function () {
-                        return root.previewState === Facts.VIDEO ? "video" : "audio"
-                    })
-                    // It exists because play was pressed, so it starts.
-                    item.autoStart = true
-                }
-            }
-
+            // The player is playerLoader in the frame above; the probe's duration gives the strip a scale until it exists.
             Flea.MediaStrip {
                 id: strip
                 anchors.fill: parent
