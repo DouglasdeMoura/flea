@@ -203,6 +203,7 @@ QtObject {
         function rowThumbReady(i: int): bool { var item = root.pane.visibleItemFor(i); return item && item.iconStatus !== undefined ? item.iconStatus === Image.Ready : false }
         function columnPlayerLoaded(): bool { return root.columns ? root.columns.playerLoaded() : false }
         function columnThumbShown(): bool { return root.columns ? root.columns.thumbShown() : false }
+        function columnFrameReady(): bool { return root.columns ? root.columns.frameReady() : false }
         function rowThumbRect(i: int): string { var item = root.pane.visibleItemFor(i); return item && item.thumbItem ? root.fleaWindow.rectOf(item.thumbItem) : "" }
         function columnFrameRect(): string { return root.columns ? root.fleaWindow.rectOf(root.columns.frameItem()) : "" }
         function columnChildEmpty(): string { var e = root.columns ? root.columns.childEmptyItem() : null; return e ? e.visible + " " + e.opacity.toFixed(2) + " " + e.markItem.opacity.toFixed(2) : "" }

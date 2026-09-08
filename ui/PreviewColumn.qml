@@ -70,6 +70,8 @@ Item {
     readonly property bool thumbShown: root.wantsThumb && root.thumbDrawn
     // For ui/Ipc.qml's columnFrameRect: the box a playing video's pixels must change inside.
     readonly property Item frameItem: frame
+    // Ready is the decoded picture on screen; thumbShown is already true while it loads.
+    readonly property alias frameStatus: frameThumb.status
     // The two states whose picture is the thumbnail; audio's mark is what that state draws when it works.
     readonly property bool picturesFromThumb: root.previewState === Facts.IMAGE || root.previewState === Facts.VIDEO
 
