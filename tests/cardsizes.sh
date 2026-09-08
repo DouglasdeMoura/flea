@@ -78,10 +78,11 @@ place() {
 # subshell) and never an empty argument under set -u; the sentinel is distinct per call so two dead
 # reads can never compare equal.
 at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered nothing"; v="0 0 0 0 dead-$RANDOM"; }; echo "$v"; }
-# section_fits <id> <shown>: at a full tile the card keeps the tallest section's height, so the section shown scrolls nothing.
+# section_fits <id> <shown>: at a full tile every section fits the card whole; a stop the rail missed is counted, never measured.
 # Sample answer: 913|406 (contentHeight|height); a content height of 0 is a section not laid out, not one that fits.
 section_fits() {
-  [ "$size" = tiled ] && [ "$2" = "$1" ] || return 0
+  [ "$size" = tiled ] || return 0
+  [ "$2" = "$1" ] || { bad "$size the $1 section was not measured, the rail is on $2"; return; }
   local sh svh; IFS='|' read -r sh svh <<<"$(at settingsScroll)"
   check "$size the $1 section fits the card whole" "$([ "${sh:-0}" -gt 0 ] && [ "$sh" -le "${svh:-0}" ] 2>/dev/null && echo fits || echo "clipped (${sh:-none} > ${svh:-none})")" "fits"
 }
@@ -112,13 +113,14 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # Settings: the rail is walked to every section, since the panel reopens on the section last shown.
   key ,; sleep 0.6
   check "$size settings opens" "$(ipc settingsOpen)" "true"
-  key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(at settingsTitleCentre); shown=$(ipc settingsSection)
+  key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(at settingsTitleCentre); shown=$(ipc settingsSection); walked=$shown
   check "$size the rail walked to keys" "$shown" "keys"; section_fits keys "$shown"
-  key j; sleep 0.3; display=$(at settingsTitleCentre); shown=$(ipc settingsSection)
+  key j; sleep 0.3; display=$(at settingsTitleCentre); shown=$(ipc settingsSection); walked="$walked $shown"
   check "$size and on to display" "$shown" "display"; section_fits display "$shown"
-  key j; sleep 0.3; menus=$(at settingsTitleCentre); shown=$(ipc settingsSection)
+  key j; sleep 0.3; menus=$(at settingsTitleCentre); shown=$(ipc settingsSection); walked="$walked $shown"
   check "$size and on to menus" "$shown" "menus"; section_fits menus "$shown"
-  check "$size settings title height is the same on keys, display and menus" "$keys|$menus" "$display|$display"
+  # Three titles from three sections, or the equality would hold trivially on one section read three times.
+  if [ "$walked" = "keys display menus" ]; then check "$size settings title height is the same on keys, display and menus" "$keys|$menus" "$display|$display"; else bad "$size settings title heights not compared, the walk reached $walked"; fi
   settings_rect=$(at settingsCardRect)
   rect_inside "$size settings card" "$settings_rect"
   omarchy-drive shot "$evidence_dir/settings-$size.png" flea >/dev/null 2>&1
