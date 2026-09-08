@@ -58,6 +58,8 @@ Singleton {
         readonly property string family: Style.font.family
         // Following takes Omarchy's resolved token, so a theme's own font override still wins. An
         // override runs Style's own fontPx ratios at the pinned stop, which is the same ladder.
+        // Running text draws at Omarchy's regular body (GM, 2026-09-07); bodySmall stays the geometry token every row and mark is sized from.
+        readonly property int body: root.overridden ? TextSize.body(root.baseSize) : Style.font.body
         readonly property int bodySmall: root.overridden ? TextSize.bodySmall(root.baseSize) : Style.font.bodySmall
         readonly property int caption: root.overridden ? TextSize.caption(root.baseSize) : Style.font.caption
     }
@@ -210,6 +212,7 @@ Singleton {
         var t = {
             family: Style.font.resolvedFamily,
             baseSize: root.baseSize,
+            body: root.font.body,
             bodySmall: root.font.bodySmall,
             caption: root.font.caption,
             lineBoxRatio: root.lineBoxRatio,

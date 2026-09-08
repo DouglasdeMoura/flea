@@ -315,7 +315,7 @@ Item {
                     text: root.dialogTitle
                     color: Theme.color.foreground
                     font.family: Theme.font.family
-                    font.pixelSize: Theme.font.bodySmall
+                    font.pixelSize: Theme.font.body
                     font.weight: Font.Bold
                     textFormat: Text.PlainText
                 }

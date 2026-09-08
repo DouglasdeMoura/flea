@@ -117,7 +117,7 @@ Item {
         text: root.entry.label !== undefined ? root.entry.label : ""
         color: root.labelColor
         font.family: Theme.font.family
-        font.pixelSize: Theme.font.bodySmall
+        font.pixelSize: Theme.font.body
         textFormat: Text.PlainText
         elide: Text.ElideRight
     }

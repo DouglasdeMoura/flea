@@ -293,7 +293,7 @@ Item {
                 text: root.path.substring(root.path.lastIndexOf("/") + 1)
                 color: Theme.color.foreground
                 font.family: Theme.font.family
-                font.pixelSize: Theme.font.bodySmall
+                font.pixelSize: Theme.font.body
                 textFormat: Text.PlainText
                 elide: Text.ElideMiddle
             }
@@ -337,7 +337,7 @@ Item {
                 text: root.status
                 color: root.archiveFailed ? Theme.color.foreground : Theme.color.muted
                 font.family: Theme.font.family
-                font.pixelSize: Theme.font.bodySmall
+                font.pixelSize: Theme.font.body
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
             }

@@ -122,7 +122,7 @@ Item {
                 text: "Convert " + root.name
                 color: Theme.color.foreground
                 font.family: Theme.font.family
-                font.pixelSize: Theme.font.bodySmall
+                font.pixelSize: Theme.font.body
                 font.bold: true
                 textFormat: Text.PlainText
                 elide: Text.ElideMiddle
@@ -191,7 +191,7 @@ Item {
                     text: "Remove metadata"
                     color: Theme.color.foreground
                     font.family: Theme.font.family
-                    font.pixelSize: Theme.font.bodySmall
+                    font.pixelSize: Theme.font.body
                     textFormat: Text.PlainText
                 }
 

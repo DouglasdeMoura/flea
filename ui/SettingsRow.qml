@@ -137,7 +137,7 @@ Item {
         text: root.row.label || ""
         color: root.isLock ? Theme.color.muted : Theme.color.foreground
         font.family: Theme.font.family
-        font.pixelSize: Theme.font.bodySmall
+        font.pixelSize: Theme.font.body
         textFormat: Text.PlainText
         elide: Text.ElideRight
     }
@@ -176,7 +176,7 @@ Item {
                                : (root.row.value || "")
             color: root.hasSteps || root.isRuler ? Theme.color.foreground : Theme.color.muted
             font.family: Theme.font.family
-            font.pixelSize: root.isRuler ? Theme.font.caption : Theme.font.bodySmall
+            font.pixelSize: root.isRuler ? Theme.font.caption : Theme.font.body
             textFormat: Text.PlainText
         }
 
