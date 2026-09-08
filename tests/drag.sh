@@ -31,6 +31,8 @@ note() { printf '     %s\n' "$*"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1"; note "expected [$3]"; note "got      [$2]"; fi; }
 
 cleanup() {
+  # R7 stops the backend it owns; a stopped process ignores TERM until it is continued.
+  [ -n "${BACKEND_PID:-}" ] && kill -CONT "$BACKEND_PID" 2>/dev/null
   [ -n "${FLEA_PID:-}" ] && kill -- -"$FLEA_PID" 2>/dev/null
   [ -n "${FLEA_PID:-}" ] && kill "$FLEA_PID" 2>/dev/null
   sleep 0.5
@@ -309,42 +311,80 @@ check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || ec
 echo
 echo "== R7: a drop on a tab whose listing is still out is a copy, never a cross-device move =="
 # ui/TabBar.qml reads the destination device as unknown while pane.listInFlight, because dirDev is then
-# the directory the hover switch just left. With a tmpfs tab the stale device made the drop a move, and
-# a move across devices copies and then deletes the source. The window is made wide on purpose: the
-# tab lists 600000 tmpfs entries, hundreds of milliseconds, and the release follows the switch by tens.
+# the directory the hover switch just left; with a tmpfs tab the stale device made the drop a move, and
+# a move across devices copies and then deletes the source. The window is held open, not raced: the
+# suite's own backend is stopped before the switch, so the listing it asks for cannot come back until
+# the drop has been taken, and the backend is continued only then.
 XDEV=$(mktemp -d /dev/shm/flea-drag-xdev-XXXXXX)
 : > "$XDEV/$SANDBOX_MARKER"
+mkdir -p "$XDEV/big/dest"
 check "the tmpfs root is another filesystem than the fixture" \
       "$([ "$(stat -c %d "$XDEV")" != "$(stat -c %d "$HOMEDIR")" ] && echo other || echo same)" "other"
-mkdir "$XDEV/big"
-seq -f "$XDEV/big/f%06g" 1 600000 | xargs -n 10000 touch
 printf 'r7 payload\n' > "$HOMEDIR/r7.txt"
 # R6 left the third tab current; it is walked into the tmpfs directory through the path bar, as R5 walked into bbb.
 check "the third tab is current" "$(ipc tabIndex)" "2"
 omarchy-drive key --window flea : >/dev/null 2>&1; sleep 0.3
 omarchy-drive key --window flea "$XDEV/big" >/dev/null 2>&1; sleep 0.2
 omarchy-drive key --window flea -k Return >/dev/null 2>&1
-for i in $(seq 1 120); do [ "$(ipc total)" = 600000 ] && break; sleep 0.25; done
-check "the third tab lists the tmpfs directory in full" "$(ipc total)" "600000"
+for i in $(seq 1 40); do [ "$(ipc path)" = "$XDEV/big" ] && [ "$(ipc listInFlight)" = false ] && break; sleep 0.25; done
+check "the third tab lists the tmpfs directory" "$(ipc path)" "$XDEV/big"
 omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
 check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
 for i in $(seq 1 40); do rowidx r7.txt >/dev/null 2>&1 && break; sleep 0.25; done
+# The one backend this suite owns: the instance's child running FLEA_BIN --backend, ui/Backend.qml's command.
+BACKEND_PID=""
+for p in $(pgrep -P "$MYPID"); do
+  [ "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" = "$FLEA_BIN --backend " ] && BACKEND_PID=$p
+done
+check "the suite found the one backend it owns" "$([ -n "$BACKEND_PID" ] && echo found || echo none)" "found"
 set -- $(screen_centre r7.txt); sx=$1; sy=$2
 set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
-# Half a second on the tab: the switch fires at hoverSwitchMs and its listing is still out at the release.
-glide_to "$tx" "$ty"; sleep 0.5
-release
-inflight=$(ipc listInFlight)
-sleep 0.6
-check "the listing the switch started was still out after the release" "$inflight" "true"
-check "and the switch had selected the tmpfs tab" "$(ipc tabIndex)" "2"
+kill -STOP "$BACKEND_PID"
+glide_to "$tx" "$ty"
+for i in $(seq 1 40); do [ "$(ipc tabIndex)" = 2 ] && [ "$(ipc listInFlight)" = true ] && break; sleep 0.1; done
+check "resting on the tmpfs tab selected it" "$(ipc tabIndex)" "2"
+check "and its listing is out against the stopped backend" "$(ipc listInFlight)" "true"
+release; sleep 0.5
+check "the drop was taken with the listing still out" "$(ipc listInFlight)" "true"
+check "and the backend was still stopped at that point" "$(cut -d' ' -f3 "/proc/$BACKEND_PID/stat")" "T"
+kill -CONT "$BACKEND_PID"
 wait_for "$XDEV/big/r7.txt" present
 check "the file landed on the tmpfs tab" \
       "$([ -e "$XDEV/big/r7.txt" ] && echo landed || echo missing)" "landed"
+check "byte for byte" "$(cmp -s "$HOMEDIR/r7.txt" "$XDEV/big/r7.txt" && echo same || echo differs)" "same"
 check "as a copy, so the source survives" \
       "$([ -e "$HOMEDIR/r7.txt" ] && echo kept || echo GONE)" "kept"
+check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+
+# ---------------------------------------------------------------- R8
+echo
+echo "== R8: the line over a folder on another filesystem says copy, and the drop is one =="
+# ui/List.qml's verbAt reads the source device off the marker, stamped at the lift: after the hover
+# switch the pane's own dirDev is the destination's, and read from there the line said move over a
+# folder the drop would copy into. The same dragCopy drives the row's "copy here" badge.
+printf 'r8 payload\n' > "$HOMEDIR/r8.txt"
+omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
+check "the home tab is current" "$(ipc path)" "$HOMEDIR"
+for i in $(seq 1 40); do rowidx r8.txt >/dev/null 2>&1 && break; sleep 0.25; done
+set -- $(screen_centre r8.txt); sx=$1; sy=$2
+set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+warp "$sx" "$sy"; sleep 0.4
+press; sleep 0.3
+glide_to "$tx" "$ty"
+for i in $(seq 1 40); do [ "$(ipc path)" = "$XDEV/big" ] && [ "$(ipc listInFlight)" = false ] && rowidx dest >/dev/null 2>&1 && break; sleep 0.1; done
+check "resting on the tmpfs tab listed it in full" "$(ipc path)" "$XDEV/big"
+set -- $(screen_centre dest); fx=$1; fy=$2
+glide_to "$fx" "$fy"; sleep 0.6
+check "the line over the folder says copy" "$(ipc stickyMessage)" "Copy 1 item to dest"
+release; sleep 0.6
+wait_for "$XDEV/big/dest/r8.txt" present
+check "the file landed in that folder" \
+      "$([ -e "$XDEV/big/dest/r8.txt" ] && echo landed || echo missing)" "landed"
+check "byte for byte" "$(cmp -s "$HOMEDIR/r8.txt" "$XDEV/big/dest/r8.txt" && echo same || echo differs)" "same"
+check "as a copy, so the source survives" \
+      "$([ -e "$HOMEDIR/r8.txt" ] && echo kept || echo GONE)" "kept"
 check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
 echo
 echo "$((pass + fail)) checks, $fail failed"

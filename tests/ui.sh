@@ -545,9 +545,11 @@ fact_labels() {
 
 # Walks the cursor to a row by name, from the top, so no case depends on an index the sort could move.
 seek_row_named() {
-    local want="$1" i
+    local want="$1" i n
+    n=$(ipc total)
+    [[ "$n" =~ ^[0-9]+$ ]] && (( n > 40 )) || n=40
     key g >/dev/null
-    for i in $(seq 1 40); do
+    for i in $(seq 1 "$n"); do
         [[ "$(ipc rowAt "$(ipc cursor)")" == "$want|"* ]] && return 0
         key j >/dev/null
     done
@@ -6297,9 +6299,11 @@ case_wheelunder() {
         [[ "$(ipc listContentY)" == "0" ]] || fail "wheelunder: three notches under $what scrolled the listing to contentY $(ipc listContentY)"
         [[ "$(ipc "$reader")" == "true" ]] || fail "wheelunder: the wheel closed $what"
     }
-    click_background
+    # 80 rows leave no ground, so the menu is opened on row 5 itself: the same overlay, and the wheel under it is the question.
+    read -r cx cy <<< "$(ipc rowCentre 5)"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" right >/dev/null
     settle
-    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "wheelunder: the background right click opened no menu"
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "wheelunder: the right click on row 5 opened no menu"
     wheel_holds "the context menu" contextMenuVisible
     key -k Escape >/dev/null
     settle
@@ -6465,8 +6469,10 @@ case_overlays() {
 case_views() {
     # Four fixtures directly inside the sandbox root, which is what its guard allows; the fourth is the
     # grid again after the columns view, so a column kept alive under the grid is proven to plan nothing.
-    local root="$fixture_root" pass mode dir r lit fx fy fw fh sx sy sw sh cx cy wx wy p1 p2 p3 p4 changed before
+    local root="$fixture_root" pass mode dir r lit fx fy fw fh sx sy sw sh cx cy wx wy p1 p2 p3 p4 changed before i
     for pass in grid list columns again; do views_fixture "$root/views-$pass"; done
+    # 44 fillers sort ahead of the fixtures, as the battery's own case directories do, so the seek has to walk past its old 40-row cap.
+    for i in $(seq -w 1 44); do mkdir -p "$root/a-filler-$i"; done
     launch "$root"
     wait_listing "$(ls "$root" | wc -l)"
     for pass in grid list columns again; do
