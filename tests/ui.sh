@@ -1623,12 +1623,15 @@ case_menu() {
     key -k Escape >/dev/null
     settle
     read -r wx wy ww wh < <(window_box)
+    # A warp alone reaches Qt as no motion at all, so the one uinput pixel is what makes the pointer rest there.
     omarchy-drive move "$((wx + rest_x))" "$((wy + rest_y))" >/dev/null
+    YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1
+    settle
     key m >/dev/null
     settle
     [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "menu: the m key did not reopen the menu under the resting pointer"
     [[ "$(ipc contextMenuCursor)" == "0" ]] || fail "menu: a menu opened under a resting pointer moved its cursor to row $(ipc contextMenuCursor)"
-    omarchy-drive move "$((wx + rest_x + 4))" "$((wy + rest_y))" >/dev/null
+    YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 3 -y 0 >/dev/null 2>&1
     settle
     [[ "$(ipc contextMenuCursor)" == "2" ]] || fail "menu: the pointer moved onto row 2 and the cursor stayed on row $(ipc contextMenuCursor)"
     printf 'MENU pointer rest=0 moved=2\n'
@@ -5614,6 +5617,8 @@ case_settings() {
     local pinned_base
     pinned_base=$(token_of baseSize)
     # Running text draws at the stop itself (GM, 2026-09-07); the row name is the rendered proof, bodySmall stays the geometry token.
+    # rowNamePx reads the list's delegate, so the list has to be the view showing and row 0 a named row.
+    [[ "$(ipc viewMode)" == "list" && "$(ipc rowAt 0)" == *"|"* ]] || fail "settings: the typography proof needs the list view on a named row, got $(ipc viewMode) and '$(ipc rowAt 0)'"
     [[ "$(ipc bodyPx)" == "$pinned_base" && "$(ipc rowNamePx 0)" == "$pinned_base" ]] \
         || fail "settings: at the ${pinned_base}px stop the body draws $(ipc bodyPx) and row 0's name $(ipc rowNamePx 0)"
 
