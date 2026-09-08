@@ -159,19 +159,11 @@ Item {
     HoverHandler {
         id: pointer
         enabled: !root.isSeparator
-        // The first point after entry is where the pointer rested; only a later, different one is motion.
-        property bool armed: false
+        // Where the pointer sat when the hover began is the rest; any later, different point is motion. Read at entry, so the first real move already counts.
         property point restingAt
-        onHoveredChanged: pointer.armed = false
+        onHoveredChanged: if (pointer.hovered) pointer.restingAt = pointer.point.position
         onPointChanged: {
-            if (!pointer.hovered)
-                return
-            if (!pointer.armed) {
-                pointer.armed = true
-                pointer.restingAt = pointer.point.position
-                return
-            }
-            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
+            if (pointer.hovered && (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y))
                 root.pointerMoved()
         }
     }
