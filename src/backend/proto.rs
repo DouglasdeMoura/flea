@@ -39,6 +39,7 @@ pub enum Request {
     // Which archive formats this box actually offers, and whether a converter is installed at all.
     Formats,
     Permissions { line: String },
+    TrashBrowse { line: String },
     Quit,
     Unknown,
 }
@@ -46,6 +47,7 @@ pub enum Request {
 // Sample input: {"c":"list","path":"/home/gm","first":350,"hidden":false}
 pub fn parse_request(line: &str) -> Request {
     match field_str(line, "c").as_deref() {
+        Some("trashbrowse") => Request::TrashBrowse { line: line.to_string() },
         Some("permissions") => Request::Permissions { line: line.to_string() },
         Some("list") => Request::List {
             path: field_str(line, "path").unwrap_or_default(),

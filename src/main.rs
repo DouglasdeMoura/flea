@@ -17,6 +17,7 @@ mod tui;
 mod thp;
 mod uischema;
 mod uistate;
+mod favourites;
 mod uistore;
 mod userfile;
 mod vulkan;
@@ -211,6 +212,10 @@ fn main() {
     // flea --ui-state [<json patch>]: the shared ui.json read and update path, see AGENTS.md "The state file".
     if args.get(1).map(String::as_str) == Some("--ui-state") {
         exit(ui_state(&args));
+    }
+
+    if args.get(1).map(String::as_str) == Some("--favourites") {
+        exit(favourites::command(&args));
     }
 
     let mut want_tui = false;

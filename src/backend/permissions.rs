@@ -1,9 +1,9 @@
 // One reviewed object stays open until its dialog closes; mode writes never walk a directory.
 use crate::json::{escape, field_str, field_usize};
 use crate::oflags::O_NOFOLLOW;
-use std::fs::{File, Metadata, OpenOptions};
 #[cfg(test)]
 use std::fs::Permissions as Mode;
+use std::fs::{File, Metadata, OpenOptions};
 #[cfg(test)]
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -21,8 +21,16 @@ extern "C" {
 }
 
 #[derive(Default)]
-pub struct Permissions { held: Option<Reviewed> }
-struct Reviewed { id: usize, path: PathBuf, file: File, dev: u64, ino: u64 }
+pub struct Permissions {
+    held: Option<Reviewed>,
+}
+struct Reviewed {
+    id: usize,
+    path: PathBuf,
+    file: File,
+    dev: u64,
+    ino: u64,
+}
 
 // Sample input: "644" or "0644"; special bits and partial/whitespace inputs are not ordinary modes.
 fn mode(text: &str) -> Result<u32, String> {
@@ -35,9 +43,13 @@ fn mode(text: &str) -> Result<u32, String> {
 
 fn reason(meta: &Metadata, uid: u32) -> String {
     for (bit, label) in [(0o4000, "setuid"), (0o2000, "setgid"), (0o1000, "sticky")] {
-        if meta.mode() & bit != 0 { return format!("Read-only: {} bit is present.", label); }
+        if meta.mode() & bit != 0 {
+            return format!("Read-only: {} bit is present.", label);
+        }
     }
-    if meta.uid() != uid { return "Read-only: you are not the owner.".into(); }
+    if meta.uid() != uid {
+        return "Read-only: you are not the owner.".into();
+    }
     String::new()
 }
 
@@ -47,7 +59,9 @@ fn group_name(gid: u32) -> String {
     for line in text.lines() {
         let mut fields = line.split(':');
         let name = fields.next().unwrap_or("");
-        if fields.nth(1).and_then(|s| s.parse::<u32>().ok()) == Some(gid) { return name.into(); }
+        if fields.nth(1).and_then(|s| s.parse::<u32>().ok()) == Some(gid) {
+            return name.into();
+        }
     }
     String::new()
 }
@@ -61,47 +75,117 @@ impl Permissions {
             "inspect" => self.inspect(id, Path::new(&field_str(line, "path").unwrap_or_default())),
             "apply" => self.apply(id, &field_str(line, "mode").unwrap_or_default()),
             "close" => {
-                if self.held.as_ref().map(|h| h.id) == Some(id) { self.held = None; }
-                Ok(format!(r#"{{"t":"permissions","id":{},"op":"close","ok":true}}"#, id))
+                if self.held.as_ref().map(|h| h.id) == Some(id) {
+                    self.held = None;
+                }
+                Ok(format!(
+                    r#"{{"t":"permissions","id":{},"op":"close","ok":true}}"#,
+                    id
+                ))
             }
             _ => Err("Unknown permissions operation.".into()),
         };
-        result.unwrap_or_else(|err| format!(r#"{{"t":"permissions","id":{},"op":"{}","ok":false,"error":"{}"}}"#, id, escape(&op), escape(&err)))
+        result.unwrap_or_else(|err| {
+            format!(
+                r#"{{"t":"permissions","id":{},"op":"{}","ok":false,"error":"{}"}}"#,
+                id,
+                escape(&op),
+                escape(&err)
+            )
+        })
     }
 
     fn inspect(&mut self, id: usize, path: &Path) -> Result<String, String> {
         self.held = None;
-        if id == 0 || !path.is_absolute() { return Err("Permissions requires an absolute path and request identity.".into()); }
-        let before = path.symlink_metadata().map_err(|e| format!("Could not inspect permissions: {}.", e))?;
-        if !(before.is_file() || before.is_dir()) { return Err("Permissions is available for one file or directory; symbolic links are not followed.".into()); }
-        let file = OpenOptions::new().read(true).custom_flags(O_NOFOLLOW | O_PATH).open(path)
+        if id == 0 || !path.is_absolute() {
+            return Err("Permissions requires an absolute path and request identity.".into());
+        }
+        let before = path
+            .symlink_metadata()
+            .map_err(|e| format!("Could not inspect permissions: {}.", e))?;
+        if !(before.is_file() || before.is_dir()) {
+            return Err("Permissions is available for one file or directory; symbolic links are not followed.".into());
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NOFOLLOW | O_PATH)
+            .open(path)
             .map_err(|e| format!("Could not open selected item for permissions: {}.", e))?;
         let meta = file.metadata().map_err(|e| e.to_string())?;
-        if meta.dev() != before.dev() || meta.ino() != before.ino() { return Err("Selected item changed; reopen Permissions.".into()); }
+        if meta.dev() != before.dev() || meta.ino() != before.ino() {
+            return Err("Selected item changed; reopen Permissions.".into());
+        }
         let why = reason(&meta, unsafe { geteuid() });
-        let response = format!(r#"{{"t":"permissions","id":{},"op":"inspect","ok":true,"path":"{}","directory":{},"mode":"{:04o}","uid":{},"gid":{},"owner":"{}","group":"{}","reason":"{}"}}"#,
-            id, escape(&path.to_string_lossy()), meta.is_dir(), meta.mode() & 0o7777, meta.uid(), meta.gid(), escape(&super::owner::name(meta.uid())), escape(&group_name(meta.gid())), escape(&why));
-        self.held = Some(Reviewed { id, path: path.into(), dev: meta.dev(), ino: meta.ino(), file });
+        let response = format!(
+            r#"{{"t":"permissions","id":{},"op":"inspect","ok":true,"path":"{}","directory":{},"mode":"{:04o}","uid":{},"gid":{},"owner":"{}","group":"{}","reason":"{}"}}"#,
+            id,
+            escape(&path.to_string_lossy()),
+            meta.is_dir(),
+            meta.mode() & 0o7777,
+            meta.uid(),
+            meta.gid(),
+            escape(&super::owner::name(meta.uid())),
+            escape(&group_name(meta.gid())),
+            escape(&why)
+        );
+        self.held = Some(Reviewed {
+            id,
+            path: path.into(),
+            dev: meta.dev(),
+            ino: meta.ino(),
+            file,
+        });
         Ok(response)
     }
 
     fn apply(&mut self, id: usize, text: &str) -> Result<String, String> {
         let requested = mode(text)?;
-        let held = self.held.as_ref().filter(|h| h.id == id).ok_or("Permissions selection expired; reopen the dialog.")?;
+        let held = self
+            .held
+            .as_ref()
+            .filter(|h| h.id == id)
+            .ok_or("Permissions selection expired; reopen the dialog.")?;
         let meta = held.file.metadata().map_err(|e| e.to_string())?;
-        let current = held.path.symlink_metadata().map_err(|_| "Selected item moved or disappeared; reopen Permissions.")?;
-        if current.dev() != held.dev || current.ino() != held.ino || current.file_type().is_symlink() {
+        let current = held
+            .path
+            .symlink_metadata()
+            .map_err(|_| "Selected item moved or disappeared; reopen Permissions.")?;
+        if current.dev() != held.dev
+            || current.ino() != held.ino
+            || current.file_type().is_symlink()
+        {
             return Err("Selected item changed; reopen Permissions.".into());
         }
-        if meta.dev() != held.dev || meta.ino() != held.ino { return Err("Held item identity changed.".into()); }
-        let why = reason(&meta, unsafe { geteuid() });
-        if !why.is_empty() { return Err(why); }
-        if meta.mode() & SPECIAL_BITS != 0 { return Err("Special permissions cannot be edited.".into()); }
-        // O_PATH can review mode 0000; empty-path fchmodat2 changes that held object without reopening a pathname.
-        if unsafe { syscall(SYS_FCHMODAT2, held.file.as_raw_fd(), c"".as_ptr(), requested, AT_EMPTY_PATH) } != 0 {
-            return Err(format!("Could not change mode: {}. No change was applied.", std::io::Error::last_os_error()));
+        if meta.dev() != held.dev || meta.ino() != held.ino {
+            return Err("Held item identity changed.".into());
         }
-        Ok(format!(r#"{{"t":"permissions","id":{},"op":"apply","ok":true,"mode":"{:04o}"}}"#, id, requested))
+        let why = reason(&meta, unsafe { geteuid() });
+        if !why.is_empty() {
+            return Err(why);
+        }
+        if meta.mode() & SPECIAL_BITS != 0 {
+            return Err("Special permissions cannot be edited.".into());
+        }
+        // O_PATH can review mode 0000; empty-path fchmodat2 changes that held object without reopening a pathname.
+        if unsafe {
+            syscall(
+                SYS_FCHMODAT2,
+                held.file.as_raw_fd(),
+                c"".as_ptr(),
+                requested,
+                AT_EMPTY_PATH,
+            )
+        } != 0
+        {
+            return Err(format!(
+                "Could not change mode: {}. No change was applied.",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(format!(
+            r#"{{"t":"permissions","id":{},"op":"apply","ok":true,"mode":"{:04o}"}}"#,
+            id, requested
+        ))
     }
 }
 
@@ -121,8 +205,12 @@ mod tests {
     }
     #[test]
     fn ordinary_modes_only() {
-        for text in ["644", "000", "777", "0644"] { assert!(mode(text).is_ok()); }
-        for text in ["", "64", "888", "4755", " 644", "0644 ", "00000", "-1"] { assert!(mode(text).is_err(), "{}", text); }
+        for text in ["644", "000", "777", "0644"] {
+            assert!(mode(text).is_ok());
+        }
+        for text in ["", "64", "888", "4755", " 644", "0644 ", "00000", "-1"] {
+            assert!(mode(text).is_err(), "{}", text);
+        }
     }
     #[test]
     fn directory_change_does_not_traverse() {

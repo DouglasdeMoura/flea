@@ -18,6 +18,8 @@ use std::thread;
 // Everything the write operations own, kept apart from the listing state they never touch.
 pub(crate) struct Ops {
     pub journal: Journal,
+    pub permissions: super::permissions::Permissions,
+    pub trashbrowser: Option<super::trashbrowse::TrashBrowser>,
     pub next_id: usize,
     // The id of the operation on the thread, or None when none is running; the cap is one at a time.
     pub running: Option<usize>,
@@ -27,7 +29,7 @@ pub(crate) struct Ops {
 
 impl Ops {
     pub fn new(tx: Sender<OpMsg>) -> Ops {
-        Ops { journal: Journal::new(), next_id: 1, running: None, cancel: Arc::new(AtomicBool::new(false)), tx }
+        Ops { journal: Journal::new(), permissions: super::permissions::Permissions::default(), trashbrowser: None, next_id: 1, running: None, cancel: Arc::new(AtomicBool::new(false)), tx }
     }
 
     // An id with no slot claimed: archive and convert are id-keyed and run concurrently by design,

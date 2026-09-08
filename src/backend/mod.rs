@@ -32,6 +32,8 @@ pub mod owner;
 pub mod peek;
 pub mod proto;
 pub mod permissions;
+pub mod trashbrowse;
+pub mod trashdelete;
 pub mod rows;
 pub mod run;
 pub mod md5;

@@ -37,8 +37,9 @@ pub const OPTIONAL_COLUMNS: [&str; 4] = ["mode", "size", "date", "kind"];
 // Omarchy's own textSizeStops, so an override can never land on a size the OEM panel could not produce.
 pub const TEXT_SIZE_STOPS: [f64; 7] = [9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 20.0];
 // A rail narrower than a mark plus a label is not a rail, and one wider than this is a second pane.
-pub const SIDEBAR_MIN: f64 = 120.0;
-pub const SIDEBAR_MAX: f64 = 640.0;
+pub const SIDEBAR_MIN: f64 = 160.0;
+pub const SIDEBAR_MAX: f64 = 256.0;
+pub const SIDEBAR_STOPS: [f64; 4] = [160.0, 192.0, 224.0, 256.0];
 
 // What a value has to be for the key to keep it. A key that fails its rule falls back to its default.
 pub enum Rule {
@@ -46,7 +47,8 @@ pub enum Rule {
     Word(&'static [&'static str]),
     // columns names what the list row SHOWS, so it holds each column key at most once and name always.
     Columns,
-    Paths,
+    Favourites,
+    SidebarWidth,
     // dual.paths is the pair handoff 5a specifies, or the empty array that means nothing remembered.
     Pair,
     // menu.hidden is deliberately open: a closed list would make this Flea drop an id a newer one hid.
@@ -63,13 +65,13 @@ pub const SORT: &[(&str, Rule)] = &[("key", Rule::Word(&["name", "size", "date",
 pub const DUAL: &[(&str, Rule)] = &[("paths", Rule::Pair), ("focus", Rule::Count(0.0, 1.0))];
 
 pub const PLACES: &[(&str, Rule)] = &[
-    ("favourites", Rule::Paths),
+    ("favourites", Rule::Favourites),
     ("showHome", Rule::Bool),
     ("showNetwork", Rule::Bool),
     ("showDevices", Rule::Bool),
     ("showTrash", Rule::Bool),
     ("driveSize", Rule::Bool),
-    ("sidebarWidth", Rule::Count(SIDEBAR_MIN, SIDEBAR_MAX)),
+    ("sidebarWidth", Rule::SidebarWidth),
 ];
 
 pub const PREVIEW: &[(&str, Rule)] = &[
@@ -232,7 +234,6 @@ mod tests {
                              (r#"{"menu":{"basic":false}}"#, "menu.basic"),
                              (r#"{"keys":"emacs"}"#, "keys"),
                              (r#"{"language":"en"}"#, "language"),
-                             (r#"{"places":{"favourites":[""]}}"#, "places.favourites"),
                              (r#"{"places":{"favourites":"/a"}}"#, "places.favourites")] {
             let message = takes(bad).expect_err("the patch must be refused");
             assert!(message.contains(named), "{} should name {}, got {}", bad, named, message);

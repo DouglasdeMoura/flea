@@ -72,10 +72,14 @@ impl Store {
     // The lock is held across the re-read, the validation, the merge, the temp write and the rename,
     // so a second Flea cannot land between this one's read and its write.
     pub fn update(&self, patch: &Json) -> Result<Json, String> {
+        self.transform(|state| uistate::patched(state, patch))
+    }
+
+    pub fn transform(&self, change: impl FnOnce(&Json) -> Result<Json, String>) -> Result<Json, String> {
         let dir = self.file.parent().ok_or_else(|| format!("{} has no directory to write in", self.file.display()))?;
         make_dir(dir)?;
         let lock = take_lock(&self.lock)?;
-        let next = uistate::patched(&self.read(), patch)?;
+        let next = change(&self.read())?;
         self.write(&next)?;
         lock.unlock().map_err(|e| format!("{} could not be unlocked ({:?})", self.lock.display(), e.kind()))?;
         Ok(next)

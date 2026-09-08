@@ -82,7 +82,6 @@ pub fn run() -> i32 {
     let (results, done) = channel::<Done>();
     let (op_tx, op_rx) = channel::<OpMsg>();
     let mut ops = Ops::new(op_tx);
-    let mut permissions = super::permissions::Permissions::default();
     // The pool shares this process's one parse of both tables rather than reading the same two files again.
     let pool = Pool::new(THUMB_WORKERS, results, default_root(), Arc::clone(&tb.aliases), Arc::clone(&tb.thumbs));
     let cache = Cache::new();
@@ -116,7 +115,7 @@ pub fn run() -> i32 {
         };
         match event {
             Event::Request(line) => {
-                if handle_line(&line, &mut out, &mut st, &tb, &pool, &cache, &mut ops, &mut watch, &mut permissions) == Control::Quit {
+                if handle_line(&line, &mut out, &mut st, &tb, &pool, &cache, &mut ops, &mut watch) == Control::Quit {
                     break;
                 }
             }
@@ -156,10 +155,13 @@ fn handle_line(
     cache: &Cache,
     ops: &mut Ops,
     watch: &mut Watch,
-    permissions: &mut super::permissions::Permissions,
 ) -> Control {
     match parse_request(line) {
-        Request::Permissions { line } => say(out, &permissions.handle(&line)),
+        Request::Permissions { line } => say(out, &ops.permissions.handle(&line)),
+        Request::TrashBrowse { line } => {
+            let replies = ops.tx.clone();
+            ops.trashbrowser.get_or_insert_with(|| super::trashbrowse::TrashBrowser::new(replies)).request(line);
+        }
         Request::List { path, first, hidden } => {
             // A new listing replaces whatever the walk was filling, so the walk ends before the scan starts.
             if finish_search(out, st, true) {
