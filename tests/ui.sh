@@ -6410,8 +6410,10 @@ case_views() {
         dir="$root/views-$pass"
         mode=$pass
         [[ "$pass" == "again" ]] && mode=grid
-        switch_view "$mode"
+        # Sought in the list, where j walks one row; the grid's j walks a tile row. The target view is on before Return.
+        switch_view list
         seek_row_named "views-$pass"
+        switch_view "$mode"
         key -k Return >/dev/null
         wait_listing 406
         [[ "$(ipc path)" == "$dir" ]] || fail "$mode: Return on the $mode row opened $(ipc path)"
