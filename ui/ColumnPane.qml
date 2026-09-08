@@ -106,13 +106,11 @@ Item {
         total: root.rows.length
     }
 
-    // The empty answer drawn quiet: the mark size Locked and Error already take in this slot, the hero's own first phrase, and a fixed caption, which is what keeps EmptyState's rotation off in a column the cursor rebuilds on every step.
+    // The same hero the list draws, per the operator: a peeked empty directory animates like the pane's own.
     Flea.EmptyState {
         id: emptyTile
         anchors.fill: parent
         visible: root.drawsEmpty && root.rows.length === 0 && root.lockedMode < 0
-        caption: emptyTile.messages[0]
-        mark: "folder"
     }
 
     // The cursor can move off screen through the keyboard, so the column follows it.
