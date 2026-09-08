@@ -49,6 +49,11 @@ QtObject {
         function railCount(): int { return root.pane.railCount }
         function path(): string { return root.pane.path }
         function lastMessage(): string { return root.bar.transient_ }
+        function statusPrimary(): string { return root.bar.rightText() }
+        function statusColor(): string { return String(root.bar.rightColor()) }
+        function statusSecondary(): string { return root.bar.secondaryText }
+        function statusError(): bool { return root.bar.transientIsError }
+
         // The sticky slot an operation holds while it runs, so a test can name the verb in flight.
         function stickyMessage(): string { return root.bar.sticky }
         function firstRowsAt(): string { return String(root.backend.firstRowsAt) }

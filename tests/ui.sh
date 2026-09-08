@@ -2386,6 +2386,44 @@ case_columns() {
     kill_flea
 }
 
+case_status() {
+    local dir="$fixture_root/status" failure
+    sandbox_scratch "$dir"
+    printf 'body\n' > "$dir/notes.txt"
+    launch "$dir"
+    wait_listing 1
+    sandbox_require "$dir"
+    chmod u-w "$dir"
+    click_row 0 right
+    settle
+    menu_seek "Duplicate"
+    key -k Return >/dev/null
+    settle
+    failure=$(ipc lastMessage)
+    [[ "$(ipc statusError)" == true && -n "$failure" ]] || fail "status: unwritable duplicate produced no error: $failure"
+    sandbox_require "$dir"
+    chmod u+w "$dir"
+    key y >/dev/null
+    settle
+    [[ "$(ipc lastMessage)" == "$failure" ]] || fail "status: clipboard notice acknowledged error"
+    key f >/dev/null
+    key notes >/dev/null
+    key -k Return >/dev/null
+    settle
+    [[ "$(ipc statusPrimary)" == "$failure" ]] || fail "status: search hid error"
+    [[ "$(ipc statusSecondary)" == *scanned* || "$(ipc statusSecondary)" == *result* ]] || fail "status: search lost secondary count"
+    [[ "$(ipc statusColor)" == "$(ipc palette | cut -d' ' -f6)" ]] || fail "status: error lost its color"
+    shot status-error-search
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc statusError)" == true ]] || fail "status: closing search acknowledged error"
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc statusError)" == false ]] || fail "status: Escape did not acknowledge error"
+    shot status-dismissed
+    kill_flea
+}
+
 case_operations() {
     local dir="$fixture_root/operations"
     sandbox_scratch "$dir"
