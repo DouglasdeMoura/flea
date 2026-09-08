@@ -19,20 +19,8 @@ pub struct Graphics {
 }
 impl Graphics {
     pub fn new() -> Self {
-        let term = std::env::var("TERM").unwrap_or_default();
-        let program = std::env::var("TERM_PROGRAM").unwrap_or_default();
-        let protocol = if term.contains("kitty")
-            || program == "ghostty"
-            || std::env::var_os("KITTY_WINDOW_ID").is_some()
-        {
-            Protocol::Kitty
-        } else if term.contains("foot") {
-            Protocol::Sixel
-        } else {
-            Protocol::None
-        };
         Self {
-            protocol,
+            protocol: Protocol::None,
             job: None,
             identity: PathBuf::new(),
             bytes: Vec::new(),

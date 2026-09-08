@@ -303,6 +303,16 @@ impl Model {
     pub fn current_path(&self) -> Option<PathBuf> {
         self.rows.get(&self.cursor).map(|row| self.row_path(row))
     }
+    pub fn single_row(&self) -> Option<(usize, Row)> {
+        match self.selected.len() {
+            0 => self.rows.get(&self.cursor).cloned().map(|row| (self.cursor, row)),
+            1 => {
+                let index = *self.selected.first()?;
+                self.selected_rows.get(&index).or_else(|| self.rows.get(&index)).cloned().map(|row| (index, row))
+            }
+            _ => None,
+        }
+    }
     pub fn menu_enabled(&self, index: usize) -> bool {
         if self.taildrop.submenu { return self.menu_ready && index < self.taildrop.peers.len(); }
         match index {
@@ -845,6 +855,25 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_mark_keeps_its_identity_when_cursor_leaves_the_page() {
+        let mut model = Model::new(PathBuf::from("/"), &Json::Null);
+        let row = |name| Row::parse(&Json::Obj(vec![("n".into(), word(name))]), &[]);
+        model.rows.insert(3, row("marked"));
+        model.selected.insert(3);
+        model.remember_selection();
+        model.rows.clear();
+        model.rows.insert(8, row("cursor"));
+        model.cursor = 8;
+        let (index, selected) = model.single_row().unwrap();
+        assert_eq!(index, 3);
+        assert_eq!(selected.name, "marked");
+        model.selected.insert(8);
+        assert!(model.single_row().is_none());
+        model.selected.clear();
+        assert_eq!(model.single_row().unwrap().1.name, "cursor");
+    }
 
     #[test]
     fn errors_survive_until_each_is_acknowledged() {

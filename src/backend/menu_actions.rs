@@ -9,7 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{sync_channel, Sender, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct MenuActions {
@@ -35,10 +35,13 @@ impl MenuActions {
                 let reply = if cancel.check().is_ok() {
                     state.handle_request(&line, paths, &queries, &cancel)
                 } else { response(&line, Err("Menu request cancelled.".into())) };
-                if cancel.check().is_ok() && matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close")) {
-                    *published.lock().unwrap() = state;
+                if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close" | "prepareDelete" | "delete")) {
+                    publish_snapshot(published.lock().unwrap(), state, &cancel);
                 }
-                if output.send(OpMsg::Meta { line: reply }).is_err() { break; }
+                let message = if field_str(&line, "op").as_deref() == Some("delete") {
+                    OpMsg::MenuDeleteDone { line: reply }
+                } else { OpMsg::Meta { line: reply } };
+                if output.send(message).is_err() { break; }
             }
         });
         Self { requests, replies, snapshot, cancellation: Mutex::new(Cancellation::default()), registry, requested_id: AtomicUsize::new(0) }
@@ -50,25 +53,31 @@ impl MenuActions {
         }
         Ok(snapshot.items.clone())
     }
-    pub fn request(&self, line: String, paths: Vec<String>) {
+    pub(crate) fn selected_path(&self, id: usize, path: &Path) -> Result<Selected, String> {
+        let snapshot = self.snapshot.lock().map_err(|_| "The menu service stopped; reopen this window.")?;
+        if id == 0 || snapshot.id != id { return Err("Menu selection expired; reopen the menu.".into()); }
+        snapshot.items.iter().find(|item| item.path == path).cloned()
+            .ok_or_else(|| "This path was not in the menu selection; reopen the menu.".into())
+    }
+    pub fn request(&self, line: String, paths: Vec<String>) -> bool {
         let op = field_str(&line, "op").unwrap_or_default();
         let mut cancellation = self.cancellation.lock().unwrap();
         if op == "snapshot" || op == "close" {
             let id = field_usize(&line, "id").unwrap_or(0);
             if op == "close" && self.requested_id.load(Ordering::Relaxed) != id {
                 let _ = self.replies.send(OpMsg::Meta { line: response(&line, Ok(String::new())) });
-                return;
+                return false;
             }
             *cancellation = cancellation.next();
             self.requested_id.store(if op == "snapshot" { id } else { 0 }, Ordering::Relaxed);
             *self.snapshot.lock().unwrap() = Snapshot::default();
             if let Err(error) = self.registry.cancel() {
                 let _ = self.replies.send(OpMsg::Meta { line: response(&line, Err(error)) });
-                return;
+                return false;
             }
             if op == "close" {
                 let _ = self.replies.send(OpMsg::Meta { line: response(&line, Ok(String::new())) });
-                return;
+                return false;
             }
         }
         if let Err(error) = self.requests.try_send((line, paths, cancellation.clone())) {
@@ -78,7 +87,9 @@ impl MenuActions {
             };
             let reply = response(&request.0, Err(reason.into()));
             let _ = self.replies.send(OpMsg::Meta { line: reply });
+            return false;
         }
+        true
     }
 }
 
@@ -93,6 +104,12 @@ impl Drop for MenuActions {
 struct Snapshot {
     id: usize,
     items: Vec<Selected>,
+    deletion: Option<Arc<super::menudelete::Review>>,
+}
+
+// The lock must already be held when cancellation is checked, or close can be followed by a stale publication.
+fn publish_snapshot(mut published: MutexGuard<'_, Snapshot>, state: Snapshot, cancel: &Cancellation) {
+    if cancel.check().is_ok() { *published = state; }
 }
 #[derive(Clone)]
 pub(crate) struct Selected {
@@ -102,7 +119,7 @@ pub(crate) struct Selected {
     kind: u32,
 }
 impl Selected {
-    fn inspect(path: &str) -> Result<Self, String> {
+    pub(crate) fn inspect(path: &str) -> Result<Self, String> {
         let path = PathBuf::from(path);
         if !path.is_absolute() || path.file_name().is_none() {
             return Err("Menu selection requires an absolute item path.".into());
@@ -126,6 +143,7 @@ impl Snapshot {
         let result = if op == "snapshot" {
             self.id = 0;
             self.items.clear();
+            self.deletion = None;
             if id == 0 || paths.is_empty() {
                 Err("There are no selected items to inspect.".into())
             } else {
@@ -136,18 +154,29 @@ impl Snapshot {
                 })
             }
         } else if op == "close" {
-            if self.id == id { self.id = 0; self.items.clear(); }
+            if self.id == id { *self = Self::default(); }
             Ok(String::new())
         } else {
             self.perform(id, &op, line, registry, cancel)
         };
         response(line, result)
     }
-    fn perform(&self, id: usize, op: &str, line: &str, registry: &Registry, cancel: &Cancellation) -> Result<String, String> {
+    fn perform(&mut self, id: usize, op: &str, line: &str, registry: &Registry, cancel: &Cancellation) -> Result<String, String> {
         if id == 0 || id != self.id || self.items.is_empty() {
             return Err("Menu selection expired; reopen the menu.".into());
         }
+        if op == "delete" {
+            let review = self.take_deletion(field_usize(line, "token").unwrap_or(0))?;
+            return review.delete(&super::trashdelete::recovery_root()?, cancel);
+        }
+        if op == "prepareDelete" { self.deletion = None; }
         for item in &self.items { item.current()?; }
+        if op == "prepareDelete" {
+            let review = super::menudelete::Review::prepare(&self.items, &std::env::temp_dir(), cancel)?;
+            let reply = format!(r#""token":{},"count":{},"bytes":{}"#, review.token, review.count, review.bytes);
+            self.deletion = Some(Arc::new(review));
+            return Ok(reply);
+        }
         if op == "validate" {
             let paths: Vec<String> = self.items.iter().map(|i| format!(r#""{}""#, escape(&i.path.to_string_lossy()))).collect();
             return Ok(format!(r#""action":"{}","paths":[{}],"dest":"{}""#,
@@ -183,6 +212,10 @@ impl Snapshot {
             }
             _ => Err("Unknown menu operation.".into()),
         }
+    }
+    fn take_deletion(&mut self, token: usize) -> Result<Arc<super::menudelete::Review>, String> {
+        self.deletion.take().filter(|review| token > 0 && review.token == token)
+            .ok_or_else(|| "Deletion confirmation expired; review a fresh confirmation.".into())
     }
     #[cfg(test)]
     fn handle(&mut self, line: &str, paths: Vec<String>) -> String {
@@ -227,6 +260,44 @@ mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn cancellation_at_publication_cannot_resurrect_a_closed_snapshot() {
+        let published = Mutex::new(Snapshot::default());
+        let old = Cancellation::default();
+        let previously_checked = old.check().is_ok();
+        old.next();
+        if previously_checked { *published.lock().unwrap() = Snapshot { id: 3, ..Snapshot::default() }; }
+        assert_eq!(published.lock().unwrap().id, 3, "the former check-before-lock ordering resurrects the snapshot");
+
+        *published.lock().unwrap() = Snapshot::default();
+        let current = Cancellation::default();
+        let guard = published.lock().unwrap();
+        current.next();
+        publish_snapshot(guard, Snapshot { id: 3, ..Snapshot::default() }, &current);
+        assert_eq!(published.lock().unwrap().id, 0, "publication must recheck the cancelled generation under its lock");
+    }
+
+    #[test]
+    fn deletion_confirmation_is_replaced_consumed_and_closed() {
+        let d = TestDir::new("menu-delete-token");
+        let path = d.file("item", "preserved");
+        let item = Selected::inspect(path.to_str().unwrap()).unwrap();
+        let prepare = || Arc::new(super::super::menudelete::Review::prepare(std::slice::from_ref(&item), d.path(), &Cancellation::default()).unwrap());
+        let old = prepare();
+        let current = prepare();
+        assert_ne!(old.token, current.token);
+        let mut snapshot = Snapshot { id: 4, items: vec![item.clone()], deletion: Some(current.clone()) };
+        assert!(snapshot.take_deletion(old.token).is_err());
+        assert!(snapshot.deletion.is_none(), "a refused confirmation cannot be retried as a different token");
+        snapshot.deletion = Some(current.clone());
+        assert!(snapshot.take_deletion(current.token).is_ok());
+        assert!(snapshot.take_deletion(current.token).is_err());
+        snapshot.deletion = Some(prepare());
+        snapshot.handle(r#"{"op":"close","id":4}"#, vec![]);
+        assert!(snapshot.deletion.is_none());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "preserved");
+    }
 
     #[test]
     fn snapshot_rejects_replaced_items_and_stale_request_ids() {

@@ -53,7 +53,7 @@ impl Terminal {
                 .handlers
                 .push((sig, unsafe { signal(sig, stop as *const () as usize) }));
         }
-        print!("\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[>1u\x1b[c");
+        print!("\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[>1u\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c");
         io::stdout().flush()?;
         Ok(terminal)
     }

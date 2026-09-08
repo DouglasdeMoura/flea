@@ -232,7 +232,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             if let (Some(path), Some(pixels)) = (&model.image_file, pixels) {
                 graphics.request(path.clone(), geometry.0, geometry.1, pixels);
             }
-            if visible && !graphics_ready && (is_media || is_pdf || model.image_file.is_some()) && model.preview_failed != current {
+            if visible && graphics.protocol != graphics::Protocol::None && pixels.is_none() && (is_media || is_pdf || model.image_file.is_some()) && model.preview_failed != current {
                 model.fail("Inline preview unavailable: terminal did not report pixel dimensions".into());
                 model.preview_failed = current.clone();
             }
@@ -299,8 +299,13 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     model.fail(e.to_string());
                 }
             }
-            if decoder.sixel && graphics.protocol == graphics::Protocol::None {
-                graphics.protocol = graphics::Protocol::Sixel;
+            let protocol = if decoder.kitty { graphics::Protocol::Kitty }
+                else if decoder.sixel { graphics::Protocol::Sixel } else { graphics::Protocol::None };
+            if protocol != graphics.protocol {
+                graphics.clear();
+                model.player = None;
+                model.pdf = None;
+                graphics.protocol = protocol;
                 thumbnail = PathBuf::new();
             }
             let next = terminal::size();

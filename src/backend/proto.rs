@@ -19,7 +19,7 @@ pub enum Request {
     Transfer { op: String, paths: Vec<String>, rows: Vec<usize>, dest: String, menu_id: usize },
     TransferCancel { id: usize },
     Trash { paths: Vec<String>, rows: Vec<usize> },
-    Rename { path: String, to: String },
+    Rename { path: String, to: String, menu_id: usize },
     Duplicate { path: String },
     // One new empty directory inside parent path; an empty name asks for the first free "New Folder".
     MkDir { path: String, name: String },
@@ -96,6 +96,7 @@ pub fn parse_request(line: &str) -> Request {
         Some("rename") => Request::Rename {
             path: field_str(line, "path").unwrap_or_default(),
             to: field_str(line, "to").unwrap_or_default(),
+            menu_id: field_usize(line, "menuId").unwrap_or(0),
         },
         Some("duplicate") => Request::Duplicate { path: field_str(line, "path").unwrap_or_default() },
         Some("mkdir") => Request::MkDir {

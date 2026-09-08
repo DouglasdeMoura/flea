@@ -225,10 +225,10 @@ ShellRoot {
                         listOnly: true
                         paneFocused: view.currentPane === otherPane
                         overlayParent: view
-                        preview: preview
-                        shareBrowser: shareBrowser
-                        keymapSheet: keymapSheet
-                        settingsPanel: settingsPanel
+                        preview: primaryPane.preview
+                        shareBrowser: primaryPane.shareBrowser
+                        keymapSheet: primaryPane.keymapSheet
+                        settingsPanel: primaryPane.settingsPanel
                         onFocusRequested: view.focusPane(1)
                         onSwitchPane: view.focusPane(0)
                         onPathChanged: view.rememberPaths()
@@ -240,7 +240,7 @@ ShellRoot {
                         onPermissionsRequested: function(path) { permissionsDialog.open(path, otherPane) }
                         onPathBarRequested: chrome.startEdit()
                         onTextSizeRequested: function(direction) { fleaWindow.applyTextSize(direction) }
-                        onOpened: shareBrowser.close()
+                        onOpened: otherPane.shareBrowser.close()
                     }
                 }
                 onLoaded: {

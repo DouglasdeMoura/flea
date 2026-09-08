@@ -48,6 +48,8 @@ impl Key {
 pub struct Decoder {
     pending: Vec<u8>,
     string_control: bool,
+    kitty_reply: Option<Vec<u8>>,
+    pub kitty: bool,
     pub sixel: bool,
     paste: Option<Vec<u8>>,
 }
@@ -92,15 +94,23 @@ impl Decoder {
             if self.string_control {
                 let end = self.pending.iter().enumerate().find_map(|(i, byte)| {
                     if *byte == 7 || *byte == 0x9c {
-                        Some(i + 1)
+                        Some((i, i + 1))
                     } else if *byte == 27 && self.pending.get(i + 1) == Some(&b'\\') {
-                        Some(i + 2)
+                        Some((i, i + 2))
                     } else {
                         None
                     }
                 });
-                if let Some(end) = end {
-                    self.pending.drain(..end);
+                let keep = usize::from(end.is_none() && self.pending.last() == Some(&27));
+                let content = end.map_or(self.pending.len() - keep, |(content, _)| content);
+                if let Some(reply) = &mut self.kitty_reply {
+                    const REPLY_LIMIT: usize = 128;
+                    if reply.len() + content <= REPLY_LIMIT { reply.extend_from_slice(&self.pending[..content]); }
+                    else { self.kitty_reply = None; }
+                }
+                if let Some((_, consumed)) = end {
+                    if self.kitty_reply.take().is_some_and(|reply| reply == b"Gi=31;OK") { self.kitty = true; }
+                    self.pending.drain(..consumed);
                     self.string_control = false;
                     continue;
                 }
@@ -113,6 +123,7 @@ impl Decoder {
                 break;
             }
             if matches!(self.pending[0], 0x90 | 0x9d | 0x9e | 0x9f) {
+                self.kitty_reply = (self.pending[0] == 0x9f).then(Vec::new);
                 self.pending.remove(0);
                 self.string_control = true;
                 continue;
@@ -126,6 +137,7 @@ impl Decoder {
                     break;
                 }
                 if matches!(self.pending[1], b']' | b'P' | b'_' | b'^') {
+                    self.kitty_reply = (self.pending[1] == b'_').then(Vec::new);
                     self.pending.drain(..2);
                     self.string_control = true;
                     continue;
@@ -399,5 +411,21 @@ mod tests {
             vec![Key::named("F2", ""), Key::named("Left", "superalt")]
         );
         assert_eq!(decoder.feed(b"\x1b[1;7D", false)[0].mods, "unsupported");
+    }
+    #[test]
+    fn graphics_capability_requires_the_requested_terminal_reply() {
+        let mut decoder = Decoder::default();
+        assert!(decoder.feed(b"\x1b_Gi=30;OK\x1b\\", false).is_empty());
+        assert!(!decoder.kitty);
+        assert!(decoder.feed(b"\x1b_Gi=31;ENOENT\x1b\\", false).is_empty());
+        assert!(!decoder.kitty);
+        assert!(decoder.feed(b"\x1b_Gi=31;O", false).is_empty());
+        assert!(decoder.feed(b"K\x1b", false).is_empty());
+        assert!(decoder.feed(b"\\", false).is_empty());
+        assert!(decoder.kitty);
+        let mut decoder = Decoder::default();
+        assert!(decoder.feed(b"\x1b[?62;4;22c", false).is_empty());
+        assert!(decoder.sixel);
+        assert!(!decoder.kitty);
     }
 }

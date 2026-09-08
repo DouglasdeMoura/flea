@@ -75,6 +75,18 @@ pub(crate) fn start_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, path
     start_transfer_checked(out, ops, op, paths, dest, None)
 }
 
+pub(crate) fn request_menu_action(out: &mut impl Write, ops: &mut Ops, line: String, paths: Vec<String>) {
+    let deleting = crate::json::field_str(&line, "op").as_deref() == Some("delete");
+    if deleting && ops.running.is_some() {
+        writeln!(out, "{}", super::menu_actions::response(&line, Err("An operation is already running.".into()))).ok();
+        out.flush().ok();
+        return;
+    }
+    let replies = ops.tx.clone();
+    let accepted = ops.menuactions.get_or_insert_with(|| super::menu_actions::MenuActions::new(replies)).request(line, paths);
+    if deleting && accepted { ops.claim(); }
+}
+
 pub(crate) fn start_menu_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, id: usize, dest: &str) {
     let result = ops.menuactions.as_ref().ok_or_else(|| "Menu selection expired; reopen the menu.".to_string())
         .and_then(|menu| menu.selection(id));
@@ -143,6 +155,18 @@ pub(crate) fn start_duplicate(out: &mut impl Write, ops: &mut Ops, path: &str) {
 }
 
 // Rename answers on the calling thread; rclone directory compatibility may copy before removing its source.
+pub(crate) fn do_menu_rename(out: &mut impl Write, ops: &mut Ops, path: &str, to: &str, id: usize) {
+    let checked = ops.menuactions.as_ref().ok_or_else(|| "Menu selection expired; reopen the menu.".to_string())
+        .and_then(|menu| menu.selected_path(id, Path::new(path)))
+        .and_then(|item| item.current());
+    if let Err(error) = checked {
+        writeln!(out, "{}", error_line(&op_err("rename", path, &error))).ok();
+        out.flush().ok();
+        return;
+    }
+    do_rename(out, ops, path, to);
+}
+
 pub(crate) fn do_rename(out: &mut impl Write, ops: &mut Ops, path: &str, to: &str) {
     if ops.running.is_some() { busy(out, "rename"); return; }
     match ops::rename(Path::new(path), to) {
@@ -221,6 +245,10 @@ pub(crate) fn start_redo(out: &mut impl Write, ops: &mut Ops) {
 // Every message an operation thread sends, written out and, when terminal, recorded in the journal.
 pub(crate) fn report_op(out: &mut impl Write, ops: &mut Ops, msg: OpMsg) {
     match msg {
+        OpMsg::MenuDeleteDone { line } => {
+            ops.running = None;
+            writeln!(out, "{}", line).ok();
+        }
         OpMsg::Progress { id, index, name, bytes, total } => {
             writeln!(out, "{}", transferprogress_line(id, index, &name, bytes, total)).ok();
         }
@@ -304,6 +332,63 @@ mod tests {
         assert!(!flag.load(Ordering::Relaxed), "a stale id must not cancel the live operation");
         cancel_transfer(&o, id);
         assert!(flag.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn permanent_delete_owns_the_mutation_slot_and_releases_it_on_refusal() {
+        let (tx, rx) = channel();
+        let mut o = Ops::new(tx);
+        let mut buf = out();
+        o.claim();
+        request_menu_action(&mut buf, &mut o, r#"{"op":"delete","id":5,"token":1}"#.into(), vec![]);
+        assert!(text(&buf).contains(r#""op":"delete","ok":false"#));
+        assert!(text(&buf).contains("already running"));
+        assert!(o.menuactions.is_none(), "busy refusal must not start a competing service");
+        o.running = None;
+        buf.clear();
+        request_menu_action(&mut buf, &mut o, r#"{"op":"delete","id":5,"token":1}"#.into(), vec![]);
+        assert!(o.running.is_some());
+        let message = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(matches!(&message, OpMsg::MenuDeleteDone { .. }));
+        report_op(&mut buf, &mut o, message);
+        assert!(o.running.is_none());
+        assert!(text(&buf).contains("expired"));
+    }
+
+    #[test]
+    fn menu_rename_checks_only_the_requested_captured_identity() {
+        let d = TestDir::new("menu-rename");
+        let first = d.file("first", "first");
+        let second = d.file("second", "second");
+        let foreign = d.file("foreign", "foreign");
+        let (tx, rx) = channel();
+        let mut o = Ops::new(tx.clone());
+        let menu = super::super::menu_actions::MenuActions::new(tx);
+        menu.request(r#"{"op":"snapshot","id":5}"#.into(), vec![first.to_string_lossy().into(), second.to_string_lossy().into()]);
+        let OpMsg::Meta { line } = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() else { panic!("snapshot reply"); };
+        assert!(line.contains(r#""ok":true"#));
+        o.menuactions = Some(menu);
+        for path in [&first, &second, &foreign] { assert!(path.is_absolute() && path.starts_with(d.path())); }
+        let mut buf = out();
+        do_menu_rename(&mut buf, &mut o, &first.to_string_lossy(), "first-renamed", 5);
+        assert!(text(&buf).contains(r#""t":"renamed","ok":true"#));
+        buf.clear();
+        do_menu_rename(&mut buf, &mut o, &second.to_string_lossy(), "second-renamed", 5);
+        assert!(text(&buf).contains(r#""t":"renamed","ok":true"#), "a prior successful rename must not invalidate the next captured item");
+        assert_eq!(o.journal.len(), 2);
+        buf.clear();
+        do_menu_rename(&mut buf, &mut o, &foreign.to_string_lossy(), "wrong", 5);
+        assert!(text(&buf).contains("not in the menu selection"));
+        d.file("first", "replacement");
+        buf.clear();
+        do_menu_rename(&mut buf, &mut o, &first.to_string_lossy(), "wrong", 5);
+        assert!(text(&buf).contains("Selected item changed"));
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "replacement");
+        assert_eq!(std::fs::read_to_string(&foreign).unwrap(), "foreign");
+        buf.clear();
+        do_menu_rename(&mut buf, &mut o, &first.to_string_lossy(), "wrong", 4);
+        assert!(text(&buf).contains("expired"));
+        assert!(!d.join("wrong").exists());
     }
 
     #[test]

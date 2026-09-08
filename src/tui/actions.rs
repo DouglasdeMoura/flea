@@ -47,9 +47,9 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     model.menu_action.clear();
                 }
             }
-            "cursorDown" | "cursorUp" => {
+            "cursorDown" | "cursorUp" | "focusNext" | "focusPrevious" => {
                 for _ in 0..count {
-                    model.menu_cursor = (model.menu_cursor + if action == "cursorDown" { 1 } else { count - 1 }) % count;
+                    model.menu_cursor = (model.menu_cursor + if matches!(action.as_str(), "cursorDown" | "focusNext") { 1 } else { count - 1 }) % count;
                     if model.menu_enabled(model.menu_cursor) { break; }
                 }
                 model.menu_top = model.menu_top.min(model.menu_cursor);
@@ -346,12 +346,16 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         "rename" => {
             if m.selected.len() > 1 {
                 m.fail("Select one item to rename".into());
-            } else if let Some(row) = m.rows.get(&m.cursor) {
+            } else if let Some((index, row)) = m.single_row() {
+                m.cursor = index;
+                m.window(w)?;
                 m.editor = Some(Editor::rename(
                     row.name.clone(),
-                    m.row_path(row),
+                    m.row_path(&row),
                     row.directory,
                 )?);
+            } else {
+                m.fail("Selected item is unavailable; select it again to rename".into());
             }
         }
         "newFolder" => m.editor = Some(Editor::new("mkdir", "New Folder".into(), m.path.clone())),
@@ -392,11 +396,14 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         }
         "undo" | "redo" => w.send(vec![("c", word(action))])?,
         "duplicate" => {
-            if let Some(path) = m.current_path() {
+            if let Some((_, row)) = m.single_row() {
+                let path = m.row_path(&row);
                 w.send(vec![
                     ("c", word("duplicate")),
                     ("path", word(&path.to_string_lossy())),
                 ])?;
+            } else {
+                m.fail("Select one available item to duplicate".into());
             }
         }
         "newFile" => {
@@ -475,6 +482,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             m.taildrop.submenu = false;
             m.taildrop.refresh();
             m.menu_ready = false;
+            m.menu_action.clear();
             m.menu_path = m.current_path().unwrap_or_default();
             m.menu_directory = m.rows.get(&m.cursor).is_some_and(|row| row.directory);
             let mut rows: Vec<usize> = if m.selected.is_empty() { m.rows.contains_key(&m.cursor).then_some(m.cursor).into_iter().collect() } else { m.selected.iter().copied().collect() };

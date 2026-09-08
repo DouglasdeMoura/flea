@@ -192,7 +192,7 @@ fn mark(row: &Row) -> &'static str {
         "□"
     }
 }
-fn row(row: &Row, columns: usize) -> String {
+fn row(row: &Row, columns: usize) -> (String, String) {
     let label = format!(
         "{} {}{}{}",
         mark(row),
@@ -210,9 +210,9 @@ fn row(row: &Row, columns: usize) -> String {
         } else {
             bytes(row.size)
         };
-        format!("{} {}", fit(&label, columns - size.len() - 1), size)
+        (fit(&label, columns - size.len() - 1), format!(" {}", size))
     } else {
-        fit(&label, columns)
+        (fit(&label, columns), String::new())
     }
 }
 pub fn draw(
@@ -299,30 +299,30 @@ pub fn draw(
         out.push_str(&base);
         let index = filtered.as_ref().map_or(m.top + y, |rows| rows.get(y).copied().unwrap_or(usize::MAX));
         if let Some(entry) = m.rows.get(&index) {
-            if index == m.cursor {
-                out.push_str(&theme.accent);
-                out.push_str("\x1b[7m");
+            let row_color = if index == m.cursor {
+                format!("{}\x1b[7m", theme.accent)
             } else if m.selected.contains(&index) {
-                out.push_str(&theme.selected);
+                format!("{}{}", theme.foreground, theme.selected)
             } else if !entry.link.is_empty() {
-                out.push_str(&theme.symlink);
+                theme.symlink.clone()
             } else if entry.mode & 0o111 != 0 && !entry.directory {
-                out.push_str(&theme.executable);
-            }
+                theme.executable.clone()
+            } else { theme.foreground.clone() };
+            out.push_str(&row_color);
             if let Some(editor) = m.editor.as_ref().filter(|e| e.kind == "rename" && e.path == m.row_path(entry)) {
                 out.push_str(&base);
                 out.push_str(&editor.line(&format!("{} ", mark(entry)), "", middle, &base, &theme.muted));
-            } else if filtered.is_some() && index != m.cursor {
-                let label = row(entry, middle);
-                if let Some((start, end)) = match_range(&label, &m.filter) {
+            } else {
+                let (label, metadata) = row(entry, middle);
+                if let Some((start, end)) = (index != m.cursor).then(|| match_range(&label, &m.filter)).flatten() {
                     out.push_str(&label[..start]);
                     out.push_str(&theme.accent);
                     out.push_str(&label[start..end]);
-                    out.push_str(&base);
+                    out.push_str(&row_color);
                     out.push_str(&label[end..]);
                 } else { out.push_str(&label); }
-            } else {
-                out.push_str(&row(entry, middle));
+                if index != m.cursor { out.push_str(&theme.foreground); }
+                out.push_str(&metadata);
             }
             out.push_str(&base);
         } else if m.total == 0 {
@@ -378,6 +378,7 @@ pub fn draw(
             let notice = if !editor.error.is_empty() { editor.error.as_str() }
                 else if editor.pending { "Renaming…" }
                 else { "Enter saves · Escape cancels · Ctrl+A selects the full name" };
+            if !editor.error.is_empty() { out.push_str(&theme.error); }
             out.push_str(&fit(notice, columns));
         } else {
         let prefix = if editor.kind == "path" {
@@ -619,7 +620,7 @@ mod tests {
         model.search = "Searching 12 matches".into();
         let theme = Theme::from_text("");
         let output = footer(&model, &theme, 120, std::time::Duration::ZERO);
-        assert!(output.contains(&format!("{}Denied (+1) · Esc dismisses\\x1b[0m", theme.error)));
+        assert!(output.contains(&format!("{}Denied (+1) · Esc dismisses\x1b[0m", theme.error)));
         assert!(output.find("Denied").unwrap() < output.find("Copying").unwrap());
         assert!(output.find("Copying").unwrap() < output.find("Searching").unwrap());
         assert!(output.ends_with("? keys"));

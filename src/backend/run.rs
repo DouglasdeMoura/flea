@@ -160,8 +160,7 @@ fn handle_line(
         Request::Permissions { line } => say(out, &ops.permissions.handle(&line)),
         Request::MenuAction { line, rows } => {
             let paths = resolve_rows(Vec::new(), &rows, &st.base, &st.listing);
-            let replies = ops.tx.clone();
-            ops.menuactions.get_or_insert_with(|| super::menu_actions::MenuActions::new(replies)).request(line, paths);
+            super::opsdispatch::request_menu_action(out, ops, line, paths);
         }
         Request::TrashBrowse { line } => {
             let replies = ops.tx.clone();
@@ -290,7 +289,10 @@ fn handle_line(
             let named = resolve_rows(paths, &rows, &st.base, &st.listing);
             start_trash(out, ops, named)
         }
-        Request::Rename { path, to } => do_rename(out, ops, &path, &to),
+        Request::Rename { path, to, menu_id } => {
+            if menu_id == 0 { do_rename(out, ops, &path, &to); }
+            else { super::opsdispatch::do_menu_rename(out, ops, &path, &to, menu_id); }
+        }
         Request::MkDir { path, name } => do_mkdir(out, ops, &path, &name),
         Request::NewFile { path, name, id } => do_newfile(out, ops, &path, &name, id),
         Request::Duplicate { path } => start_duplicate(out, ops, &path),
