@@ -27,6 +27,7 @@ pub enum Request {
     // Resolves row indices to absolute paths, which is what lets a client hold a clipboard for a
     // selection wider than the window it renders; see docs/protocol.md "paths".
     Paths { rows: Vec<usize> },
+    Locate { path: String },
     // The preview column's own extras for one row: pixels, line count, symlink target.
     Meta { row: usize, text: bool, media: bool, archive: bool, token: usize },
     // The status bar's filesystem line for the directory the pane is on.
@@ -98,6 +99,7 @@ pub fn parse_request(line: &str) -> Request {
         },
         Some("undo") => Request::Undo,
         Some("paths") => Request::Paths { rows: field_usize_array(line, "rows") },
+        Some("locate") => Request::Locate { path: field_str(line, "path").unwrap_or_default() },
         Some("fsinfo") => Request::FsInfo,
         Some("archive") => Request::Archive {
             // Anything that is not "compress" is an extract, so a malformed op never writes an archive.
@@ -128,6 +130,12 @@ pub fn parse_request(line: &str) -> Request {
         Some("quit") => Request::Quit,
         _ => Request::Unknown,
     }
+}
+
+pub fn located_line(directory: &str, path: &str, index: Option<usize>) -> String {
+    let index = index.map(|value| value.to_string()).unwrap_or_else(|| "-1".into());
+    format!(r#"{{"t":"located","directory":"{}","path":"{}","index":{}}}"#,
+        escape(directory), escape(path), index)
 }
 
 pub fn listed_line(n: usize, read_ms: f64, sort_ms: f64, dev: u64) -> String {
@@ -203,6 +211,13 @@ pub fn error_line_with_mode(e: &FleaError, mode: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locate_preserves_request_identity_and_reports_absence() {
+        assert!(matches!(parse_request(r#"{"c":"locate","path":"/a/file"}"#), Request::Locate { path } if path == "/a/file"));
+        assert_eq!(located_line("/a", "/a/file", Some(3)), r#"{"t":"located","directory":"/a","path":"/a/file","index":3}"#);
+        assert_eq!(located_line("/a", "/a/\"\n", None), r#"{"t":"located","directory":"/a","path":"/a/\"\n","index":-1}"#);
+    }
 
     #[test]
     fn parses_each_request_shape() {

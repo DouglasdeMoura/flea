@@ -1,4 +1,5 @@
 // One buffer plus a span each, see AGENTS.md "Why the listing is an arena".
+use std::path::{Component, Path};
 
 // Enough that a normal directory never reallocates its way up from nothing.
 const NAME_RESERVE_BYTES: usize = 1 << 20;
@@ -50,6 +51,19 @@ impl Listing {
     pub fn len(&self) -> usize {
         self.spans.len()
     }
+
+    // Locate only names already in this listing; no filesystem access or symlink resolution.
+    pub fn index_of(&self, base: &Path, path: &Path) -> Option<usize> {
+        if !base.is_absolute() || !path.is_absolute() {
+            return None;
+        }
+        let relative = path.strip_prefix(base).ok()?;
+        if relative.components().any(|part| !matches!(part, Component::Normal(_))) {
+            return None;
+        }
+        let name = relative.to_str()?;
+        (0..self.len()).find(|&index| self.name(index) == name)
+    }
 }
 
 #[cfg(test)]
@@ -72,6 +86,21 @@ mod tests {
     fn a_new_listing_is_empty() {
         let l = Listing::new();
         assert_eq!(l.len(), 0);
+    }
+
+    #[test]
+    fn locates_existing_names_without_resolving_files() {
+        let base = Path::new("/listing");
+        let mut listing = Listing::new();
+        listing.push("first.txt", false);
+        listing.push("sub/selected.txt", false);
+        assert_eq!(listing.index_of(base, Path::new("/listing/sub/selected.txt")), Some(1));
+        listing.spans.reverse();
+        assert_eq!(listing.index_of(base, Path::new("/listing/sub/selected.txt")), Some(0));
+        for path in ["", "sub/selected.txt", "/listing", "/listing/missing", "/listing-other/first.txt", "/listing/../listing/first.txt"] {
+            assert_eq!(listing.index_of(base, Path::new(path)), None, "{path}");
+        }
+        assert_eq!(listing.index_of(Path::new(""), Path::new("/first.txt")), None);
     }
 
     #[test]

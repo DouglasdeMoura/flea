@@ -41,6 +41,17 @@ re-scanning: `sort` reorders whichever listing `list` last produced and cannot a
 remove rows, so changing `hidden` always means a fresh `list`, which is also what
 clears the cursor and selection back to row 0.
 
+### locate
+
+`{"c":"locate","path":"/directory/selected.txt"}`
+
+Returns `{"t":"located","directory":"/directory","path":"/directory/selected.txt","index":42}`
+for a name already in the current listing, or `index:-1` when absent or invalid. This reads only
+the listing's name arena; it does not stat files, resolve symlinks or scan another directory.
+The client must match both `directory` and the requested `path` before using the index, then
+fetch only the viewport containing that row. This is location in the current listing, not proof
+that the filesystem object still exists or has the same identity for a later operation.
+
 ### listpaths
 
 `{"c":"listpaths","paths":[<string>,...],"first":<uint>}`

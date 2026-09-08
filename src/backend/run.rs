@@ -305,6 +305,10 @@ fn handle_line(
         }
         Request::Paths { rows } =>
             say(out, &paths_line(&resolve_rows(Vec::new(), &rows, &st.base, &st.listing))),
+        Request::Locate { path } => {
+            let index = st.listing.index_of(&st.base, Path::new(&path));
+            say(out, &super::proto::located_line(&st.base.to_string_lossy(), &path, index));
+        }
         Request::Quit => return Control::Quit,
         // corner: an unrecognised line is answered with silence, see AGENTS.md.
         Request::Unknown => {}
