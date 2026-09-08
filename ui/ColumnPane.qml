@@ -49,7 +49,8 @@ Item {
 
     // The viewport's rows and no more, rule 1: the same plan the list and the grid run, over this column's own scroll position.
     function requestThumbs() {
-        if (root.pane === null || root.pane.total === 0 || root.pane.listInFlight)
+        // visible is effective visibility, so the column kept alive under another view plans nothing against the shared state.
+        if (root.pane === null || !root.visible || root.pane.total === 0 || root.pane.listInFlight)
             return
         var span = Thumbs.viewport(view.contentY, Theme.rowHeight, Math.max(1, Math.ceil(view.height / Theme.rowHeight)), root.rows.length)
         var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, root.offset + span.first, root.offset + span.last)
@@ -65,6 +66,7 @@ Item {
         onTriggered: root.requestThumbs()
     }
     onRowsChanged: if (root.pane !== null) settle.restart()
+    onVisibleChanged: if (root.visible && root.pane !== null) settle.restart()
 
     ListView {
         id: view
