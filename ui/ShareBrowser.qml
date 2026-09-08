@@ -88,6 +88,7 @@ Item {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: {}
+            onWheel: function (wheel) { wheel.accepted = true }
         }
 
         Column {

@@ -250,6 +250,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             onClicked: root.close()
+            onWheel: function (wheel) { wheel.accepted = true }
         }
     }
 
@@ -286,6 +287,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             onClicked: {}
+            onWheel: function (wheel) { wheel.accepted = true }
         }
 
         Flea.CardScroll {

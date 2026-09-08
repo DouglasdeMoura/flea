@@ -6156,8 +6156,69 @@ case_clickthrough() {
     kill_flea
 }
 
+# The wheel over an open overlay stays with the overlay: the listing beneath a menu, a card or a
+# sheet never scrolls. Each ground swallows the wheel the way it swallows a click (ui/ContextMenu.qml
+# and the four card files), so the list's contentY is the witness.
+case_wheelunder() {
+    local dir="$fixture_root/wheelunder"
+    sandbox_scratch "$dir"
+    local i
+    for i in $(seq -w 1 80); do : > "$dir/f$i.txt"; done
+    launch "$dir"
+    wait_listing 80
+    local wx wy ww wh cx cy
+    read -r wx wy ww wh < <(window_box)
+    read -r cx cy <<< "$(ipc rowCentre 5)"
+    omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null
+    # The control: with nothing open the same wheel moves the list, so a still list below is not a lost wheel.
+    omarchy-drive scroll down 3 >/dev/null
+    settle
+    [[ "$(ipc listContentY)" != "0" ]] || fail "wheelunder: three notches with nothing open left contentY at 0, so the wheel is not reaching the list"
+    key -k Home >/dev/null
+    settle
+    [[ "$(ipc listContentY)" == "0" ]] || fail "wheelunder: Home did not bring contentY back to 0, it is $(ipc listContentY)"
+
+    wheel_holds() {
+        local what="$1" reader="$2"
+        omarchy-drive scroll down 3 >/dev/null
+        settle
+        [[ "$(ipc listContentY)" == "0" ]] || fail "wheelunder: three notches under $what scrolled the listing to contentY $(ipc listContentY)"
+        [[ "$(ipc "$reader")" == "true" ]] || fail "wheelunder: the wheel closed $what"
+    }
+    click_background
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "wheelunder: the background right click opened no menu"
+    wheel_holds "the context menu" contextMenuVisible
+    key -k Escape >/dev/null
+    settle
+    key , >/dev/null
+    settle
+    [[ "$(ipc settingsOpen)" == "true" ]] || fail "wheelunder: the comma key did not open settings"
+    wheel_holds "the settings card" settingsOpen
+    key -k Escape >/dev/null
+    settle
+    key '?' >/dev/null
+    settle
+    [[ "$(ipc keymapSheetOpen)" == "true" ]] || fail "wheelunder: the ? key did not open the keymap sheet"
+    wheel_holds "the keymap sheet" keymapSheetOpen
+    key -k Escape >/dev/null
+    settle
+    key -k Tab >/dev/null
+    settle
+    key a >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == "true" ]] || fail "wheelunder: the rail's a key did not open the network dialog"
+    wheel_holds "the network dialog" dialogOpen
+    key -k Escape >/dev/null
+    settle
+    key -k Escape >/dev/null
+    settle
+    printf 'WHEELUNDER menu=ok settings=ok keymap=ok network=ok\n'
+    kill_flea
+}
+
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder hangshare)
 
 : > "$run_log"
 : > "$flea_log"

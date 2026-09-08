@@ -118,6 +118,9 @@ Item {
         return from
     }
 
+    // Row i's item, for ui/Ipc.qml's contextMenuRowCentre.
+    function rowItemAt(i) { return menuRows.itemAt(i) }
+
     function firstRow() {
         return root.entries.length > 0 && root.entries[0].separator === true ? root.stepCursor(0, 1) : 0
     }
@@ -247,10 +250,12 @@ Item {
         entry: ({ separator: true })
     }
 
+    // The ground closes on a press and swallows the wheel: the listing beneath must not scroll under an open menu.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onPressed: root.close()
+        onWheel: function (wheel) { wheel.accepted = true }
     }
 
     Rectangle {
@@ -282,6 +287,7 @@ Item {
                     entry: row.modelData
                     compact: root.forRail
                     current: !root.submenuOpen && root.cursor === row.index
+                    onPointerMoved: root.cursor = row.index
                     onActivated: {
                         if (Menu.hasSubmenu(row.modelData))
                             root.openSubmenu(row.index)
@@ -324,6 +330,7 @@ Item {
                     entry: ({ label: subRow.modelData.label, action: "",
                               glyph: Menu.submenuGlyph(root.entries[root.openSubmenuRow].action) })
                     current: root.submenuCursor === subRow.index
+                    onPointerMoved: root.submenuCursor = subRow.index
                     onActivated: root.chooseSub(subRow.modelData.id)
                 }
             }
