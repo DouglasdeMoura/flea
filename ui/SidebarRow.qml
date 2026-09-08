@@ -46,7 +46,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: root.cursor
-            ? (root.focused ? Style.selectedFill : Style.normalFill)
+            ? (root.modelData.kind === "trash" ? Style.selectedAccentFill : root.focused ? Style.selectedFill : Style.normalFill)
             : "transparent"
     }
 
@@ -73,7 +73,7 @@ Item {
         id: glyphMark
         Glyph {
             name: root.modelData.glyph
-            color: Theme.color.foreground
+            color: root.cursor && root.modelData.kind === "trash" ? Theme.color.accent : Theme.color.foreground
         }
     }
 

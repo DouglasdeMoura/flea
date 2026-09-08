@@ -73,10 +73,13 @@ ListView {
         dirSuffix: true
         row: root.pane.rowFor(listingIndex)
         cursor: listingIndex === root.pane.cursorIndex
+        paneFocused: root.pane.paneFocused
+        dualMode: root.pane.dualMode
+        hiddenCols: root.pane.dualMode ? ["mode", "kind"].concat(ViewState.hiddenCols) : ViewState.hiddenCols
         hovered: hover.hovered
         thumb: root.thumbFor(listingIndex)
         // The zebra follows the drawn position, so a narrowed listing still alternates row by row.
-        alternate: index % 2 === 1
+        alternate: !root.pane.dualMode && index % 2 === 1
         selected: root.pane.isSelected(listingIndex)
         kindNames: root.pane.kindNames
         dirSize: root.dirSizeFor(listingIndex)

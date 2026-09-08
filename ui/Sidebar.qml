@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import "js/Icons.js" as Icons
 import "js/Mounts.js" as Mounts
+import "js/Menu.js" as Menu
 import "js/Places.js" as Places
 
 // The rail is Favorites, Network and Devices, three groups sharing one flat cursor space and one
@@ -15,6 +16,7 @@ Item {
     id: root
 
     property bool focused: false
+    property bool trashActive: false
     // ui/Pane.qml's one ui/ContextMenu.qml, handed in rather than built here: a second instance in
     // this tree took the keyboard away from the list, see ui/SidebarRow.qml's own note.
     property var menu: null
@@ -31,7 +33,7 @@ Item {
     function refreshTrash() { trashMonitor.refresh() }
     TrashMonitor {
         id: trashMonitor
-        enabled: root.placesState.showTrash !== false
+        enabled: root.trashActive || root.placesState.showTrash !== false
         onChanged: root.trashChanged()
         onFailed: function(text) { root.message(text, true) }
     }
@@ -172,6 +174,10 @@ Item {
             return
         }
         root.cursorIndex = index
+        if (entry.kind === "trash") {
+            root.menu.openForRail("trash", Menu.trashEntries(root.trashCount, false), scenePosition)
+            return
+        }
         if (entry.kind === "favourite") {
             root.menu.openForRail("favourite:" + entry.favouriteIndex + ":" + JSON.stringify(entry.original),
                 [{ label: "Remove", action: "removeFavourite", glyph: "minus" }], scenePosition)
@@ -193,6 +199,7 @@ Item {
     // A chosen menu row, arriving with the row's key rather than its position; which row that
     // names is Mounts.release', so tests/js/network.js drives the resolution with no rail.
     function releaseChosen(action, key) {
+        if (key === "trash") return
         if (action === "removeFavourite" && key.indexOf("favourite:") === 0) {
             var end = key.indexOf(":", 10)
             var index = Number(key.substring(10, end))
@@ -472,8 +479,9 @@ Item {
                 model: root.trashEntries
                 delegate: SidebarRow {
                     cursor: index + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length === root.cursorIndex
-                    focused: root.focused
-                    onActivated: root.trashRequested()
+                    focused: root.focused || root.trashActive
+                    onActivated: root.activate(index + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length)
+                    onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length, pos) }
                 }
             }
         }

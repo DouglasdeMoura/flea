@@ -72,7 +72,7 @@ impl Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
-        print!("\x1b[<u\x1b[?1002l\x1b[?1006l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l");
+        print!("\x1b[<u\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l");
         let _ = io::stdout().flush();
         let _ = Command::new("stty").arg(&self.saved).status();
         for &(sig, handler) in &self.handlers {

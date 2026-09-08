@@ -2,7 +2,7 @@
 use crate::backend::copyfile::{copy_any, move_any, Progress};
 use crate::backend::ops;
 use crate::backend::trash;
-use crate::backend::undo::{Entry, Step};
+use crate::backend::undo::{self, Entry, ItemIdentity, Step};
 use crate::error::FleaError;
 use crate::json::escape;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // One progress line per item at most this often, so a fast copy of a small file may emit none at all.
-const PROGRESS_EVERY: Duration = Duration::from_millis(150);
+pub(crate) const PROGRESS_EVERY: Duration = Duration::from_millis(150);
 
 // What an operation thread sends back, joined onto the same receiver every other event already arrives on.
 pub enum OpMsg {
@@ -21,6 +21,7 @@ pub enum OpMsg {
     TransferDone { id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool, entry: Entry },
     Trashed { ok: usize, failed: usize, entry: Entry },
     Duplicated { ok: bool, path: String, err: String, entry: Entry },
+    RedoDone { journal: super::undo::Journal, result: Result<String, FleaError> },
     // Not an operation: meta rides this channel because a media probe is a subprocess and the loop
     // must not wait on one. Nothing about it claims the one-at-a-time slot.
     Meta { line: String },
@@ -114,6 +115,13 @@ pub fn run_transfer(
     cancel: Arc<AtomicBool>,
     tx: Sender<OpMsg>,
 ) {
+    run_transfer_checked(id, moving, paths, dest, cancel, tx, None)
+}
+
+pub(crate) fn run_transfer_checked(
+    id: usize, moving: bool, paths: Vec<String>, dest: PathBuf,
+    cancel: Arc<AtomicBool>, tx: Sender<OpMsg>, selection: Option<Vec<super::menu_actions::Selected>>,
+) {
     let mut steps: Vec<Step> = Vec::new();
     let (mut ok, mut failed, mut skipped) = (0usize, 0usize, 0usize);
     let mut was_cancelled = false;
@@ -129,6 +137,16 @@ pub fn run_transfer(
         let src = PathBuf::from(raw);
         let name = base_name(&src);
         let dst = dest.join(&name);
+        if let Some(items) = &selection {
+            let checked = items.get(index).filter(|item| item.path == src)
+                .ok_or_else(|| "Menu selection no longer matches this transfer.".to_string())
+                .and_then(|item| item.current().map(|_| ()));
+            if let Err(err) = checked {
+                failed += 1;
+                let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err });
+                continue;
+            }
+        }
         // A symlink is copied or moved as the link itself (copy_any, move_any), so it holds nothing and its target's tree is not its own; only a real directory can contain the destination.
         let src_is_link = src.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
         let src_real = if src_is_link { src.clone() } else { src.canonicalize().unwrap_or_else(|_| src.clone()) };
@@ -181,6 +199,7 @@ fn one_item(
     tx: &Sender<OpMsg>,
     steps: &mut Vec<Step>,
 ) -> Result<(), FleaError> {
+    let source = ItemIdentity::inspect(src)?;
     let is_file = src.symlink_metadata().map(|m| m.is_file()).unwrap_or(false);
     let mut last = Instant::now() - PROGRESS_EVERY;
     let mut sink = |done: u64, total: u64| {
@@ -199,12 +218,12 @@ fn one_item(
     let mut p = Progress { cancel, on_bytes: &mut sink, partial: None };
     let outcome = if moving { move_any(src, dst, &mut p) } else { copy_any(src, dst, &mut p) };
     match &outcome {
-        Ok(()) if moving => steps.push(Step::Moved { from: src.to_path_buf(), to: dst.to_path_buf() }),
-        Ok(()) => steps.push(Step::Created { path: dst.to_path_buf() }),
+        Ok(()) if moving => steps.push(undo::moved(src, dst, source)?),
+        Ok(()) => steps.push(undo::copied(src, dst, source)?),
         // The partial is this operation's, so it is journaled and undo removes it like any created path.
         Err(_) => {
             if let Some(path) = p.partial.take() {
-                steps.push(Step::Created { path });
+                steps.push(undo::copied(src, &path, source)?);
             }
         }
     }

@@ -16,14 +16,16 @@ pub enum Request {
     // Unlike thumbcancel, there is no rows form: it always cancels everything in flight, see docs/protocol.md "dirsizecancel".
     DirSizeCancel,
     // The five write operations and their cancel, per the operations design's own wire.
-    Transfer { op: String, paths: Vec<String>, rows: Vec<usize>, dest: String },
+    Transfer { op: String, paths: Vec<String>, rows: Vec<usize>, dest: String, menu_id: usize },
     TransferCancel { id: usize },
     Trash { paths: Vec<String>, rows: Vec<usize> },
     Rename { path: String, to: String },
     Duplicate { path: String },
     // One new empty directory inside parent path; an empty name asks for the first free "New Folder".
     MkDir { path: String, name: String },
+    NewFile { path: String, name: String, id: usize },
     Undo,
+    Redo,
     // Resolves row indices to absolute paths, which is what lets a client hold a clipboard for a
     // selection wider than the window it renders; see docs/protocol.md "paths".
     Paths { rows: Vec<usize> },
@@ -40,6 +42,7 @@ pub enum Request {
     // Which archive formats this box actually offers, and whether a converter is installed at all.
     Formats,
     Permissions { line: String },
+    MenuAction { line: String, rows: Vec<usize> },
     TrashBrowse { line: String },
     Quit,
     Unknown,
@@ -50,6 +53,7 @@ pub fn parse_request(line: &str) -> Request {
     match field_str(line, "c").as_deref() {
         Some("trashbrowse") => Request::TrashBrowse { line: line.to_string() },
         Some("permissions") => Request::Permissions { line: line.to_string() },
+        Some("menuaction") => Request::MenuAction { line: line.to_string(), rows: field_usize_array(line, "rows") },
         Some("list") => Request::List {
             path: field_str(line, "path").unwrap_or_default(),
             first: field_usize(line, "first").unwrap_or(0),
@@ -82,6 +86,7 @@ pub fn parse_request(line: &str) -> Request {
             // The client can only name rows inside the window it holds, so a wide selection is sent as indices instead.
             rows: field_usize_array(line, "rows"),
             dest: field_str(line, "dest").unwrap_or_default(),
+            menu_id: field_usize(line, "menuId").unwrap_or(0),
         },
         Some("transfercancel") => Request::TransferCancel { id: field_usize(line, "id").unwrap_or(0) },
         Some("trash") => Request::Trash {
@@ -97,7 +102,13 @@ pub fn parse_request(line: &str) -> Request {
             path: field_str(line, "path").unwrap_or_default(),
             name: field_str(line, "name").unwrap_or_default(),
         },
+        Some("newfile") => Request::NewFile {
+            path: field_str(line, "path").unwrap_or_default(),
+            name: field_str(line, "name").unwrap_or_default(),
+            id: field_usize(line, "id").unwrap_or(0),
+        },
         Some("undo") => Request::Undo,
+        Some("redo") => Request::Redo,
         Some("paths") => Request::Paths { rows: field_usize_array(line, "rows") },
         Some("locate") => Request::Locate { path: field_str(line, "path").unwrap_or_default() },
         Some("fsinfo") => Request::FsInfo,

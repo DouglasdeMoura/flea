@@ -82,3 +82,6 @@ SettingsFavourite 1.0 SettingsFavourite.qml
 TrashView 1.0 TrashView.qml
 TrashConfirm 1.0 TrashConfirm.qml
 TrashMonitor 1.0 TrashMonitor.qml
+TrashHost 1.0 TrashHost.qml
+PaneMenuActions 1.0 PaneMenuActions.qml
+MenuActionDialog 1.0 MenuActionDialog.qml

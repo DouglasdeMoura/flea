@@ -305,8 +305,6 @@ mod tests {
         let current = from_file("{}");
         for (patch, named) in [
             (r#"{"view":"miller"}"#, "view"),
-            // The dual group is stored for a newer Flea, but this one cannot draw that view.
-            (r#"{"view":"dual"}"#, "view"),
             (r#"{"places":{"sidebarWidth":"wide"}}"#, "places.sidebarWidth"),
             (r#"{"notAKey":1}"#, "notAKey"),
             (r#"{"menu":{"nope":1}}"#, "menu.nope"),
@@ -322,6 +320,9 @@ mod tests {
     // no dual-pane locations have been remembered. Three paths is a shape the restore cannot read.
     #[test]
     fn dual_paths_is_two_places_or_none_and_never_a_relative_name() {
+        let enabled = jsondoc::parse(r#"{"view":"dual","dual":{"paths":["/tmp/left","/tmp/right"],"focus":1}}"#).expect("dual patch");
+        let restored = patched(&from_file("{}"), &enabled).expect("dual view is implemented");
+        assert_eq!(restored.get("view").and_then(Json::as_str), Some("dual"));
         let current = from_file("{}");
         for good in [r#"{"dual":{"paths":[]}}"#, r#"{"dual":{"paths":["/home/gm","/tmp"]}}"#,
                      r#"{"dual":{"paths":["smb://nas/share","/run/user/1000/gvfs/x"]}}"#] {

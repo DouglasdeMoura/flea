@@ -59,10 +59,21 @@ impl Decoder {
             if let Some(paste) = &mut self.paste {
                 const PASTE_END: &[u8] = b"\x1b[201~";
                 const PASTE_LIMIT: usize = 64 * 1024;
-                if let Some(end) = self.pending.windows(PASTE_END.len()).position(|w| w == PASTE_END) {
-                    paste.extend(self.pending[..end].iter().take(PASTE_LIMIT.saturating_sub(paste.len())));
+                if let Some(end) = self
+                    .pending
+                    .windows(PASTE_END.len())
+                    .position(|w| w == PASTE_END)
+                {
+                    paste.extend(
+                        self.pending[..end]
+                            .iter()
+                            .take(PASTE_LIMIT.saturating_sub(paste.len())),
+                    );
                     let mut key = Key::named("Paste", "");
-                    key.text = String::from_utf8_lossy(paste).chars().filter(|c| !c.is_control()).collect();
+                    key.text = String::from_utf8_lossy(paste)
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .collect();
                     out.push(key);
                     self.pending.drain(..end + PASTE_END.len());
                     self.paste = None;
@@ -70,7 +81,11 @@ impl Decoder {
                 }
                 let keep = PASTE_END.len() - 1;
                 let consume = self.pending.len().saturating_sub(keep);
-                paste.extend(self.pending[..consume].iter().take(PASTE_LIMIT.saturating_sub(paste.len())));
+                paste.extend(
+                    self.pending[..consume]
+                        .iter()
+                        .take(PASTE_LIMIT.saturating_sub(paste.len())),
+                );
                 self.pending.drain(..consume);
                 break;
             }
@@ -216,12 +231,35 @@ impl Decoder {
 fn csi(text: &str) -> Option<Key> {
     let last = text.chars().last()?;
     if let Some(body) = text.strip_prefix('<') {
-        if !matches!(last, 'M' | 'm') { return None; }
-        let numbers: Vec<u32> = body[..body.len() - 1].split(';').map(str::parse).collect::<Result<_, _>>().ok()?;
-        if numbers.len() != 3 || numbers[1] == 0 || numbers[2] == 0 { return None; }
+        if !matches!(last, 'M' | 'm') {
+            return None;
+        }
+        let numbers: Vec<u32> = body[..body.len() - 1]
+            .split(';')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        if numbers.len() != 3 || numbers[1] == 0 || numbers[2] == 0 {
+            return None;
+        }
         let button = numbers[0];
-        let mut key = Key::named("Pointer", match button & 28 { 4 => "shift", 8 => "alt", 16 => "ctrl", 0 => "", _ => "unsupported" });
-        key.pointer = Some(Pointer { button: button & 67, x: numbers[1] as usize, y: numbers[2] as usize, released: last == 'm', motion: button & 32 != 0 });
+        let mut key = Key::named(
+            "Pointer",
+            match button & 28 {
+                4 => "shift",
+                8 => "alt",
+                16 => "ctrl",
+                0 => "",
+                _ => "unsupported",
+            },
+        );
+        key.pointer = Some(Pointer {
+            button: button & 67,
+            x: numbers[1] as usize,
+            y: numbers[2] as usize,
+            released: last == 'm',
+            motion: button & 32 != 0,
+        });
         return Some(key);
     }
     let values: Vec<u32> = text[..text.len() - 1]
@@ -231,20 +269,44 @@ fn csi(text: &str) -> Option<Key> {
     let code = *values.first().unwrap_or(&0);
     let modifier = values.get(1).copied().unwrap_or(1).saturating_sub(1);
     let mods = match modifier & 15 {
-        0 => "", 1 => "shift", 2 => "alt", 4 => "ctrl", 5 => "ctrlshift",
-        8 => "super", 9 => "supershift", 10 => "superalt", _ => "unsupported",
+        0 => "",
+        1 => "shift",
+        2 => "alt",
+        4 => "ctrl",
+        5 => "ctrlshift",
+        8 => "super",
+        9 => "supershift",
+        10 => "superalt",
+        _ => "unsupported",
     };
     if last == 'u' {
         // Sample input: 113;1:3u is a kitty key release, which must never repeat an action.
-        if text[..text.len() - 1].split(';').nth(1).and_then(|v| v.split(':').nth(1)) == Some("3") {
+        if text[..text.len() - 1]
+            .split(';')
+            .nth(1)
+            .and_then(|v| v.split(':').nth(1))
+            == Some("3")
+        {
             return None;
         }
         let functional = match code {
-            57348 => "Insert", 57349 => "Delete", 57350 => "Left", 57351 => "Right",
-            57352 => "Up", 57353 => "Down", 57354 => "PageUp", 57355 => "PageDown",
-            57356 => "Home", 57357 => "End", 57365 => "F2", 127 => "Backspace", _ => "",
+            57348 => "Insert",
+            57349 => "Delete",
+            57350 => "Left",
+            57351 => "Right",
+            57352 => "Up",
+            57353 => "Down",
+            57354 => "PageUp",
+            57355 => "PageDown",
+            57356 => "Home",
+            57357 => "End",
+            57365 => "F2",
+            127 => "Backspace",
+            _ => "",
         };
-        if !functional.is_empty() { return Some(Key::named(functional, mods)); }
+        if !functional.is_empty() {
+            return Some(Key::named(functional, mods));
+        }
         return char::from_u32(code).map(|c| match c {
             '\r' => Key::named("Return", mods),
             '\t' => Key::named("Tab", mods),
@@ -316,14 +378,26 @@ mod tests {
         let mut decoder = Decoder::default();
         let mouse = decoder.feed(b"\x1b[<4;12;3M", false);
         assert_eq!(mouse[0].mods, "shift");
-        assert_eq!(mouse[0].pointer, Some(Pointer { button: 0, x: 12, y: 3, released: false, motion: false }));
+        assert_eq!(
+            mouse[0].pointer,
+            Some(Pointer {
+                button: 0,
+                x: 12,
+                y: 3,
+                released: false,
+                motion: false
+            })
+        );
         assert!(decoder.feed(b"\x1b[200~ddq", false).is_empty());
         let pasted = decoder.feed(b"\x1b[201~", false);
         assert_eq!(pasted.len(), 1);
         assert_eq!(pasted[0].name, "Paste");
         assert_eq!(pasted[0].text, "ddq");
         assert!(decoder.feed(b"\x1b[113;1:3u", false).is_empty());
-        assert_eq!(decoder.feed(b"\x1b[57365u\x1b[1;11D", false), vec![Key::named("F2", ""), Key::named("Left", "superalt")]);
+        assert_eq!(
+            decoder.feed(b"\x1b[57365u\x1b[1;11D", false),
+            vec![Key::named("F2", ""), Key::named("Left", "superalt")]
+        );
         assert_eq!(decoder.feed(b"\x1b[1;7D", false)[0].mods, "unsupported");
     }
 }

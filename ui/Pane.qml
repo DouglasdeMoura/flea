@@ -34,6 +34,8 @@ FocusScope {
     readonly property bool wrapAtEnds: ViewState.state.wrapAtEnds === true
     // When the first d of the dd pair landed; ui/js/Focus.js reads it and Nav's reset clears it.
     property double trashArmedAt: 0
+    property string keySequence: ""
+    property string keySequenceIdentity: ""
     // "" off, "typing" while the query line has the keyboard, "results" once a walk was asked for; ui/js/Search.js owns every transition.
     property string searchMode: ""
     // Where the search was started from, which a home-wide walk leaves behind; see ui/js/Search.js.
@@ -56,12 +58,18 @@ FocusScope {
     readonly property int menuCursor: menu.cursor
     // What the header case reads over IPC, the same alias idiom Row.qml uses for its icon.
     readonly property alias header: header
-    readonly property alias sidebar: sidebar  // shell.qml reads addRequested/networkEntries through this
+    property var sharedSidebar: null
+    property var railPane: root
+    readonly property var sidebar: root.sharedSidebar || railLoader.item
+    readonly property real sidebarWidth: railLoader.width
+    property bool paneFocused: true
+    property bool listOnly: false
+    signal focusRequested()
     // Which view Tab last handed the keyboard to; the rail's own cursor is read the same way.
     property string focusView: Focus.LIST
-    readonly property alias railCursor: sidebar.cursorIndex
+    readonly property int railCursor: root.sidebar ? root.sidebar.cursorIndex : 0
     // So a test can wait for the rail's async FileViews instead of sleeping and guessing.
-    readonly property int railCount: sidebar.entries.length
+    readonly property int railCount: root.sidebar ? root.sidebar.entries.length : 0
     property var preview: null
     // shell.qml's ui/ShareBrowser.qml overlay, wired the same way as preview above.
     property var shareBrowser: null
@@ -69,9 +77,16 @@ FocusScope {
     property var keymapSheet: null
     // shell.qml's ui/SettingsPanel.qml, which the comma key opens from the list and the rail alike, see act() below.
     property var settingsPanel: null
+    property Item overlayParent: null
+    readonly property alias trash: trashHost
+    readonly property alias menuActions: menuActions
+    readonly property alias emptyState: emptyState
+    readonly property string menuSelectionIdentity: JSON.stringify([root.path, root.held, root.rows,
+        root.selectionVersion, root.cursorIndex, root.total, root.listInFlight])
 
     signal opened(string path)
     signal message(string text, bool isError)
+    signal operationResult(string headline, string detail, bool isError)
     // The status bar's sticky slot, which unlike message does not time out; empty clears it.
     signal sticky(string text)
     // The one popup, hosted in shell.qml beside the network dialog rather than inside the pane.
@@ -134,13 +149,13 @@ FocusScope {
     property string viewMode: "list"
     property bool preferencesReady: false
     Component.onCompleted: {
-        root.viewMode = ViewState.state.view || "list"
+        root.viewMode = root.listOnly || ViewState.state.view === "dual" ? "list" : ViewState.state.view || "list"
         root.preferencesReady = true
     }
     // Only the list view draws a filter, so leaving it takes the filter with it.
     onViewModeChanged: {
         Filter.close(root)
-        if (root.preferencesReady && ViewState.state.view !== root.viewMode)
+        if (root.preferencesReady && !root.listOnly && (!root.dualMode || root.viewMode !== "list") && ViewState.state.view !== root.viewMode)
             ViewState.changeKey("view", root.viewMode)
     }
     readonly property string listingPreferences: JSON.stringify([ViewState.state.hidden, ViewState.state.sort,
@@ -152,7 +167,7 @@ FocusScope {
         id: preferences
         interval: 0
         onTriggered: {
-            var desired = ViewState.state.view || "list"
+            var desired = root.listOnly || ViewState.state.view === "dual" ? "list" : ViewState.state.view || "list"
             if (root.viewMode !== desired) root.viewMode = desired
             if (!root.path || root.listInFlight || root.searchMode.length > 0
                     || root.appliedListingPreferences === root.listingPreferences) return
@@ -166,18 +181,19 @@ FocusScope {
     }
 
 
-    // Directories already visited, newest last, so the chrome's back arrow has somewhere to go.
-    // Deliberately not a forward stack: the canvas draws one arrow, not two.
+    // Each tab retains its own back and forward navigation.
     property var history: []
+    property var forwardHistory: []
     property var tabs: null
-    readonly property bool canGoBack: root.history.length > 0
+    readonly property bool canGoBack: trashHost.opened || root.history.length > 0
     readonly property bool canGoUp: root.path.length > 1
 
     // The filesystem line the status bar draws, refreshed once per directory rather than per row.
     property string fsName: ""
     property real fsFree: 0
 
-    function goBack() { Nav.back(root) }
+    function goBack() { if (trashHost.opened) trashHost.close(); else Nav.back(root) }
+    function goForward() { if (!trashHost.opened) Nav.forward(root) }
 
     // Rename lives in ui/js/Ops.js with the other write operations; ui/List.qml's editor commits through this.
     function commitRename(newName) { Ops.commitRename(root, newName) }
@@ -202,7 +218,11 @@ FocusScope {
     function applyPendingSelect() { Nav.applyPendingSelect(root) }
     function refresh(selectPath) { Nav.refresh(root, selectPath) }
 
-    function open(newPath) { Nav.open(root, newPath) }
+    function open(newPath) {
+        if (trashHost.confirming) return
+        trashHost.close()
+        Nav.open(root, newPath)
+    }
 
     function openWithoutHistory(newPath) { Nav.openWithoutHistory(root, newPath) }
 
@@ -242,8 +262,14 @@ FocusScope {
 
     // Lifted to Focus.act, see ui/js/Focus.js, which routes "settings" here from the list and the rail alike.
     function act(action) {
+        if (trashHost.confirming) return
+        if (action === "openTrash" || action === "emptyTrash" || action === "restoreAll") { trashHost.action(action); return }
         if (action === "settings") { root.settingsPanel.open(root); return }
         if (action === "permissions") { root.openPermissions(); return }
+        if (["newFile", "openWith", "moveTo", "copyTo", "properties"].indexOf(action) >= 0) {
+            menuActions.open(action)
+            return
+        }
         Focus.act(action, root)
     }
     function permissionSelection() {
@@ -279,9 +305,11 @@ FocusScope {
     // A terminal in the directory being shown, through ui/Opener.qml's flea --terminal.
     function openTerminal() { wire.opener.openTerminal(root.path) }
 
+    function newWindow() { Quickshell.execDetached([Quickshell.env("FLEA_BIN") || "flea", root.path]) }
+
     function copyDirPath() { wire.opener.copyText(root.path) }
 
-    function openParent() { Nav.parent(root) }
+    function openParent() { if (trashHost.opened) trashHost.close(); else Nav.parent(root) }
 
     function join(base, name) {
         return base === "/" ? "/" + name : base + "/" + name
@@ -292,17 +320,51 @@ FocusScope {
         pane: root
     }
 
-    Flea.Sidebar {
-        id: sidebar
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        focused: root.focusView === Focus.RAIL
-        onOpened: function (path) { root.open(path) }
-        onMessage: function (text, isError) { root.message(text, isError) }
-        menu: menu
-        // The rename TextField takes real Qt focus itself; this only hands it back once it is done.
-        onRenameFinished: list.forceActiveFocus()
+    Loader {
+        id: railLoader
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        width: item ? item.implicitWidth : 0
+        active: !root.listOnly && root.sharedSidebar === null
+        sourceComponent: Flea.Sidebar {
+            focused: root.railPane.focusView === Focus.RAIL
+            trashActive: root.railPane.trash.opened
+            onOpened: function(path) { root.railPane.open(path) }
+            onTrashRequested: root.railPane.trash.open()
+            onMessage: function(text, isError) { root.railPane.message(text, isError) }
+            menu: root.railPane.contextMenu()
+            onRenameFinished: root.railPane.listArea.forceActiveFocus()
+        }
+    }
+
+    Rectangle {
+        id: panePath
+        anchors { left: railLoader.right; right: parent.right; top: parent.top }
+        height: root.dualMode ? Theme.chromeHeight : 0
+        visible: root.dualMode
+        color: root.paneFocused ? Theme.color.surface : Theme.color.background
+        Text {
+            anchors.fill: parent
+            anchors.leftMargin: Theme.spacing.rowPaddingX
+            anchors.rightMargin: Theme.spacing.rowPaddingX
+            verticalAlignment: Text.AlignVCenter
+            text: Nav.crumbs(root.path, root.home).map(function(c) { return c.text }).join("")
+            textFormat: Text.PlainText
+            color: Theme.color.foreground
+            font { family: Theme.font.family; pixelSize: Theme.font.caption }
+            elide: Text.ElideLeft
+        }
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Theme.spacing.hairline
+            color: Theme.color.muted
+        }
+        TapHandler { onDoubleTapped: root.pathBarRequested() }
+    }
+
+    PointHandler {
+        id: focusPointer
+        acceptedButtons: Qt.AllButtons
+        onActiveChanged: if (active && focusPointer.point.position.x >= root.sidebarWidth) root.focusRequested()
     }
 
     Flea.Header {
@@ -310,13 +372,15 @@ FocusScope {
         // Only the list view has columns to head, and neither the grid board nor the columns board
         // draws one; the strip collapses rather than hiding, so the view below starts at the top of
         // the pane instead of a gap. A search takes the strip whole, in any view.
-        visible: root.viewMode === "list" || root.searchMode.length > 0
+        visible: !trashHost.opened && (root.viewMode === "list" || root.searchMode.length > 0)
         height: visible ? implicitHeight : 0
-        anchors.top: parent.top
-        anchors.left: sidebar.right
+        anchors.top: panePath.bottom
+        anchors.left: railLoader.right
         anchors.right: parent.right
         sortBy: root.backend.sortBy
         sortDesc: root.backend.sortDesc
+        dualMode: root.dualMode
+        hiddenCols: root.dualMode ? ["mode", "kind"].concat(ViewState.hiddenCols) : ViewState.hiddenCols
         onSortRequested: function (key) { Sort.column(root, key) }
         onMenuRequested: function (pos) { menu.openForHeader(pos) }
         searchMode: root.searchMode
@@ -341,7 +405,7 @@ FocusScope {
     Flea.FilterStrip {
         id: filterStrip
         anchors.top: header.bottom
-        anchors.left: sidebar.right
+        anchors.left: railLoader.right
         anchors.right: parent.right
         pane: root
     }
@@ -354,8 +418,9 @@ FocusScope {
     Loader {
         id: columnsLoader
         active: root.viewMode === "columns" || root.columnsBuilt
-        focus: root.viewMode === "columns"
-        anchors { top: filterStrip.bottom; left: sidebar.right; right: parent.right; bottom: parent.bottom }
+        visible: !trashHost.opened
+        focus: visible && root.viewMode === "columns"
+        anchors { top: filterStrip.bottom; left: railLoader.right; right: parent.right; bottom: parent.bottom }
         Component.onCompleted: setSource("ColumnsArea.qml", { pane: root, menu: menu, focus: true })
         onLoaded: { root.columnsBuilt = true; item.visible = Qt.binding(function () { return root.viewMode === "columns" }) }
     }
@@ -363,8 +428,9 @@ FocusScope {
     Loader {
         id: gridLoader
         active: root.viewMode === "grid" || root.gridBuilt
-        focus: root.viewMode === "grid"
-        anchors { top: filterStrip.bottom; left: sidebar.right; right: parent.right; bottom: parent.bottom }
+        visible: !trashHost.opened
+        focus: visible && root.viewMode === "grid"
+        anchors { top: filterStrip.bottom; left: railLoader.right; right: parent.right; bottom: parent.bottom }
         anchors.rightMargin: selectionPreview.width
         Component.onCompleted: setSource("GridArea.qml", { pane: root, menu: menu })
         onLoaded: { root.gridBuilt = true; item.visible = Qt.binding(function () { return root.viewMode === "grid" }) }
@@ -385,12 +451,12 @@ FocusScope {
 
     Loader {
         id: selectionPreview
-        active: ViewState.previewColumn && root.viewMode !== "columns"
+        active: !root.dualMode && !trashHost.opened && ViewState.previewColumn && root.viewMode !== "columns"
         visible: active
         anchors.top: filterStrip.bottom
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        width: active ? Math.floor((root.width - sidebar.width) / 3) : 0
+        width: active ? Math.floor((root.width - root.sidebarWidth) / 3) : 0
         sourceComponent: Flea.SelectionPreview {
             pane: root
             onThumbsApplied: function (work) { root.thumbState = Thumbs.applied(root.thumbState, work) }
@@ -400,18 +466,27 @@ FocusScope {
         ? (columnsLoader.item ? columnsLoader.item.previewIndex : -1)
         : (selectionPreview.item ? selectionPreview.item.loadedIndex : -1)
     function loadSelectionPreview() {
-        if (!ViewState.previewColumn) ViewState.changeLeaf("preview", { column: true })
+        if (!ViewState.previewColumn || root.dualMode) return
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()
         else if (selectionPreview.item) selectionPreview.item.loadSelection()
     }
+    function togglePreviewColumn() { ViewState.changeLeaf("preview", { column: !ViewState.previewColumn }) }
+    function chooseView(mode) { ViewState.changeKey("view", mode) }
+    function focusPreviewColumn() {
+        if (!ViewState.previewColumn || root.dualMode) return
+        if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.focusPreview()
+        else if (selectionPreview.item) selectionPreview.item.forceActiveFocus()
+    }
+    property bool dualMode: false
+    signal switchPane()
 
     Flea.List {
         id: list
         anchors.rightMargin: selectionPreview.width
-        visible: root.viewMode === "list"
-        focus: root.viewMode === "list"
+        visible: !trashHost.opened && root.viewMode === "list"
+        focus: visible
         anchors.top: filterStrip.bottom
-        anchors.left: sidebar.right
+        anchors.left: railLoader.right
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         pane: root
@@ -424,7 +499,21 @@ FocusScope {
         onDirSizesCancelled: root.dirSizeState = DirSizes.cancelled(root.dirSizeState)
 
         // The whole route lives in Focus.handleKey now, see its own comment; this is only the seam.
-        Keys.onPressed: function (event) { event.accepted = Focus.handleKey(event, root, sidebar) }
+        Keys.onPressed: function (event) { event.accepted = Focus.handleKey(event, root, root.sidebar) }
+    }
+
+    Rectangle {
+        anchors { top: panePath.bottom; bottom: parent.bottom; left: railLoader.right }
+        visible: root.dualMode && root.paneFocused
+        width: Theme.spacing.hairline * 2
+        color: Theme.color.accent
+    }
+
+    Flea.TrashHost {
+        id: trashHost
+        pane: root
+        overlayParent: root.overlayParent
+        anchors { top: parent.top; left: railLoader.right; right: parent.right; bottom: parent.bottom }
     }
 
     // A directory has nothing Taildrop can send today, so the entry hides for one rather than
@@ -433,15 +522,22 @@ FocusScope {
 
     Flea.ContextMenu {
         id: menu
+        parent: root.overlayParent || root
         showHidden: root.showHidden
         taildropPeers: (root.cursorRow && !root.cursorRow.d) ? wire.taildrop.peers : []
         archiveFormats: root.backend.archiveFormats
         canConvert: root.backend.canConvert
+        canExtract: root.cursorRow && /\.7z$/i.test(root.cursorRow.n)
+            ? root.backend.extraction.sevenZip : root.backend.extraction.archive
         rowMode: root.permissionSelection() ? root.permissionSelection().p : 0
         selectionCount: Ops.targetIndices(root).length
+        selectionIdentity: root.menuSelectionIdentity
+        clipboardAvailable: root.clipboard.paths.length > 0
+        onSnapshotRequested: menuActions.snapshot()
+        onRefused: function(reason) { root.message(reason, true) }
         rowIsArchive: root.cursorRow !== null && !root.cursorRow.d && Archive.isArchive(root.cursorRow.n)
         rowIsImage: root.cursorRow !== null && root.cursorRow.i === "image-x-generic"
-        dropboxPath: sidebar.dropboxReady ? root.home + "/Dropbox" : ""
+        dropboxPath: root.sidebar && root.sidebar.dropboxReady ? root.home + "/Dropbox" : ""
         // The separator is part of the test, or /home/gm/DropboxBackup would count as inside Dropbox.
         rowInDropbox: root.path === root.home + "/Dropbox" || root.path.indexOf(root.home + "/Dropbox/") === 0
         onChosen: function (action) {
@@ -452,12 +548,35 @@ FocusScope {
         }
     }
 
+    Flea.PaneMenuActions {
+        id: menuActions
+        parent: root.overlayParent || root
+        pane: root
+    }
+
     // The one ui/ContextMenu.qml this pane owns, for ui/Ipc.qml: entries, flyout and row geometry
     // are read off it directly, so a new reader costs the seam a line and this file none.
     function contextMenu() { return menu }
 
+    Flea.EmptyState {
+        id: emptyState
+        x: root.listSlot.x + (root.viewMode === "columns" && root.columnsArea ? root.columnsArea.columnWidth : 0)
+        y: root.listSlot.y
+        width: root.viewMode === "columns" && root.columnsArea ? root.columnsArea.columnWidth : root.listSlot.width
+        height: root.listSlot.height
+        visible: !trashHost.opened && root.listingState === "empty"
+        caption: root.searchMode === "results" ? "Nothing matches " + root.searchQuery : ""
+        mark: "search"
+        hint: root.searchMode === "results" ? "Press Escape to clear."
+            : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""
+    }
+    Flea.LoadingState {
+        anchors.fill: root.listSlot
+        visible: !trashHost.opened && root.listingState === "loading"
+    }
+
     function openConvert() { Ops.openConvert(root) }
-    function moveToDropbox() { Ops.moveToDropbox(root, sidebar.dropboxReady ? root.home + "/Dropbox" : "") }
+    function moveToDropbox() { Ops.moveToDropbox(root, root.sidebar && root.sidebar.dropboxReady ? root.home + "/Dropbox" : "") }
     // The three foreign programs live in ui/PaneWire.qml with the backend's replies; these only name the row.
     function copyShareLink() { wire.shareLink.copy(root.join(root.path, root.cursorRow ? root.cursorRow.n : "")) }
     function sendTaildrop(peerId) { Ops.sendTaildrop(root, wire.taildrop, peerId) }
@@ -466,6 +585,7 @@ FocusScope {
     function openCursorMenu() { return Menu.openAtCursor(root, menu, Theme.spacing.rowPaddingX) }
 
     Flea.StateMessage {
+        visible: !trashHost.opened
         anchors.fill: root.listSlot
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.rightMargin: Theme.spacing.rowPaddingX

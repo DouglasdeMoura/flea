@@ -10,6 +10,7 @@ Item {
 
     property bool opened: false
     property Item focusHolder: null
+    readonly property var sheet: Keymap.sheetFor(ViewState.keysPreset, "gui", root.focusHolder ? root.focusHolder.dualMode : false)
 
     // The canvas draws this panel at 300 design pixels wide, the same as the convert popup.
     readonly property int sheetWidth: 300
@@ -44,8 +45,8 @@ Item {
     // menuEntries() uses: one row per line, the cap and the wording it is drawn beside.
     function rows() {
         var out = []
-        for (var i = 0; i < Keymap.SHEET.length; i++)
-            out.push(Keymap.SHEET[i].keys + " " + Keymap.SHEET[i].label)
+        for (var i = 0; i < root.sheet.length; i++)
+            out.push(root.sheet[i].keys + " " + root.sheet[i].label)
         return out.join("\n")
     }
 
@@ -100,7 +101,7 @@ Item {
                 columnSpacing: Theme.spacing.rowPaddingX
 
                 Repeater {
-                    model: Keymap.SHEET
+                    model: root.sheet
 
                     delegate: Item {
                         id: entry

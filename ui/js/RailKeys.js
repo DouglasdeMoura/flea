@@ -23,7 +23,10 @@ function act(action, root, sidebar) {
     // Favorites are not offered: Sidebar.startRename ignores an index outside the Network group.
     case "rename": sidebar.startRename(sidebar.cursorIndex); return
     // Eject and Unmount are menu rows, so this opens the menu rather than inventing a second route.
-    case "menu": Mounts.raiseMenu(root, sidebar); return
+    case "menu":
+        if (sidebar.entries[sidebar.cursorIndex] && sidebar.entries[sidebar.cursorIndex].kind === "trash") sidebar.openCursorMenu()
+        else Mounts.raiseMenu(root, sidebar)
+        return
     case "eject": Eject.release(root, sidebar, true); return
     }
 }

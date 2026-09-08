@@ -52,18 +52,23 @@ impl Map {
                 let key_matches = if mods == "text" {
                     matches!(key.mods.as_str(), "" | "shift") && get(block, "key") == key.text
                 } else {
-                    (if mods == "none" { "" } else { mods }) == key.mods && get(block, "key") == key.name
+                    (if mods == "none" { "" } else { mods }) == key.mods
+                        && get(block, "key") == key.name
                 };
-                if kind == "preset" && get(block, "name") == name
+                if kind == "preset"
+                    && get(block, "name") == name
                     && get(block, "frontend") != "gui"
-                    && (here.split(',').any(|part| part == context || part == "all") || (here.is_empty() && context == "listing"))
+                    && (here.split(',').any(|part| part == context || part == "all")
+                        || (here.is_empty() && context == "listing"))
                     && key_matches
                 {
                     return get(block, "action").into();
                 }
             }
         }
-        if context != "listing" { return String::new(); }
+        if context != "listing" {
+            return String::new();
+        }
         for (kind, block) in &self.blocks {
             let matches = if key.mods.is_empty() {
                 (kind == "text" && get(block, "char") == key.text && !key.text.is_empty())
@@ -81,21 +86,79 @@ impl Map {
         let mut rows = Vec::new();
         for (_, label) in self.blocks.iter().filter(|(kind, _)| kind == "sheet") {
             let action = get(label, "action");
-            if !supported(action) { continue; }
+            if !supported(action) {
+                continue;
+            }
             let mut keys = Vec::new();
             for (kind, block) in &self.blocks {
-                let mods = if kind == "preset" { get(block, "mods") } else { kind };
-                let name = if kind == "text" { get(block, "char") } else { get(block, "key") };
-                if name.is_empty() || !matches!(mods, "text" | "code" | "none" | "" | "shift" | "ctrl" | "ctrlshift" | "alt" | "super" | "supershift" | "superalt") { continue; }
+                let mods = if kind == "preset" {
+                    get(block, "mods")
+                } else {
+                    kind
+                };
+                let name = if kind == "text" {
+                    get(block, "char")
+                } else {
+                    get(block, "key")
+                };
+                if name.is_empty()
+                    || !matches!(
+                        mods,
+                        "text"
+                            | "code"
+                            | "none"
+                            | ""
+                            | "shift"
+                            | "ctrl"
+                            | "ctrlshift"
+                            | "alt"
+                            | "super"
+                            | "supershift"
+                            | "superalt"
+                    )
+                {
+                    continue;
+                }
                 let text_key = mods == "text";
-                let key = if text_key { Key::character(name.chars().next().unwrap(), "") } else { Key::named(name, if matches!(mods, "code" | "none") { "" } else { mods }) };
+                let key = if text_key {
+                    Key::character(name.chars().next().unwrap(), "")
+                } else {
+                    Key::named(
+                        name,
+                        if matches!(mods, "code" | "none") {
+                            ""
+                        } else {
+                            mods
+                        },
+                    )
+                };
                 let found = self.action(&key, preset);
-                if canonical(&found) != action { continue; }
-                let prefix = match key.mods.as_str() { "ctrl" => "Ctrl+", "ctrlshift" => "Ctrl+Shift+", "alt" => "Alt+", "super" => "Super+", "supershift" => "Super+Shift+", "superalt" => "Super+Alt+", "shift" => "Shift+", _ => "" };
-                let chord = format!("{}{}{}", prefix, name, if found.ends_with("Arm") { name } else { "" });
-                if !keys.contains(&chord) { keys.push(chord); }
+                if canonical(&found) != action {
+                    continue;
+                }
+                let prefix = match key.mods.as_str() {
+                    "ctrl" => "Ctrl+",
+                    "ctrlshift" => "Ctrl+Shift+",
+                    "alt" => "Alt+",
+                    "super" => "Super+",
+                    "supershift" => "Super+Shift+",
+                    "superalt" => "Super+Alt+",
+                    "shift" => "Shift+",
+                    _ => "",
+                };
+                let chord = format!(
+                    "{}{}{}",
+                    prefix,
+                    name,
+                    if found.ends_with("Arm") { name } else { "" }
+                );
+                if !keys.contains(&chord) {
+                    keys.push(chord);
+                }
             }
-            if !keys.is_empty() { rows.push(format!("{}  {}", keys.join(" / "), get(label, "label"))); }
+            if !keys.is_empty() {
+                rows.push(format!("{}  {}", keys.join(" / "), get(label, "label")));
+            }
         }
         rows.push("1–9  Select tab".into());
         rows.push("q  Quit".into());
@@ -103,10 +166,65 @@ impl Map {
     }
 }
 fn canonical(action: &str) -> &str {
-    match action { "copyArm" => "copy", "cutArm" => "cut", "pasteArm" => "paste", "cursorFirstArm" => "cursorFirst", "trashArm" => "trash", _ => action }
+    match action {
+        "copyArm" => "copy",
+        "cutArm" => "cut",
+        "pasteArm" => "paste",
+        "cursorFirstArm" => "cursorFirst",
+        "trashArm" => "trash",
+        _ => action,
+    }
 }
 fn supported(action: &str) -> bool {
-    matches!(action, "cursorDown" | "cursorUp" | "extendDown" | "extendUp" | "pageDown" | "pageUp" | "cursorFirst" | "cursorLast" | "parent" | "historyBack" | "historyForward" | "open" | "toggleSelect" | "selectAll" | "toggleHidden" | "pathBar" | "filter" | "search" | "rename" | "newFolder" | "copy" | "cut" | "paste" | "trash" | "undo" | "sortNext" | "sortReverse" | "tabNew" | "tabClose" | "tabNext" | "tabPrevious" | "preview" | "togglePreview" | "loadPreview" | "focusPreview" | "focusNext" | "menu" | "keymapSheet" | "reveal" | "escape" | "quit")
+    matches!(
+        action,
+        "cursorDown"
+            | "cursorUp"
+            | "extendDown"
+            | "extendUp"
+            | "pageDown"
+            | "pageUp"
+            | "cursorFirst"
+            | "cursorLast"
+            | "parent"
+            | "historyBack"
+            | "historyForward"
+            | "open"
+            | "toggleSelect"
+            | "selectAll"
+            | "toggleHidden"
+            | "pathBar"
+            | "filter"
+            | "search"
+            | "rename"
+            | "newFolder"
+            | "newFile"
+            | "properties"
+            | "copy"
+            | "cut"
+            | "paste"
+            | "movePaste"
+            | "duplicate"
+            | "trash"
+            | "undo"
+            | "redo"
+            | "sortNext"
+            | "sortReverse"
+            | "tabNew"
+            | "tabClose"
+            | "tabNext"
+            | "tabPrevious"
+            | "preview"
+            | "togglePreview"
+            | "loadPreview"
+            | "focusPreview"
+            | "focusNext"
+            | "menu"
+            | "keymapSheet"
+            | "reveal"
+            | "escape"
+            | "quit"
+    )
 }
 fn get<'a>(map: &'a HashMap<String, String>, key: &str) -> &'a str {
     map.get(key).map(String::as_str).unwrap_or("")
@@ -158,11 +276,23 @@ mod tests {
     fn contexts_share_only_declared_actions_and_sheet_matches_preset() {
         let map = Map::load();
         assert_eq!(map.in_context(&Key::character('d', ""), "vim", "pdf"), "");
-        assert_eq!(map.in_context(&Key::named("Space", ""), "mac", "pdf"), "preview");
-        assert_eq!(map.in_context(&Key::named("Tab", "shift"), "windows", "media"), "focusPrevious");
-        assert_eq!(map.in_context(&Key::named("Insert", "ctrl"), "default", "editor"), "");
+        assert_eq!(
+            map.in_context(&Key::named("Space", ""), "mac", "pdf"),
+            "preview"
+        );
+        assert_eq!(
+            map.in_context(&Key::named("Tab", "shift"), "windows", "media"),
+            "focusPrevious"
+        );
+        assert_eq!(
+            map.in_context(&Key::named("Insert", "ctrl"), "default", "editor"),
+            ""
+        );
         assert_eq!(map.action(&Key::character('y', ""), "vim"), "copyArm");
         assert!(map.sheet("vim").iter().any(|line| line.contains("yy")));
-        assert!(!map.sheet("default").iter().any(|line| line.to_lowercase().contains("grid")));
+        assert!(!map
+            .sheet("default")
+            .iter()
+            .any(|line| line.to_lowercase().contains("grid")));
     }
 }

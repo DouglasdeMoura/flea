@@ -25,6 +25,7 @@ function snapshot(pane, path) {
     return {
         path: where,
         history: pane.history.slice(),
+        forwardHistory: (pane.forwardHistory || []).slice(),
         cursorIndex: elsewhere ? 0 : pane.cursorIndex,
         viewMode: pane.viewMode,
         showHidden: pane.showHidden,
@@ -138,6 +139,7 @@ function restoreSelection(pane, selected) {
 function apply(pane, item) {
     var same = pane.path === item.path && pane.showHidden === item.showHidden
     pane.history = item.history.slice()
+    pane.forwardHistory = (item.forwardHistory || []).slice()
     pane.viewMode = item.viewMode
     pane.showHidden = item.showHidden
     if (same) {

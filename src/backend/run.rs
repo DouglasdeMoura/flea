@@ -7,7 +7,7 @@ use crate::backend::archivereq::{formats_line, start_archive, start_convert};
 use crate::backend::convert;
 use crate::backend::peek::peek_line;
 use crate::backend::metareq::spawn as spawn_meta;
-use crate::backend::opsdispatch::{cancel_transfer, do_mkdir, do_rename, do_undo, report_op, resolve_rows, start_duplicate, start_trash, start_transfer, Ops};
+use crate::backend::opsdispatch::{cancel_transfer, do_mkdir, do_newfile, do_rename, do_undo, report_op, resolve_rows, start_duplicate, start_trash, start_transfer, start_menu_transfer, start_redo, Ops};
 use crate::backend::opsreq::OpMsg;
 use crate::backend::mime::Db;
 use crate::backend::dirsizereq::{queue_dirsizes, walk_one_dirsize};
@@ -158,6 +158,11 @@ fn handle_line(
 ) -> Control {
     match parse_request(line) {
         Request::Permissions { line } => say(out, &ops.permissions.handle(&line)),
+        Request::MenuAction { line, rows } => {
+            let paths = resolve_rows(Vec::new(), &rows, &st.base, &st.listing);
+            let replies = ops.tx.clone();
+            ops.menuactions.get_or_insert_with(|| super::menu_actions::MenuActions::new(replies)).request(line, paths);
+        }
         Request::TrashBrowse { line } => {
             let replies = ops.tx.clone();
             ops.trashbrowser.get_or_insert_with(|| super::trashbrowse::TrashBrowser::new(replies)).request(line);
@@ -272,9 +277,13 @@ fn handle_line(
         Request::DirSizeCancel => {
             st.dirsize_queue.clear();
         }
-        Request::Transfer { op, paths, rows, dest } => {
-            let named = resolve_rows(paths, &rows, &st.base, &st.listing);
-            start_transfer(out, ops, &op, named, &dest)
+        Request::Transfer { op, paths, rows, dest, menu_id } => {
+            if menu_id != 0 {
+                start_menu_transfer(out, ops, &op, menu_id, &dest)
+            } else {
+                let named = resolve_rows(paths, &rows, &st.base, &st.listing);
+                start_transfer(out, ops, &op, named, &dest)
+            }
         }
         Request::TransferCancel { id } => cancel_transfer(ops, id),
         Request::Trash { paths, rows } => {
@@ -283,8 +292,10 @@ fn handle_line(
         }
         Request::Rename { path, to } => do_rename(out, ops, &path, &to),
         Request::MkDir { path, name } => do_mkdir(out, ops, &path, &name),
+        Request::NewFile { path, name, id } => do_newfile(out, ops, &path, &name, id),
         Request::Duplicate { path } => start_duplicate(out, ops, &path),
         Request::Undo => do_undo(out, ops),
+        Request::Redo => start_redo(out, ops),
         // Never touches st.listing, which is the whole point: a column is not the pane's own listing.
         Request::Peek { path, first, hidden } =>
             say(out, &peek_line(&path, first, hidden, &tb.mime, &tb.icons)),

@@ -25,7 +25,9 @@ function next(current) {
 // seekBack/seekForward get the same treatment, scoped to an open MEDIA preview instead of the
 // rail, so Left/Right stay silent everywhere else rather than reaching act()'s "not built yet".
 function lookup(event, root) {
-    var action = Keymap.lookup(event.key, event.text, event.modifiers)
+    var context = root.preview.active ? (root.preview.isPdf ? "pdf" : root.preview.isMedia ? "media" : "preview")
+                  : root.shareBrowser && root.shareBrowser.active ? "menu" : root.focusView === RAIL ? "rail" : "listing"
+    var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
     // Only the bare a is rail-only; Ctrl+K is scoped to neither view and opens the dialog anywhere.
     if (action === "addNetwork" && root.focusView !== RAIL && !(event.modifiers & Qt.ControlModifier))
         return ""
@@ -83,6 +85,12 @@ function act(action, root) {
     case "pageUp": step(root, -Math.max(1, Math.floor(root.visibleRows / 2))); return
     case "open": root.openCursor(); return
     case "parent": root.openParent(); return
+    case "historyBack": root.goBack(); return
+    case "historyForward": root.goForward(); return
+    case "togglePreview": root.togglePreviewColumn(); return
+    case "loadPreview": root.loadSelectionPreview(); return
+    case "focusPreview": root.focusPreviewColumn(); return
+    case "windowNew": root.newWindow(); return
     case "toggleHidden": root.toggleHidden(); return
     // Esc unwinds one thing at a time, and the least destructive first: a running walk, then the
     // search, then the filter (which loses nothing), then the selection, then the transient line.
@@ -109,7 +117,13 @@ function act(action, root) {
     case "copydirpath": root.copyDirPath(); return
     case "cut": Ops.clip(root, true); return
     case "paste": Ops.paste(root); return
+    case "movePaste":
+        if (root.clipboard.paths.length === 0) { root.message("The clipboard is empty.", false); return }
+        root.backend.send({c: "transfer", op: "move", paths: root.clipboard.paths, dest: root.path})
+        root.clipboard = Ops.emptyClipboard()
+        return
     case "undo": Ops.undo(root); return
+    case "redo": root.backend.send({c: "redo"}); return
     case "rename": Ops.startRename(root); return
     // m. Mounts.raiseMenu says why a favourite has no menu; here the pane says whether a row was
     // under the cursor at all, and an empty or fully filtered listing gets the sentence, not silence.
@@ -128,9 +142,9 @@ function act(action, root) {
     case "addNetwork": root.sidebar.addRequested(); return
     case "eject": Eject.release(root, root.sidebar, false); return
     // Finder's Cmd+1/2/3; the chrome's three buttons write the same property, so they follow.
-    case "viewList": root.viewMode = "list"; return
-    case "viewColumns": root.viewMode = "columns"; return
-    case "viewGrid": root.viewMode = "grid"; return
+    case "viewList": root.chooseView("list"); return
+    case "viewColumns": root.chooseView("columns"); return
+    case "viewGrid": root.chooseView("grid"); return
     case "newFolder": Ops.newFolder(root); return
     // The directory being shown, not the row: the menu row and the chord both land here.
     case "openTerminal": root.openTerminal(); return
@@ -195,6 +209,16 @@ function leavesLine(event) {
     return LEAVES_LINE.indexOf(Keymap.lookup(event.key, event.text, event.modifiers)) >= 0
 }
 
+// Vim pairs are consecutive inputs on the same selection; pointer or navigation changes disarm them.
+function sequenceAction(action, root) {
+    var pairs = { copyArm: "copy", cutArm: "cut", pasteArm: "paste", cursorFirstArm: "cursorFirst" }
+    var stamp = JSON.stringify([root.path, root.cursorIndex, root.selectionVersion, root.viewMode])
+    var paired = pairs[action] && root.keySequence === action && root.keySequenceIdentity === stamp
+    root.keySequence = paired || !pairs[action] ? "" : action
+    root.keySequenceIdentity = paired || !pairs[action] ? "" : stamp
+    return paired ? pairs[action] : pairs[action] ? "" : action
+}
+
 // Lifted whole from Pane.qml's Keys.onPressed, which had grown past its file's 400-line cap; returns whether the key was consumed.
 function handleKey(event, root, sidebar) {
     // Guards a key that reaches the list before a rename field's own focus transfer lands, the OEM's
@@ -224,6 +248,7 @@ function handleKey(event, root, sidebar) {
         return Filter.typeKey(event, root)
     }
     var action = lookup(event, root)
+    action = sequenceAction(action, root)
     // Anything that is not the second d of the pair disarms it, so an arm never outlives the key
     // after it; ui/js/Trash.js re-stamps on its own, which is why it reads the stamp before writing.
     if (action !== "trashArm") {
@@ -237,8 +262,13 @@ function handleKey(event, root, sidebar) {
         shareBrowserAct(action, root)
         return true
     }
-    if (action === "focusNext") {
-        root.focusView = next(root.focusView)
+    if (action === "focusNext" || action === "focusPrevious") {
+        if (root.dualMode && root.focusView === LIST) root.switchPane()
+        else root.focusView = next(root.focusView)
+        return true
+    }
+    if (action === "focusPreview") {
+        if (!root.dualMode) root.focusPreviewColumn()
         return true
     }
     // The sheet is global, unlike addNetwork, so it answers from the rail as well as the list. It

@@ -11,6 +11,10 @@ Item {
 
     property var row: null
     property bool cursor: false
+    property bool paneFocused: true
+    property bool dualMode: false
+    readonly property real markSlot: root.dualMode ? Theme.markSize : Theme.iconSize
+    readonly property real sizeWidth: root.dualMode ? Theme.dualColumn.size : Theme.column.size
     property bool hovered: false
     property string thumb: ""
     property bool selected: false
@@ -31,7 +35,7 @@ Item {
     property bool compactDate: false
     // The window's own third: only FleaWindow.html and Search.html end a directory name with a slash.
     property bool dirSuffix: false
-    readonly property int dateWidth: root.compactDate ? Theme.column.pickerDate : Theme.column.date
+    readonly property real dateWidth: root.dualMode ? Theme.dualColumn.date : root.compactDate ? Theme.column.pickerDate : Theme.column.date
     // The picker's third: it hides the columns its own board does not draw, and the window's own set stays ViewState's.
     property var hiddenCols: ViewState.hiddenCols
     // Non-empty while a search or filter is narrowing the listing: the run to paint, and the switch to the search column set.
@@ -52,13 +56,13 @@ Item {
     readonly property real nameShare: 0.66
     // What the name and location share: the row minus its padding, the mark, the gap between the
     // two of them, and the size column while it is still being drawn.
-    readonly property real searchSlot: Math.max(0, root.width - 2 * Theme.spacing.rowPaddingX - Theme.iconSize - 2 * Theme.spacing.gap
-                                                - (root.sizeShown ? Theme.column.size + Theme.spacing.gap : 0))
+    readonly property real searchSlot: Math.max(0, root.width - 2 * Theme.spacing.rowPaddingX - root.markSlot - 2 * Theme.spacing.gap
+                                                - (root.sizeShown ? root.sizeWidth + Theme.spacing.gap : 0))
 
     // The columns this row's width affords, and which of them this row is drawing. A column that
     // is not drawn takes neither its width nor its gap, so the chain collapses onto the one to its
     // right and the name takes back the whole of it.
-    readonly property var cols: Theme.columns(root.width, root.hiddenCols, root.dateWidth)
+    readonly property var cols: root.dualMode ? Theme.dualColumns(root.width, root.hiddenCols) : Theme.columns(root.width, root.hiddenCols, root.dateWidth)
     readonly property bool modeShown: !root.searching && root.cols.mode
     // The search column set keeps Size and drops the other three, so only this one ignores searching.
     readonly property bool sizeShown: root.cols.size
@@ -86,8 +90,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         // selectionFill is the OEM's fifth rung, kept visually distinct from the cursor's selectedFill.
-        color: root.cursor ? Style.selectedFill
-             : root.selected ? Style.selectionFill
+        color: root.cursor && root.paneFocused ? (root.dualMode ? Style.selectedAccentFill : Style.selectedFill)
+             : root.selected && root.paneFocused ? Style.selectionFill
              : root.hovered ? Style.hoverFill
              : root.alternate ? Style.normalFill
              : "transparent"
@@ -98,7 +102,7 @@ Item {
         visible: root.cursor
         width: Theme.spacing.hairline * 2
         height: parent.height
-        color: Theme.color.accent
+        color: root.paneFocused ? Theme.color.accent : Theme.color.muted
     }
 
     // The drop frame: the board's hairline of accent inset in the row over a faint accent wash, the
@@ -119,11 +123,11 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX + root.leadingSlot
         anchors.verticalCenter: parent.verticalCenter
-        width: Theme.iconSize
-        height: Theme.iconSize
+        width: root.markSlot
+        height: root.markSlot
         // Sized on purpose, see AGENTS.md "The thumbnail decode arm": it caps the themed icon and saves 158 KB a thumbnail.
-        sourceSize.width: Theme.iconSize
-        sourceSize.height: Theme.iconSize
+        sourceSize.width: root.markSlot
+        sourceSize.height: root.markSlot
         fillMode: Image.PreserveAspectFit
         // A synchronous decode on the UI thread would land inside a scrolled frame.
         asynchronous: true
@@ -136,10 +140,11 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX + root.leadingSlot
         anchors.verticalCenter: parent.verticalCenter
-        width: Theme.iconSize
-        height: Theme.iconSize
+        width: root.markSlot
+        height: root.markSlot
         name: root.row ? Icons.glyphForRow(root.row.i, root.row.p) : Icons.FALLBACK
-        color: root.lifted ? Theme.color.foreground : root.dim
+        color: root.dualMode ? (root.cursor && root.paneFocused ? Theme.color.accent : Theme.color.muted)
+            : root.lifted ? Theme.color.foreground : root.dim
     }
 
     // What the row actually draws, so a test catches the binding being cut and not only the lookup.
@@ -214,7 +219,7 @@ Item {
         anchors.left: searchName.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: size.left
-        anchors.rightMargin: root.sizeShown ? Theme.spacing.gap : 0
+        anchors.rightMargin: root.sizeShown && !root.dualMode ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         text: root.locationText
         color: root.cellColor()
@@ -227,7 +232,7 @@ Item {
     Text {
         id: mode
         anchors.right: size.left
-        anchors.rightMargin: root.sizeShown ? Theme.spacing.gap : 0
+        anchors.rightMargin: root.sizeShown && !root.dualMode ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         visible: root.modeShown && !root.dropTarget
         width: root.modeShown ? Theme.column.mode : 0
@@ -242,10 +247,10 @@ Item {
     Text {
         id: size
         anchors.right: modified.left
-        anchors.rightMargin: root.dateShown ? Theme.spacing.gap : 0
+        anchors.rightMargin: root.dateShown && !root.dualMode ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         visible: root.sizeShown && !root.dropTarget
-        width: root.sizeShown ? Theme.column.size : 0
+        width: root.sizeShown ? root.sizeWidth : 0
         text: root.row ? root.sizeText() : ""
         color: root.cellColor()
         font.family: Theme.font.family

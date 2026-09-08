@@ -110,6 +110,8 @@ var PATHS = {
     // The context menu's own seven marks, added with the operations surface that draws them.
     // The canvas's own open folder, which keeps the closed folder's back panel byte for byte.
     "folder-open": "M2 20V3h6l2 3h12v3 M22 11l-2.5 9H2l2.5-9z",
+    "external-link": "M14 3h7v7 M21 3 11 13 M18 13v8H3V6h8",
+    "undo": "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8 M3 3v5h5",
     "rename": "M3 21l1-4L17 4l3 3L7 20l-4 1z M14 7l3 3",
     "file-plus": "M6 22V2h8l4 4v16H6z M14 2v4h4 M12 11v6 M9 14h6",
     // lucide's own folder-plus is the folder body byte for byte plus these two strokes, so the recut
@@ -128,6 +130,7 @@ var PATHS = {
     // The bullets are lucide's own zero-length-line technique, which SquareCap draws as square dots.
     "list": "M8 6h13 M8 12h13 M8 18h13 M3 6L3.01 6 M3 12L3.01 12 M3 18L3.01 18",
     "columns": "M3 3h18v18H3z M9 3v18 M15 3v18",
+    "dual": "M3 4h8v16H3z M13 4h8v16h-8z",
     "grid": "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
     // The preview column's own two, taken from the canvas's icon table rather than recut from lucide.
     "symlink": "M7 17L17 7 M8 7h9v9",

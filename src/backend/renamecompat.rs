@@ -13,6 +13,7 @@ const RENAME_NOREPLACE: u32 = 1;
 const EINVAL: i32 = 22;
 // GVFS answers a WebDAV rename with EIO instead of refusing it outright.
 const EIO: i32 = 5;
+const EXDEV: i32 = 18;
 // The kind a half-succeeded rename answers; ui/js/Errors.js words it and ui/PaneWire.qml refreshes on it.
 pub(crate) const KEPT: &str = "rename-kept";
 
@@ -49,7 +50,7 @@ pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
 pub(crate) fn rename_path(from: &Path, to: &Path) -> Result<(), FleaError> {
     match rename_noreplace(from, to) {
         Ok(()) => Ok(()),
-        Err(error) if needs_copy_fallback(from, &error) => copy_then_remove(from, to),
+        Err(error) if error.raw_os_error() == Some(EXDEV) || needs_copy_fallback(from, &error) => copy_then_remove(from, to),
         Err(error) => Err(from_io("rename", &to.to_string_lossy(), &error)),
     }
 }

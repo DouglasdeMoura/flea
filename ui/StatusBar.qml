@@ -16,7 +16,8 @@ Item {
     property real fsFree: 0
     property string notice: ""
     property var errors: []
-    readonly property string transient_: root.errors.length ? root.errors[0] : root.notice
+    readonly property string transient_: root.errors.length ? root.errors[0].text : root.notice
+    readonly property string errorDetail: root.errors.length ? root.errors[0].detail : ""
     readonly property bool transientIsError: root.errors.length > 0
     property string sticky: ""
     property var transfer: Ops.emptyTransfer()
@@ -35,13 +36,13 @@ Item {
         : ""
     signal transferCancelRequested(int id)
     signal undoRequested()
-    implicitHeight: Theme.chromeHeight
+    implicitHeight: Theme.chromeHeight + detailView.height
 
     // Completion messages cannot acknowledge a failure; each error requires its own dismissal.
-    function say(text, isError) {
+    function say(text, isError, detail) {
         if (!text) { root.dismiss(); return }
         if (isError) {
-            root.errors = root.errors.concat([text])
+            root.errors = root.errors.concat([{text: text, detail: detail || ""}])
             return
         }
         root.notice = text
@@ -85,8 +86,11 @@ Item {
 
     Timer { id: clear; interval: root.messageMs; onTriggered: root.notice = "" }
 
+    Item { id: strip; width: parent.width; height: Theme.chromeHeight }
+
     Rectangle {
-        anchors.fill: parent
+        width: parent.width
+        height: Theme.chromeHeight
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: root.transientIsError ? Theme.color.error : Theme.color.muted
@@ -96,7 +100,7 @@ Item {
         id: location
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: strip.verticalCenter
         width: Math.min(implicitWidth, root.width / 4)
         text: root.path
         color: Theme.color.muted
@@ -110,7 +114,7 @@ Item {
         id: actions
         anchors.right: parent.right
         anchors.rightMargin: Theme.spacing.rowPaddingX
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: strip.verticalCenter
         spacing: Theme.spacing.gap
 
         StatusAction {
@@ -130,7 +134,7 @@ Item {
         id: secondary
         anchors.right: actions.left
         anchors.rightMargin: actions.width ? Theme.spacing.gap : 0
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: strip.verticalCenter
         width: root.secondaryText.length ? Math.min(implicitWidth, root.width / 4) : 0
         text: root.secondaryText
         color: Theme.color.muted
@@ -144,7 +148,7 @@ Item {
         id: primary
         anchors.right: secondary.left
         anchors.rightMargin: secondary.width ? Theme.spacing.gap : 0
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: strip.verticalCenter
         width: Math.max(0, Math.min(implicitWidth, secondary.x - location.x - location.width - 3 * Theme.spacing.gap - root.spiralSize))
         text: root.rightText() || root.countText()
         color: root.rightColor()
@@ -158,9 +162,42 @@ Item {
         visible: !root.transientIsError && (root.stickyHere || root.searchRunning)
         anchors.right: primary.left
         anchors.rightMargin: Theme.spacing.gap
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: strip.verticalCenter
         width: root.spiralSize
         height: root.spiralSize
         color: Theme.color.muted
+    }
+
+    Rectangle {
+        x: detailView.x; y: detailView.y
+        width: detailView.width; height: detailView.height
+        visible: detailView.visible
+        color: Theme.color.surface
+        border.color: Theme.color.error
+        border.width: Theme.spacing.hairline
+    }
+    Flickable {
+        id: detailView
+        y: Theme.chromeHeight
+        width: parent.width
+        visible: root.errorDetail.length > 0
+        height: visible ? Math.min(contentHeight, root.parent ? root.parent.height / 3 : contentHeight) : 0
+        contentWidth: width
+        contentHeight: detailText.implicitHeight + 2 * Theme.spacing.rowPaddingY
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        onVisibleChanged: contentY = 0
+        Text {
+            id: detailText
+            x: Theme.spacing.rowPaddingX
+            y: Theme.spacing.rowPaddingY
+            width: parent.width - 2 * Theme.spacing.rowPaddingX
+            text: root.errorDetail
+            color: Theme.color.error
+            font.family: Theme.font.family
+            font.pixelSize: Theme.font.caption
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+        }
     }
 }

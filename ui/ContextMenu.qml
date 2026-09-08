@@ -12,6 +12,8 @@ Item {
     // "taildrop:<peerId>" instead, so one signal covers both without a second wire. The header's
     // rows fire "col:<key>" and "toggleHidden", routed in ui/Pane.qml's onChosen.
     signal chosen(string action)
+    signal refused(string reason)
+    signal snapshotRequested()
 
     property bool opened: false
     // Driven from ui/Pane.qml's own state, so this file owns no hidden-file logic itself.
@@ -19,9 +21,13 @@ Item {
     // The application name ui/Opener.qml resolved for the cursor row, shown muted beside "Open".
     // [{id, label}], the reachable Taildrop targets; empty self-hides the whole row, see ui/Taildrop.qml.
     property var taildropPeers: []
+    property bool taildropInstalled: false
+    property string taildropReason: ""
     // The archive formats this box actually probed, and whether a converter is installed at all.
     property var archiveFormats: []
     property bool canConvert: false
+    property bool canExtract: false
+    property bool clipboardAvailable: false
     // Whether the cursor row is an archive, and whether it is an image; both decided client-side.
     property bool rowIsArchive: false
     property bool rowIsImage: false
@@ -29,11 +35,18 @@ Item {
     property int selectionCount: 0
     // Empty until the stock Dropbox service is installed and authenticated, which is what gates the row.
     property string dropboxPath: ""
+    property bool dropboxInstalled: false
+    property string dropboxReason: ""
     // True when the cursor row already lives under ~/Dropbox, where a share link is the useful action.
     property bool rowInDropbox: false
     // False on a listing's empty space, where Menus.html's background column is what opens instead.
     // openBackground() is its only writer and openAt() puts it back, because one instance serves both.
     property bool hasRow: true
+    property string selectionIdentity: ""
+    property string openedIdentity: ""
+    // The owner intersects the live monitor work area with this application's viewport.
+    property rect workArea: Qt.rect(0, 0, root.width, root.height)
+    readonly property real workAreaInset: Theme.space(4)
 
     // The rail's own rows when ui/Sidebar.qml raised this menu, empty when the listing did. One
     // instance serves both: a second one in this tree takes the keyboard from the list, see AGENTS.md.
@@ -78,7 +91,7 @@ Item {
         ? root.entries[root.openSubmenuRow].submenu : []
 
     // The row list this menu currently offers; a test reads this back through shell.qml's IPC.
-    readonly property var entries: root.buildEntries()
+    property var entries: []
 
     // The construction lives in ui/js/Menu.js now, so the rows are unit-testable without a window:
     // listingEntries(p) builds the listing's rows from the pane's state, headerEntries() the column
@@ -95,11 +108,17 @@ Item {
             hasRow: root.hasRow,
             rowInDropbox: root.rowInDropbox,
             dropboxPath: root.dropboxPath,
+            dropboxInstalled: root.dropboxInstalled,
+            dropboxReason: root.dropboxReason,
             taildropPeers: root.taildropPeers,
+            taildropInstalled: root.taildropInstalled,
+            taildropReason: root.taildropReason,
             archiveFormats: root.archiveFormats,
             rowIsArchive: root.rowIsArchive,
             rowIsImage: root.rowIsImage,
             canConvert: root.canConvert,
+            canExtract: root.canExtract,
+            clipboardAvailable: root.clipboardAvailable,
             rowMode: root.rowMode,
             selectionCount: root.selectionCount,
             // The Menus settings section's stored set; ui/js/Menu.js applyHidden is what reads it.
@@ -123,7 +142,7 @@ Item {
     }
 
     function firstRow() {
-        return root.entries.length > 0 && root.entries[0].separator === true ? root.stepCursor(0, 1) : 0
+        return root.stepCursor(-1, 1)
     }
 
     anchors.fill: parent
@@ -172,22 +191,31 @@ Item {
     // height place() reads is still the menu that was open before this one. Clamping again on the
     // real height lands before the first paint, so no menu is placed against another's size.
     function clampFrame() {
-        frame.x = Menu.clamp(root.placeX, frame.width, root.width)
-        frame.y = Menu.clamp(root.placeY, frame.height, root.height)
+        frame.x = root.workArea.x + Menu.clamp(root.placeX - root.workArea.x, frame.width, root.workArea.width)
+        frame.y = root.workArea.y + root.workAreaInset
+                + Menu.clamp(root.placeY - root.workArea.y - root.workAreaInset,
+                             frame.height, Math.max(0, root.workArea.height - 2 * root.workAreaInset))
     }
 
     function place(scenePoint) {
         var point = root.mapFromItem(null, scenePoint)
         root.placeX = point.x
         root.placeY = point.y
+        root.entries = root.buildEntries()
+        root.openedIdentity = root.selectionIdentity
+        scroll.contentY = 0
         root.clampFrame()
         root.cursor = root.firstRow()
         root.openSubmenuRow = -1
         root.submenuCursor = 0
         root.focusHolder = root.focusedSibling()
         root.opened = true
+        if (root.hasRow && !root.forRail && !root.forHeader) root.snapshotRequested()
         keyCatcher.forceActiveFocus()
     }
+    onWorkAreaChanged: if (root.opened) root.clampFrame()
+    onCursorChanged: scroll.reveal(menuRows.itemAt(root.cursor))
+    onSubmenuCursorChanged: subScroll.reveal(subRows.itemAt(root.submenuCursor))
 
     // Whichever sibling holds active focus when the menu opens, which is the pane's list today.
     function focusedSibling() {
@@ -212,9 +240,7 @@ Item {
 
     // The menu closes before the action runs, so it never hangs over the listing that action opened.
     function choose(action) {
-        for (var i = 0; i < root.entries.length; i++) {
-            if (root.entries[i].action === action && root.entries[i].disabled === true) return
-        }
+        if (!root.validateChoice(action, "")) return
         // Both read before close(), which is what clears them.
         var key = root.railKey
         var rail = root.forRail
@@ -229,15 +255,36 @@ Item {
     // One signal covers every submenu: the row's own action, a colon, and the entry chosen inside it.
     function chooseSub(id) {
         var entry = root.entries[root.openSubmenuRow]
+        if (!entry || !root.validateChoice(entry.action, id)) return
         root.close()
         if (entry)
             root.chosen(entry.action + ":" + id)
     }
 
     function openSubmenu(index) {
-        if (!root.entries[index] || root.entries[index].disabled === true) return
+        if (!Menu.hasSubmenu(root.entries[index]) || root.entries[index].disabled === true) return
         root.openSubmenuRow = index
         root.submenuCursor = 0
+        subScroll.contentY = 0
+    }
+
+    // Rebuild only to validate; rows stay fixed while the menu is open under the pointer.
+    function validateChoice(action, subId) {
+        var identityChanged = !root.forRail && !root.forHeader && root.hasRow
+                              && root.openedIdentity !== root.selectionIdentity
+        var live = root.buildEntries()
+        for (var i = 0; !identityChanged && i < live.length; i++) {
+            var entry = live[i]
+            if (entry.action !== action || entry.disabled === true) continue
+            if (!subId) return true
+            var sub = entry.submenu || []
+            for (var j = 0; j < sub.length; j++)
+                if (sub[j].id === subId && sub[j].disabled !== true) return true
+        }
+        root.close()
+        root.refused(identityChanged ? "Selected items changed; reopen the menu."
+                                     : "That action is no longer available; reopen the menu.")
+        return false
     }
 
     // Rows above the open one are a mix of full rows and separators, so the offset is summed, not multiplied.
@@ -245,7 +292,7 @@ Item {
         var y = 0
         for (var i = 0; i < root.openSubmenuRow; i++)
             y += root.entries[i].separator === true ? separatorProbe.separatorHeight : Theme.rowHeight
-        return y
+        return y - scroll.contentY
     }
 
     // One row off the model, only so the two heights above are read from MenuRow rather than repeated here.
@@ -266,9 +313,10 @@ Item {
 
     Rectangle {
         id: frame
-        width: Math.min(root.width, Theme.menuWidth)
+        width: Math.max(0, Math.min(root.workArea.width, Theme.menuWidth))
         // The vertical inset keeps the first and last row's square highlight off the rounded corners.
-        height: rows.implicitHeight + 2 * Theme.spacing.rowPaddingY
+        height: Math.max(0, Math.min(rows.implicitHeight + 2 * Theme.spacing.rowPaddingY,
+                                    root.workArea.height - 2 * root.workAreaInset))
         // The height this menu is actually going to have, arriving after place() has already run.
         onHeightChanged: if (root.opened) root.clampFrame()
         color: Theme.color.surface
@@ -277,10 +325,14 @@ Item {
         // Mirrors hyprland decoration:rounding, same as NetworkDialog; 0 on a stock box stays square.
         radius: Style.cornerRadius
 
+        Flea.CardScroll {
+            id: scroll
+            anchors.fill: parent
+            anchors.topMargin: Theme.spacing.rowPaddingY
+            anchors.bottomMargin: Theme.spacing.rowPaddingY
         Column {
             id: rows
             width: parent.width
-            y: Theme.spacing.rowPaddingY
 
             Repeater {
                 id: menuRows
@@ -291,9 +343,13 @@ Item {
                     required property int index
                     width: rows.width
                     entry: row.modelData
-                    compact: root.forRail
+                    compact: root.forRail && root.railKey !== "trash" && root.railKey !== "trashSelection"
                     current: !root.submenuOpen && root.cursor === row.index
-                    onPointerMoved: root.cursor = row.index
+                    onPointerMoved: {
+                        root.cursor = row.index
+                        if (Menu.hasSubmenu(row.modelData)) root.openSubmenu(row.index)
+                        else root.openSubmenuRow = -1
+                    }
                     onActivated: {
                         if (Menu.hasSubmenu(row.modelData))
                             root.openSubmenu(row.index)
@@ -303,28 +359,58 @@ Item {
                 }
             }
         }
+        }
+        Rectangle {
+            anchors.top: parent.top
+            width: parent.width
+            height: Theme.spacing.gap
+            visible: scroll.contentY > 0
+            gradient: Gradient {
+                GradientStop { position: 0; color: Theme.color.surface }
+                GradientStop { position: 1; color: Qt.rgba(Theme.color.surface.r, Theme.color.surface.g, Theme.color.surface.b, 0) }
+            }
+        }
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: Theme.spacing.gap
+            visible: scroll.contentY + scroll.height < scroll.contentHeight
+            rotation: 180
+            gradient: Gradient {
+                GradientStop { position: 0; color: Theme.color.surface }
+                GradientStop { position: 1; color: Qt.rgba(Theme.color.surface.r, Theme.color.surface.g, Theme.color.surface.b, 0) }
+            }
+        }
     }
 
     // The flyout: a second frame beside whichever row opened it, only while one has.
     Rectangle {
         id: flyout
         visible: root.submenuOpen
-        x: frame.x + frame.width
+        x: frame.x + frame.width + width <= root.workArea.x + root.workArea.width
+           ? frame.x + frame.width : Math.max(root.workArea.x, frame.x - width)
         // peers.y already carries the inset, so the flyout frame itself stays on the row grid.
-        y: frame.y + root.submenuOffset()
-        width: Theme.menuWidth
-        height: peers.implicitHeight + 2 * Theme.spacing.rowPaddingY
+        y: Math.max(root.workArea.y + root.workAreaInset,
+                    Math.min(frame.y + root.submenuOffset(), root.workArea.y + root.workArea.height - root.workAreaInset - height))
+        width: Math.max(0, Math.min(Theme.menuWidth, root.workArea.width))
+        height: Math.max(0, Math.min(peers.implicitHeight + 2 * Theme.spacing.rowPaddingY,
+                                    root.workArea.height - 2 * root.workAreaInset))
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: Theme.color.muted
         radius: Style.cornerRadius
 
+        Flea.CardScroll {
+            id: subScroll
+            anchors.fill: parent
+            anchors.topMargin: Theme.spacing.rowPaddingY
+            anchors.bottomMargin: Theme.spacing.rowPaddingY
         Column {
             id: peers
             width: parent.width
-            y: Theme.spacing.rowPaddingY
 
             Repeater {
+                id: subRows
                 model: root.submenuEntries
                 delegate: Flea.MenuRow {
                     id: subRow
@@ -333,13 +419,14 @@ Item {
                     width: peers.width
                     // Which mark a whole flyout draws is ui/js/Menu.js submenuGlyph's to say, so the
                     // read-back submenuGlyphs() above and the drawn row cannot answer differently.
-                    entry: ({ label: subRow.modelData.label, action: "",
+                    entry: ({ label: subRow.modelData.label, action: "", disabled: subRow.modelData.disabled === true,
                               glyph: Menu.submenuGlyph(root.entries[root.openSubmenuRow].action) })
                     current: root.submenuCursor === subRow.index
                     onPointerMoved: root.submenuCursor = subRow.index
                     onActivated: root.chooseSub(subRow.modelData.id)
                 }
             }
+        }
         }
     }
 
@@ -352,7 +439,8 @@ Item {
         focus: true
 
         Keys.onPressed: function (event) {
-            var action = Keymap.lookup(event.key, event.text, event.modifiers)
+            var action = Keymap.lookup(event.key, event.text, event.modifiers, "menu")
+            event.accepted = true
             if (action === "escape") {
                 if (root.submenuOpen)
                     root.openSubmenuRow = -1
@@ -377,6 +465,8 @@ Item {
                 event.accepted = true
                 return
             }
+            if (action === "parent") { root.openSubmenuRow = -1; return }
+            if (action === "menuRight") { root.openSubmenu(root.cursor); return }
             if (action === "open" || action === "preview") {
                 if (root.submenuOpen) {
                     var sub = root.submenuEntries[root.submenuCursor]

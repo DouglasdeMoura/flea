@@ -39,7 +39,8 @@ pub fn convertdone_line(id: usize, ok: bool, path: &str, err: &str) -> String {
 // Sample output: {"t":"formats","archive":["zip","tar","tar.zst"],"convert":true}
 pub fn formats_line(formats: &Formats, can_convert: bool) -> String {
     let names: Vec<String> = formats.names().iter().map(|n| format!(r#""{}""#, escape(n))).collect();
-    format!(r#"{{"t":"formats","archive":[{}],"convert":{}}}"#, names.join(","), can_convert)
+    format!(r#"{{"t":"formats","archive":[{}],"convert":{},"extract":{{"archive":{},"sevenZip":{}}}}}"#,
+        names.join(","), can_convert, formats.offers("tar"), formats.offers("7z"))
 }
 
 pub fn run_archive(id: usize, compressing: bool, paths: Vec<String>, format: String,
@@ -129,11 +130,11 @@ mod tests {
         let f = Formats::from_tools(true, false);
         assert_eq!(
             formats_line(&f, true),
-            r#"{"t":"formats","archive":["zip","tar","tar.gz","tar.bz2","tar.xz","tar.zst"],"convert":true}"#
+            r#"{"t":"formats","archive":["zip","tar","tar.gz","tar.bz2","tar.xz","tar.zst"],"convert":true,"extract":{"archive":true,"sevenZip":false}}"#
         );
         assert_eq!(
             formats_line(&Formats::from_tools(false, false), false),
-            r#"{"t":"formats","archive":[],"convert":false}"#
+            r#"{"t":"formats","archive":[],"convert":false,"extract":{"archive":false,"sevenZip":false}}"#
         );
     }
 

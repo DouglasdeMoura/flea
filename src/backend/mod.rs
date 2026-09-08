@@ -32,8 +32,10 @@ pub mod owner;
 pub mod peek;
 pub mod proto;
 pub mod permissions;
+pub mod menu_actions;
 pub mod trashbrowse;
 pub mod trashdelete;
+pub mod trashmanifest;
 pub mod rows;
 pub mod run;
 pub mod md5;
@@ -56,6 +58,7 @@ mod mountinfo;
 mod renamecompat;
 pub mod trash;
 pub mod undo;
+pub mod redo;
 // The open listing's directory, watched so an outside change reaches the client; see docs/protocol.md "changed".
 pub mod watch;
 // Test-only: hard rule 9's sandbox root, so no destructive test names a path outside one.

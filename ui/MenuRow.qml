@@ -45,7 +45,7 @@ Item {
 
     // The hover lift Row.qml uses, so a menu row and a list row read alike.
     readonly property real hoverOpacity: 0.08
-    // A separator is a hairline with one gap of air around it, which is the mock's 11 px read from tokens instead.
+    // Menus.html resolves the separator to rowGap + hairline, 10 px at base size 14.
     readonly property int separatorHeight: Theme.spacing.gap + Theme.spacing.hairline
     readonly property real separatorOpacity: 0.4
 

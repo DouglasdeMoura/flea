@@ -28,15 +28,16 @@ function runInventory(check) {
     for (var s = 0; s < shapes.length; s++) {
         var rows = Menu.listingEntries({
             showHidden: false, hasRow: true, dropboxPath: "/home/jw/Dropbox",
-            taildropPeers: [{ id: "x", label: "Box" }], archiveFormats: ["zip"], canConvert: true,
+            taildropPeers: [{ id: "x", label: "Box" }], taildropInstalled: true, dropboxInstalled: true,
+            archiveFormats: ["zip"], canConvert: true, canExtract: true, selectionCount: 1, rowMode: 0o100644,
             rowInDropbox: shapes[s].rowInDropbox, rowIsArchive: shapes[s].rowIsArchive,
             rowIsImage: shapes[s].rowIsImage, hiddenActions: []
         })
         for (var i = 0; i < rows.length; i++) {
             if (rows[i].separator === true)
                 continue
-            built[rows[i].action] = rows[i].label
-            builtMark[rows[i].action] = rows[i].glyph !== undefined ? rows[i].glyph : rows[i].mark
+            built[rows[i].id || rows[i].action] = rows[i].label
+            builtMark[rows[i].id || rows[i].action] = rows[i].glyph !== undefined ? rows[i].glyph : rows[i].mark
         }
     }
     var switched = []
@@ -172,7 +173,7 @@ function runRows(check) {
     check("the current menu controls include Permissions and the retained hints preference",
           menus.filter(function (r) { return r.kind === "check" })
                .map(function (r) { return r.id }).join(","),
-          "cut,copy,paste,duplicate,rename,trash,openTerminal,copypath,permissions,compress,extract,convert,taildrop,dropbox,sharelink,keyHints")
+          "cut,copy,paste,duplicate,rename,trash,delete,openwith,openTerminal,moveto,copyto,properties,permissions,copypath,compress,extract,convert,taildrop,dropbox,sharelink,keyHints")
     // The one check that is not a menu action: it says how every row is drawn, not whether it is.
     check("the hints row is a check of its own, off until it is switched on",
           find(menus, "keyHints").label + "|" + find(menus, "keyHints").on,
@@ -232,68 +233,29 @@ function runCursor(check) {
 // resolved back through the generated overlay, so a listed chord cannot advertise a binding the
 // preset lacks, and every one of the four claims a chord rather than drawing a heading over nothing.
 function runPresets(check) {
-    check("the chooser offers the board's four presets, in its own order",
-          Settings.PRESETS.join(","), "default,vim,mac,windows")
-    check("each is named for the panel",
-          Settings.PRESETS.map(function (id) { return Settings.PRESET_LABELS[id] }).join(","),
-          "Default,Vim,Mac,Windows")
-    // ui/ViewState.qml resolves an unrecognised stored name to PRESETS[0], so the order carries the
-    // board's rule that a missing or unknown value falls back to Default and not to Mac.
-    check("and the first is Default, which is what an unrecognised stored name falls back to",
-          Settings.PRESETS[0], "default")
-    var claiming = {}
-    for (var c = 0; c < Keymap.PRESET_KEYS.length; c++)
-        claiming[Keymap.PRESET_KEYS[c].preset] = true
-    check("every preset in the chooser claims a chord of its own, which is GM's ruling of 2026-09-06",
-          Settings.PRESETS.map(function (id) { return claiming[id] === true }).join(","),
-          "true,true,true,true")
-    var listed = 0
-    for (var i = 0; i < Keymap.PRESET_KEYS.length; i++) {
-        var row = Keymap.PRESET_KEYS[i]
-        var mods = (row.ctrl ? Qt.ControlModifier : 0) | (row.shift ? Qt.ShiftModifier : 0)
-        check("the Keys section's " + row.preset + " row " + row.keys + " is really bound",
-              Keymap.lookupPreset(row.preset, Qt[row.code], "", mods), row.action)
-        listed += 1
+    check("preset chooser preserves authoritative order", Settings.PRESETS.join(","), "default,vim,mac,windows")
+    check("preset chooser labels remain explicit", Settings.PRESETS.map(function (id) { return Settings.PRESET_LABELS[id] }).join(","), "Default,Vim,Mac,Windows")
+    check("missing preset resolves to Default", Settings.PRESETS[0], "default")
+    var total = 0
+    for (var i = 0; i < Settings.PRESETS.length; i++) {
+        var preset = Settings.PRESETS[i]
+        var section = Settings.rows("keys", { preset: preset })
+        var table = Keymap.bindingRows(preset, "gui")
+        check(preset + " section uses its selected label", section[1].value, Settings.PRESET_LABELS[preset])
+        check(preset + " section has every effective action", section.filter(function (r) { return r.kind === "fact" }).length,
+              Keymap.sheetFor(preset, "gui").length)
+        check(preset + " section contains actual bindings", table.length > 20, true)
+        for (var j = 0; j < table.length; j++) {
+            var row = table[j]
+            check(preset + " advertised " + row.keys + " binding", Keymap.lookupFor(preset, row.keycode, row.text, row.mask, "listing", "gui"), row.action)
+            total++
+        }
     }
-    check("and the table is not empty, so the check above has a denominator", listed > 0, true)
-    check("a mac chord is dead under the Windows preset",
-          Keymap.lookupPreset("windows", Qt.Key_1, "", Qt.ControlModifier), "")
-    check("and a Windows chord is dead under Mac",
-          Keymap.lookupPreset("mac", Qt.Key_H, "", Qt.ControlModifier), "")
-    check("Default and Vim spell view switching the way Mac does, and claim nothing else",
-          [Keymap.lookupPreset("default", Qt.Key_1, "", Qt.ControlModifier),
-           Keymap.lookupPreset("default", Qt.Key_H, "", Qt.ControlModifier),
-           Keymap.lookupPreset("vim", Qt.Key_1, "", Qt.ControlModifier)].join("|"),
-          "viewList||viewList")
-
-    // The five actions the overlay governs that no preset needs a chord for, asked under every one
-    // of the four: an overlay row can shadow a shared key, so "the shared table carries it" is a
-    // claim to check per preset rather than once. The three views have no shared key at all and are
-    // checked in tests/js/keymap.js, where every preset's own spelling of them is resolved.
-    var reach = []
-    var opened = Keymap.preset
-    for (var q = 0; q < Settings.PRESETS.length; q++) {
-        Keymap.setPreset(Settings.PRESETS[q])
-        reach.push([Keymap.lookup(Qt.Key_Backspace, "", Qt.NoModifier),
-                    Keymap.lookup(Qt.Key_Return, "", Qt.NoModifier),
-                    Keymap.lookup(Qt.Key_Delete, "", Qt.NoModifier),
-                    Keymap.lookup(Qt.Key_Period, ".", Qt.NoModifier),
-                    Keymap.lookup(Qt.Key_A, "a", Qt.NoModifier)].join("|"))
-    }
-    Keymap.setPreset(opened)
-    check("every preset reaches the overlay's other five actions on a shared key",
-          reach.join(" / "),
-          "parent|open|trash|toggleHidden|addNetwork / parent|open|trash|toggleHidden|addNetwork / "
-          + "parent|open|trash|toggleHidden|addNetwork / parent|open|trash|toggleHidden|addNetwork")
-
-    var section = function (id) { return Settings.rows("keys", { preset: id, presetKeys: Keymap.PRESET_KEYS }) }
-    var chords = function (rows) { return rows.filter(function (r) { return r.kind === "fact" }).length }
-    check("the Keys section names each preset the way the chooser does",
-          [section("default")[1].value, section("vim")[1].value, section("mac")[1].value,
-           section("windows")[1].value].join(","), "Default,Vim,Mac,Windows")
-    check("each preset lists every chord it claims, and none of them lists an empty group",
-          [chords(section("default")), chords(section("vim")), chords(section("mac")),
-           chords(section("windows"))].join(","), "3,3,7,4")
+    check("preset check denominator covers all effective bindings", total > 100, true)
+    var menuRows = Settings.menuRows([], true)
+    check("SettingsMenus contains exactly 20 action switches", menuRows.filter(function (r) { return r.kind === "check" && r.id !== "keyHints" }).length, 20)
+    check("Delete permanently is visually destructive", find(menuRows, "delete").role, "error")
+    check("Delete permanently explains its default", find(menuRows, "delete").value, "off by default")
 }
 
 function runCompletionRows(check) {

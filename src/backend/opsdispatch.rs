@@ -1,7 +1,7 @@
 // Dispatch for the five write operations: one runs at a time, because the status bar has one sticky slot for it.
 use crate::backend::ops;
 use crate::backend::opsreq::{
-    duplicated_line, made_line, op_err, renamed_line, run_duplicate, run_transfer, run_trash, trashed_line,
+    duplicated_line, made_line, op_err, renamed_line, run_duplicate, run_transfer_checked, run_trash, trashed_line,
     transferdone_line, transferitem_line, transferprogress_line, transferstarted_line, undone_line, usable_dest,
     OpMsg,
 };
@@ -19,6 +19,7 @@ use std::thread;
 pub(crate) struct Ops {
     pub journal: Journal,
     pub permissions: super::permissions::Permissions,
+    pub menuactions: Option<super::menu_actions::MenuActions>,
     pub trashbrowser: Option<super::trashbrowse::TrashBrowser>,
     pub next_id: usize,
     // The id of the operation on the thread, or None when none is running; the cap is one at a time.
@@ -29,7 +30,7 @@ pub(crate) struct Ops {
 
 impl Ops {
     pub fn new(tx: Sender<OpMsg>) -> Ops {
-        Ops { journal: Journal::new(), permissions: super::permissions::Permissions::default(), trashbrowser: None, next_id: 1, running: None, cancel: Arc::new(AtomicBool::new(false)), tx }
+        Ops { journal: Journal::new(), permissions: super::permissions::Permissions::default(), menuactions: None, trashbrowser: None, next_id: 1, running: None, cancel: Arc::new(AtomicBool::new(false)), tx }
     }
 
     // An id with no slot claimed: archive and convert are id-keyed and run concurrently by design,
@@ -71,6 +72,26 @@ pub(crate) fn resolve_rows(paths: Vec<String>, rows: &[usize], base: &Path, list
 }
 
 pub(crate) fn start_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, paths: Vec<String>, dest: &str) {
+    start_transfer_checked(out, ops, op, paths, dest, None)
+}
+
+pub(crate) fn start_menu_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, id: usize, dest: &str) {
+    let result = ops.menuactions.as_ref().ok_or_else(|| "Menu selection expired; reopen the menu.".to_string())
+        .and_then(|menu| menu.selection(id));
+    match result {
+        Ok(items) => {
+            let paths = items.iter().map(|item| item.path.to_string_lossy().into()).collect();
+            start_transfer_checked(out, ops, op, paths, dest, Some(items));
+        }
+        Err(message) => {
+            writeln!(out, "{}", error_line(&op_err("transfer", "", &message))).ok();
+            out.flush().ok();
+        }
+    }
+}
+
+fn start_transfer_checked(out: &mut impl Write, ops: &mut Ops, op: &str, paths: Vec<String>, dest: &str,
+                          selection: Option<Vec<super::menu_actions::Selected>>) {
     if ops.running.is_some() {
         busy(out, "transfer");
         return;
@@ -90,7 +111,7 @@ pub(crate) fn start_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, path
     writeln!(out, "{}", transferstarted_line(id, n, moving)).ok();
     out.flush().ok();
     let tx = ops.tx.clone();
-    thread::spawn(move || run_transfer(id, moving, paths, dest, cancel, tx));
+    thread::spawn(move || run_transfer_checked(id, moving, paths, dest, cancel, tx, selection));
 }
 
 // No response line of its own: the running operation answers with its own terminal transferdone.
@@ -123,6 +144,7 @@ pub(crate) fn start_duplicate(out: &mut impl Write, ops: &mut Ops, path: &str) {
 
 // Rename answers on the calling thread; rclone directory compatibility may copy before removing its source.
 pub(crate) fn do_rename(out: &mut impl Write, ops: &mut Ops, path: &str, to: &str) {
+    if ops.running.is_some() { busy(out, "rename"); return; }
     match ops::rename(Path::new(path), to) {
         Ok((dst, steps)) => {
             ops.journal.push(Entry { op: "rename".to_string(), steps });
@@ -137,6 +159,7 @@ pub(crate) fn do_rename(out: &mut impl Write, ops: &mut Ops, path: &str, to: &st
 
 // One mkdir(2), so like rename it answers on the calling thread and never takes the operation slot.
 pub(crate) fn do_mkdir(out: &mut impl Write, ops: &mut Ops, parent: &str, name: &str) {
+    if ops.running.is_some() { busy(out, "mkdir"); return; }
     match ops::mkdir(Path::new(parent), name) {
         Ok((dir, steps)) => {
             ops.journal.push(Entry { op: "mkdir".to_string(), steps });
@@ -150,11 +173,49 @@ pub(crate) fn do_mkdir(out: &mut impl Write, ops: &mut Ops, parent: &str, name: 
 }
 
 pub(crate) fn do_undo(out: &mut impl Write, ops: &mut Ops) {
+    if ops.running.is_some() { busy(out, "undo"); return; }
     match ops.journal.undo() {
         Ok(op) => writeln!(out, "{}", undone_line(&op, true)).ok(),
         Err(e) => writeln!(out, "{}", error_line(&e)).ok(),
     };
     out.flush().ok();
+}
+
+pub(crate) fn do_newfile(out: &mut impl Write, ops: &mut Ops, parent: &str, name: &str, id: usize) {
+    if ops.running.is_some() {
+        let request = format!(r#"{{"op":"newFile","id":{}}}"#, id);
+        writeln!(out, "{}", super::menu_actions::response(&request, Err("An operation is already running.".into()))).ok();
+        out.flush().ok();
+        return;
+    }
+    let result = super::menu_actions::create_file(Path::new(parent), name).map(|(path, identity)| {
+        ops.journal.push(Entry { op: "newfile".into(), steps: vec![super::undo::Step::MadeFile { path: path.clone(), identity }] });
+        format!(r#""path":"{}""#, crate::json::escape(&path.to_string_lossy()))
+    });
+    let request = format!(r#"{{"op":"newFile","id":{}}}"#, id);
+    writeln!(out, "{}", super::menu_actions::response(&request, result)).ok();
+    out.flush().ok();
+}
+
+pub(crate) fn start_redo(out: &mut impl Write, ops: &mut Ops) {
+    if ops.running.is_some() { busy(out, "redo"); return; }
+    let (op, n) = match ops.journal.redo_info() {
+        Ok(info) => info,
+        Err(error) => {
+            writeln!(out, "{}", error_line(&error)).ok();
+            out.flush().ok();
+            return;
+        }
+    };
+    let (id, cancel) = ops.claim();
+    let mut journal = std::mem::replace(&mut ops.journal, Journal::new());
+    writeln!(out, r#"{{"t":"redostarted","id":{},"n":{},"op":"{}"}}"#, id, n, crate::json::escape(&op)).ok();
+    out.flush().ok();
+    let tx = ops.tx.clone();
+    thread::spawn(move || {
+        let result = journal.redo(id, &cancel, &tx);
+        let _ = tx.send(OpMsg::RedoDone { journal, result });
+    });
 }
 
 // Every message an operation thread sends, written out and, when terminal, recorded in the journal.
@@ -188,6 +249,14 @@ pub(crate) fn report_op(out: &mut impl Write, ops: &mut Ops, msg: OpMsg) {
             } else {
                 writeln!(out, "{}", error_line(&op_err("duplicate", "", &err))).ok();
             }
+        }
+        OpMsg::RedoDone { journal, result } => {
+            ops.journal = journal;
+            ops.running = None;
+            match result {
+                Ok(op) => writeln!(out, r#"{{"t":"redone","op":"{}","ok":true}}"#, crate::json::escape(&op)).ok(),
+                Err(error) => writeln!(out, "{}", error_line(&error)).ok(),
+            };
         }
     }
     out.flush().ok();

@@ -24,23 +24,51 @@ pub struct Taildrop {
 
 impl Taildrop {
     pub fn new() -> Self {
-        Self { child: None, output: None, result: None, started: Instant::now(), peers: Vec::new(), error: String::new(), submenu: false, sending: None, sent: None }
+        Self {
+            child: None,
+            output: None,
+            result: None,
+            started: Instant::now(),
+            peers: Vec::new(),
+            error: String::new(),
+            submenu: false,
+            sending: None,
+            sent: None,
+        }
     }
     pub fn refresh(&mut self) {
-        if self.child.is_some() { return; }
+        if self.child.is_some() {
+            return;
+        }
         self.peers.clear();
         self.error.clear();
         self.result = None;
-        match Command::new("tailscale").args(["status", "--json"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() {
+        match Command::new("tailscale")
+            .args(["status", "--json"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
             Ok(mut child) => {
-                let Some(output) = child.stdout.take() else { self.error = "Taildrop status output unavailable".into(); return };
+                let Some(output) = child.stdout.take() else {
+                    self.error = "Taildrop status output unavailable".into();
+                    return;
+                };
                 let (tx, rx) = mpsc::channel();
                 std::thread::spawn(move || {
                     const MAX_STATUS_BYTES: u64 = 4 * 1024 * 1024;
                     let mut bytes = Vec::new();
-                    let result = output.take(MAX_STATUS_BYTES + 1).read_to_end(&mut bytes).and_then(|_| {
-                        if bytes.len() as u64 > MAX_STATUS_BYTES { Err(io::Error::other("Taildrop status exceeds its limit")) } else { Ok(bytes) }
-                    });
+                    let result = output
+                        .take(MAX_STATUS_BYTES + 1)
+                        .read_to_end(&mut bytes)
+                        .and_then(|_| {
+                            if bytes.len() as u64 > MAX_STATUS_BYTES {
+                                Err(io::Error::other("Taildrop status exceeds its limit"))
+                            } else {
+                                Ok(bytes)
+                            }
+                        });
                     let _ = tx.send(result);
                 });
                 self.child = Some(child);
@@ -50,13 +78,19 @@ impl Taildrop {
             Err(_) => self.error = "Taildrop unavailable: tailscale could not start".into(),
         }
     }
-    pub fn loading(&self) -> bool { self.child.is_some() }
+    pub fn loading(&self) -> bool {
+        self.child.is_some()
+    }
     pub fn poll(&mut self) {
         let Some(child) = &mut self.child else { return };
         if let Some(label) = &self.sending {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    self.sent = Some(if status.success() { Ok(format!("Sent to {}", label)) } else { Err(format!("Taildrop to {} failed ({})", label, status)) });
+                    self.sent = Some(if status.success() {
+                        Ok(format!("Sent to {}", label))
+                    } else {
+                        Err(format!("Taildrop to {} failed ({})", label, status))
+                    });
                     self.child = None;
                     self.sending = None;
                 }
@@ -89,25 +123,48 @@ impl Taildrop {
         let status = match child.try_wait() {
             Ok(Some(status)) => status,
             Ok(None) => return,
-            Err(_) => { self.error = "Taildrop status process could not be observed".into(); return; }
+            Err(_) => {
+                self.error = "Taildrop status process could not be observed".into();
+                return;
+            }
         };
-        let Some(result) = self.result.take() else { return };
+        let Some(result) = self.result.take() else {
+            return;
+        };
         self.child = None;
         self.output = None;
         match (status, result) {
-            (status, Ok(bytes)) if status.success() => match jsondoc::parse(&String::from_utf8_lossy(&bytes)) {
-                Ok(value) => self.peers = peers(&value),
-                Err(_) => self.error = "Taildrop status could not be read".into(),
-            },
+            (status, Ok(bytes)) if status.success() => {
+                match jsondoc::parse(&String::from_utf8_lossy(&bytes)) {
+                    Ok(value) => self.peers = peers(&value),
+                    Err(_) => self.error = "Taildrop status could not be read".into(),
+                }
+            }
             _ => self.error = "Taildrop status failed".into(),
         }
     }
     pub fn send(&mut self, peer: &Peer, paths: &[String]) -> io::Result<()> {
-        if self.child.is_some() { return Err(io::Error::other("Taildrop is already busy")); }
-        if paths.is_empty() || paths.iter().any(|path| !std::path::Path::new(path).is_absolute()) {
-            return Err(io::Error::other("Taildrop needs an absolute file selection"));
+        if self.child.is_some() {
+            return Err(io::Error::other("Taildrop is already busy"));
         }
-        self.child = Some(Command::new("omarchy-tailscale-send").arg(&peer.address).args(paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?);
+        if paths.is_empty()
+            || paths
+                .iter()
+                .any(|path| !std::path::Path::new(path).is_absolute())
+        {
+            return Err(io::Error::other(
+                "Taildrop needs an absolute file selection",
+            ));
+        }
+        self.child = Some(
+            Command::new("omarchy-tailscale-send")
+                .arg(&peer.address)
+                .args(paths)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?,
+        );
         self.sending = Some(peer.label.clone());
         self.sent = None;
         Ok(())
@@ -119,32 +176,75 @@ impl Drop for Taildrop {
         if let Some(mut child) = self.child.take() {
             if self.sending.is_some() {
                 // The OEM sender owns its notification and continues after the TUI closes.
-                std::thread::spawn(move || { let _ = child.wait(); });
-            } else { let _ = child.kill(); let _ = child.wait(); }
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            } else {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
     }
 }
 
-fn text<'a>(value: &'a Json, key: &str) -> &'a str { value.get(key).and_then(Json::as_str).unwrap_or("") }
+fn text<'a>(value: &'a Json, key: &str) -> &'a str {
+    value.get(key).and_then(Json::as_str).unwrap_or("")
+}
 // Sample input: {"Self":{"UserID":1},"Peer":{"node":{"Online":true,"TaildropTarget":1,"DNSName":"host.tail.ts.net."}}}.
 fn peers(value: &Json) -> Vec<Peer> {
     let owner = value.get("Self").and_then(|s| s.get("UserID"));
     let mut out = Vec::new();
     for (_, peer) in value.get("Peer").and_then(Json::as_object).unwrap_or(&[]) {
-        if peer.get("Online").and_then(Json::as_bool) != Some(true) { continue; }
+        if peer.get("Online").and_then(Json::as_bool) != Some(true) {
+            continue;
+        }
         let host = text(peer, "HostName");
         let dns = text(peer, "DNSName").trim_end_matches('.');
-        if [host, dns].iter().any(|s| s.to_lowercase().ends_with(".mullvad.ts.net")) { continue; }
-        let target = peer.get("TaildropTarget").and_then(Json::as_f64).unwrap_or(0.0);
+        if [host, dns]
+            .iter()
+            .any(|s| s.to_lowercase().ends_with(".mullvad.ts.net"))
+        {
+            continue;
+        }
+        let target = peer
+            .get("TaildropTarget")
+            .and_then(Json::as_f64)
+            .unwrap_or(0.0);
         if target != 0.0 {
-            if target != 1.0 { continue; }
-        } else if owner.is_none() || peer.get("UserID") != owner { continue; }
-        let address = if !dns.is_empty() { dns } else if !host.is_empty() { host } else {
-            peer.get("TailscaleIPs").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).find(|ip| ip.starts_with("100.")).unwrap_or("")
+            if target != 1.0 {
+                continue;
+            }
+        } else if owner.is_none() || peer.get("UserID") != owner {
+            continue;
+        }
+        let address = if !dns.is_empty() {
+            dns
+        } else if !host.is_empty() {
+            host
+        } else {
+            peer.get("TailscaleIPs")
+                .and_then(Json::as_array)
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(Json::as_str)
+                .find(|ip| ip.starts_with("100."))
+                .unwrap_or("")
         };
-        if address.is_empty() || address.starts_with('-') || address.chars().any(char::is_control) { continue; }
-        let label = if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") { host } else { dns.split('.').next().filter(|s| !s.is_empty()).unwrap_or(address) };
-        out.push(Peer { label: label.into(), address: address.into() });
+        if address.is_empty() || address.starts_with('-') || address.chars().any(char::is_control) {
+            continue;
+        }
+        let label = if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
+            host
+        } else {
+            dns.split('.')
+                .next()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(address)
+        };
+        out.push(Peer {
+            label: label.into(),
+            address: address.into(),
+        });
     }
     out.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
     out
@@ -157,7 +257,10 @@ mod tests {
     fn targets_match_oem_eligibility_and_refuse_option_names() {
         let value = jsondoc::parse(r#"{"Self":{"UserID":1},"Peer":{"a":{"Online":true,"UserID":1,"HostName":"alpha"},"b":{"Online":false,"TaildropTarget":1,"HostName":"offline"},"c":{"Online":true,"TaildropTarget":2,"HostName":"denied"},"d":{"Online":true,"TaildropTarget":1,"DNSName":"exit.mullvad.ts.net."},"e":{"Online":true,"TaildropTarget":1,"HostName":"--help"},"f":{"Online":true,"TaildropTarget":1,"HostName":"localhost","DNSName":"beta.tail.ts.net."}}}"#).unwrap();
         let found = peers(&value);
-        assert_eq!(found.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(), vec!["alpha", "beta"]);
+        assert_eq!(
+            found.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
         assert_eq!(found[1].address, "beta.tail.ts.net");
         assert!(peers(&Json::Null).is_empty());
     }

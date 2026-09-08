@@ -1,7 +1,7 @@
 mod actions;
 mod completion;
-mod empty;
 mod editor;
+mod empty;
 mod graphics;
 mod input;
 mod job;
@@ -11,8 +11,8 @@ mod model;
 mod pdf;
 mod preview;
 mod render;
-mod terminal;
 mod taildrop;
+mod terminal;
 mod theme;
 mod wire;
 
@@ -53,8 +53,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
         let mut graphics = graphics::Graphics::new();
         let mut thumbnail = PathBuf::new();
         let mut preview_generation = 0;
-        let mut last_message = String::new();
-        let mut message_at = std::time::Instant::now();
+        let mut menu_tracking = false;
         while !model.quit && !terminal.stopped() {
             while let Ok(event) = wire.events.try_recv() {
                 match event {
@@ -63,34 +62,49 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 }
             }
             preview::load(&mut model, false);
+            preview::poll(&mut model);
             preview::request(&mut model, &mut wire)?;
             preview::layout(&mut model);
             model.taildrop.poll();
             if let Some(result) = model.taildrop.sent.take() {
-                match result { Ok(message) => model.message = message, Err(error) => model.error = error }
+                match result {
+                    Ok(message) => model.say(message),
+                    Err(error) => model.error = error,
+                }
             }
-            if let Some(completion) = model.completer.poll() { model.completion = completion; }
-            if model.message != last_message {
-                last_message = model.message.clone();
-                message_at = std::time::Instant::now();
+            if let Some(completion) = model.completer.poll() {
+                model.completion = completion;
             }
             // Match StatusBar.messageMs while keeping the actionable undo receipt until dismissed.
             const MESSAGE_TIME: std::time::Duration = std::time::Duration::from_millis(4000);
-            if !model.message.contains("Undo available") && message_at.elapsed() >= MESSAGE_TIME { model.message.clear(); }
+            if !model.message.contains("Undo available") && model.message_at.elapsed() >= MESSAGE_TIME {
+                model.message.clear();
+            }
             let visible = (model.preview_visible || model.quicklook) && model.selected.len() < 2;
             let overlay = model.menu || model.sheet || model.editor.is_some();
+            if model.menu != menu_tracking {
+                menu_tracking = model.menu;
+                print!("{}", if menu_tracking { "\x1b[?1003h" } else { "\x1b[?1003l\x1b[?1002h" });
+                std::io::Write::flush(&mut std::io::stdout())?;
+            }
             let current = model.current_path();
-            let preview_allowed = model.preview_loaded
-                && current.as_ref() == Some(&model.preview_path);
-            let reserved = 7 + model.preview_metadata.len().min(3);
+            let preview_allowed =
+                model.preview_loaded && current.as_ref() == Some(&model.preview_path);
+            let reserved = 7 + model.preview_metadata.len().min(3)
+                + usize::from(model.rows.get(&model.cursor).is_some_and(|row| row.icon.contains("pdf")));
+            let (left, middle, right) = render::panes(size.0, model.preview_visible);
             let geometry = if model.quicklook {
-                (size.0.saturating_sub(2), size.1.saturating_sub(reserved), 2, 4)
+                (
+                    size.0.saturating_sub(2),
+                    size.1.saturating_sub(reserved),
+                    2,
+                    4,
+                )
             } else {
                 (
-                    size.0
-                        .saturating_sub(size.0 * 22 / 100 + size.0 * 40 / 100 + 2),
+                    right,
                     size.1.saturating_sub(reserved),
-                    size.0 * 22 / 100 + size.0 * 40 / 100 + 3,
+                    left + middle + 3,
                     4,
                 )
             };
@@ -133,7 +147,10 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             }
             if visible && preview_allowed {
                 if let Some(path) = current.clone() {
-                    if is_media && !overlay && model.player.is_none() && graphics_ready
+                    if is_media
+                        && !overlay
+                        && model.player.is_none()
+                        && graphics_ready
                         && model.preview_failed.as_ref() != Some(&path)
                     {
                         match media::Player::start(
@@ -187,11 +204,11 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                             } else {
                                 model.thumb_index = Some(model.cursor);
                                 wire.send(vec![
-                                ("c", wire::word("thumb")),
-                                (
-                                    "rows",
-                                    crate::jsondoc::Json::Arr(vec![wire::number(model.cursor)]),
-                                ),
+                                    ("c", wire::word("thumb")),
+                                    (
+                                        "rows",
+                                        crate::jsondoc::Json::Arr(vec![wire::number(model.cursor)]),
+                                    ),
                                 ])?;
                             }
                         }
@@ -199,7 +216,10 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 }
             } else {
                 if let Some(index) = model.thumb_index.take() {
-                    wire.send(vec![("c", wire::word("thumbcancel")), ("rows", crate::jsondoc::Json::Arr(vec![wire::number(index)]))])?;
+                    wire.send(vec![
+                        ("c", wire::word("thumbcancel")),
+                        ("rows", crate::jsondoc::Json::Arr(vec![wire::number(index)])),
+                    ])?;
                 }
                 graphics.clear();
                 model.image_file = None;

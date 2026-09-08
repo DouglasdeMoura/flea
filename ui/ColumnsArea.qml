@@ -119,6 +119,7 @@ Item {
 
     function askThumb() { active.restartSettle() }
     function loadSelection() { preview.loadSelection() }
+    function focusPreview() { if (preview.visible) preview.forceActiveFocus() }
 
     // "Kind=MPEG-4 video|Duration=1:12|...", so a test reads the preview column's own table.
     function factsLine() {

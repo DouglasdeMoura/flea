@@ -152,6 +152,19 @@ Singleton {
     // /usr/share/applications and this repo whole, and every further two buys under five points.
     readonly property int nameMinChars: 20
 
+    // DualPane specifies these slots at bodySmall 13; mark, gap and padding remain shared tokens.
+    readonly property QtObject dualColumn: QtObject {
+        readonly property real size: 70 * root.font.bodySmall / 13
+        readonly property real date: 125 * root.font.bodySmall / 13
+        readonly property real nameMin: 180 * root.font.bodySmall / 13
+    }
+
+    function dualColumns(width, hidden) {
+        return Columns.dualSet(width, {rowPaddingX: root.spacing.rowPaddingX, gap: root.spacing.gap,
+            iconSize: root.markSize, nameMin: root.dualColumn.nameMin,
+            size: root.dualColumn.size, date: root.dualColumn.date}, hidden)
+    }
+
     // The grid view's own two numbers. The canvas calls it a "48 px slot"; twice the list's own mark
     // slot is 46 at base-size 14, and the token wins over the mock, see the icon-language spec.
     readonly property QtObject grid: QtObject {

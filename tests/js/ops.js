@@ -175,6 +175,13 @@ function run(check) {
     check("a started transfer carries its id, its direction and its count",
           t.id + "/" + t.moving + "/" + t.n + "/" + t.running,
           "12/true/3/true")
+    var redo = Object.assign({}, t, { redo: "move" })
+    var redoSample = Transfer.sampled(redo, 1, "photo.heic", 50, 100)
+    var redoDone = Transfer.itemDone(redoSample, 1, "photo.heic")
+    check("redo progress keeps its operation identity through samples and completions",
+          Transfer.head(redoSample) + "/" + redoDone.redo + "/" + redoDone.done,
+          "Redoing move 2 of 3/move/2")
+    check("progress creates a new sample without changing the prior state", redo.index, 0)
 
     // Rename lives here with the other write operations. The editor opens only over a row the
     // client holds, and a commit reads the row before clearing the index, since clearing closes it.

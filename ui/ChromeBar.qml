@@ -15,6 +15,7 @@ Item {
     property bool canGoUp: false
     // "list", "columns" or "grid"; the button naming the current one takes the accent.
     property string viewMode: "list"
+    property bool showPath: true
     // Read by the path bar alone, so a Tab on a dotted leaf peeks the way the listing is set to look.
     property bool showHidden: false
 
@@ -203,7 +204,7 @@ Item {
         // pieces a click can land on.
         Text {
             anchors.fill: parent
-            visible: !root.editing && ViewState.addressBar === "path"
+            visible: !root.editing && root.showPath && ViewState.addressBar === "path"
             text: root.home && (root.path === root.home || root.path.indexOf(root.home + "/") === 0)
                   ? "~" + root.path.substring(root.home.length) : root.path
             color: Theme.color.foreground
@@ -217,7 +218,7 @@ Item {
 
         Item {
             id: crumbSlot
-            visible: !root.editing && ViewState.addressBar === "breadcrumb"
+            visible: !root.editing && root.showPath && ViewState.addressBar === "breadcrumb"
             anchors.fill: parent
             clip: true
 
@@ -385,7 +386,7 @@ Item {
         }
 
         Repeater {
-            model: ["list", "columns", "grid"]
+            model: ["list", "columns", "grid", "dual"]
             delegate: Flea.ChromeButton {
                 required property string modelData
                 glyph: modelData

@@ -2,6 +2,8 @@ import QtQuick
 import "." as Flea
 import "js/Facts.js" as Facts
 import "js/Thumbs.js" as Thumbs
+import "js/Keymap.js" as Keymap
+import "js/PreviewKeys.js" as PreviewKeys
 
 // Selection loading is independent of column visibility and the separate Quick Look overlay.
 Flea.PreviewColumn {
@@ -12,6 +14,27 @@ Flea.PreviewColumn {
     property string loadedIdentity: ""
     property int pendingToken: 0
     signal thumbsApplied(var work)
+
+    Keys.onPressed: function(event) {
+        var context = root.rowState === Facts.PDF ? "pdf"
+            : root.rowState === Facts.VIDEO || root.rowState === Facts.AUDIO ? "media" : "preview"
+        var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
+        if (action === "escape" || action === "focusPreview") root.pane.listArea.forceActiveFocus()
+        else if (action === "preview") {
+            var strip = root.mediaStripItem()
+            if (strip) strip.toggled()
+            else if (root.row && !root.row.d) root.pane.preview.open(root.path, root.row.i, root.row.s)
+        } else if (action === "seekBack" || action === "seekForward") {
+            var direction = action === "seekBack" ? -1 : 1
+            if (root.rowState === Facts.PDF) root.turnPage(direction)
+            else {
+                var transport = root.mediaStripItem()
+                if (transport) transport.seeked(root.mediaPosition() + direction * PreviewKeys.SEEK_MS)
+            }
+        } else if (action === "parent") root.turnPage(-1)
+        else if (action === "pageForward") root.turnPage(1)
+        event.accepted = true
+    }
 
     readonly property bool canRead: root.visible && root.pane !== null && !root.pane.listInFlight
     overlayOpen: root.pane && root.pane.preview ? root.pane.preview.active : false

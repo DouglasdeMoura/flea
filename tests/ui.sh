@@ -6269,12 +6269,12 @@ token_of() {
 # Mark geometry retains the board's fractional bodySmall * 1.45 size.
 assert_board_row() {
     local want_base="$1" row got
-    for row in "9|8|7|5|24|14|11.6" "10|9|8|5|26|16|13.05" "11|10|9|6|30|18|14.5" \
+    for row in "9|8|7|5|24|14|11.60" "10|9|8|5|26|16|13.05" "11|10|9|6|30|18|14.50" \
                "12|11|10|6|32|20|15.95" "14|13|12|7|37|23|18.85" "16|15|13|8|43|27|21.75" \
-               "20|18|17|10|52|32|26.1"; do
+               "20|18|17|10|52|32|26.10"; do
         IFS='|' read -r base body caption padding height icon mark <<< "$row"
         [[ "$base" == "$want_base" ]] || continue
-        got="$(token_of baseSize)|$(token_of bodySmall)|$(token_of caption)|$(token_of rowPaddingY)|$(token_of rowHeight)|$(token_of iconSize)|$(token_of markSize)"
+        got="$(token_of baseSize)|$(token_of bodySmall)|$(token_of caption)|$(token_of rowPaddingY)|$(token_of rowHeight)|$(token_of iconSize)|$(LC_NUMERIC=C printf '%.2f' "$(token_of markSize)")"
         printf 'SETTINGS stop=%s tokens=%s\n' "$base" "$got"
         [[ "$got" == "$base|$body|$caption|$padding|$height|$icon|$mark" ]] \
             || fail "settings: the ${base}px stop draws $got, and the board's table says $base|$body|$caption|$padding|$height|$icon|$mark"

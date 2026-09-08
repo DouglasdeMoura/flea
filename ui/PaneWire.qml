@@ -26,7 +26,7 @@ Item {
         y: root.pane ? root.pane.listSlot.y : 0
         width: root.pane ? root.pane.listSlot.width : 0
         height: root.pane ? root.pane.listSlot.height : 0
-        enabled: root.pane !== null && root.pane.viewMode === "list" && root.pane.searchMode === ""
+        enabled: root.pane !== null && !root.pane.trash.opened && root.pane.viewMode === "list" && root.pane.searchMode === ""
         pane: root.pane
         dest: root.pane ? root.pane.path : ""
         // Unknown until the listed reply lands, because dirDev is still the directory being left.
@@ -46,7 +46,7 @@ Item {
     // open: an editor, the menu over a row, a filter being typed, a search listing, a selection whose
     // indices would name other files afterwards, and a list already in flight.
     readonly property bool watchBusy: !pane || pane.listInFlight || pane.renamingIndex >= 0
-            || pane.menuVisible || pane.filterTyping || pane.searchMode.length > 0
+            || pane.menuVisible || pane.menuActions.opened || pane.filterTyping || pane.searchMode.length > 0
             || pane.selectionCount() > 0
     // ui/Pane.qml reaches the three through these: openCursor takes the opener, the menu reads the
     // Taildrop peers, and the two share actions call the other two.
@@ -298,6 +298,19 @@ Item {
             pane.refresh("")
         }
 
+        function onRedoStarted(id, n, op) {
+            var next = Ops.started(id, false, n)
+            next.redo = op
+            pane.transfer = next
+            pane.sticky(Ops.progressLine(next))
+        }
+        function onRedone(op, ok) {
+            pane.transfer = Ops.emptyTransfer()
+            pane.sticky("")
+            pane.message("Redid the " + op + Ops.UNDO_HINT, false)
+            pane.refresh("")
+        }
+
         // A success nobody could check must not read as one that was checked, so the unverified
         // extract says so in the same slot rather than in a dialog.
         function onArchiveDone(id, ok, verified, err) {
@@ -327,6 +340,7 @@ Item {
             // A listing that failed cannot seat the row a peeked right click asked for, so its menu intent dies here.
             pane.pendingMenu = false
             var text = Errors.sentence(where, message)
+            if (where === "redo") { pane.transfer = Ops.emptyTransfer(); pane.sticky("") }
             // A refused sort changes nothing in the backend, so it changes nothing here: a notice in the
             // plain role, never the error role, which is for a listing that stopped being true.
             if (where === "sort") {

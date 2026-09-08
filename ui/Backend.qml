@@ -10,6 +10,10 @@ Item {
     // the dropped-on folder's own to tell a move within one volume from a copy across two.
     property var dirDev: 0
     signal rows(int start, var items, real ms, var kinds)
+    property real firstRowsAt: 0
+    onRows: function(start, items, ms, kinds) {
+        if (root.firstRowsAt === 0 && items.length > 0) root.firstRowsAt = Date.now()
+    }
     // mode rides only on a denied listing, the one failure a pane draws more than a sentence for.
     signal failed(string where, string input, string message, int mode)
     signal thumbed(int row, string file)
@@ -29,6 +33,9 @@ Item {
     signal paths(var list)
     signal trashResult(var message)
     signal permissionsResult(var message)
+    signal menuResult(var message)
+    signal redone(string op, bool ok)
+    signal redoStarted(int id, int n, string op)
     signal metaResult(var message)
     property int metaToken: 0
     signal meta(int row, int w, int h, real durationMs, int sampleRate, int entries, real unpacked, bool archiveFailed, var names, real lines, bool partial, bool linesFailed, string target, bool targetDir, string owner)
@@ -50,6 +57,7 @@ Item {
     // The compress submenu is exactly this list, so a box with no 7zip never shows .7z.
     property var archiveFormats: []
     property bool canConvert: false
+    property var extraction: ({archive: false, sevenZip: false})
 
     readonly property bool running: child.running
 
@@ -58,6 +66,16 @@ Item {
     // ui/js/Sort.js records here because it is the one place that knows which keys are accepted.
     property string sortBy: "name"
     property bool sortDesc: false
+    property bool preserveSort: false
+    property bool hasListed: false
+    readonly property string sortPreference: JSON.stringify(ViewState.state.sort || {})
+    onSortPreferenceChanged: root.resetSort()
+
+    function resetSort() {
+        root.sortBy = (ViewState.state.sort || {}).key || "name"
+        if (root.sortBy === "date") root.sortBy = "mtime"
+        root.sortDesc = (ViewState.state.sort || {}).reverse === true
+    }
 
     // What the settle gate asserts: how many thumb requests this process has attempted; see AGENTS.md.
     property int thumbRequests: 0
@@ -92,9 +110,8 @@ Item {
         root.listRequests += 1
         // A fresh scan is always name ascending, so every refresh after a write operation puts the
         // header's mark back rather than leaving it describing the order before the refresh.
-        root.sortBy = (ViewState.state.sort || {}).key || "name"
-        if (root.sortBy === "date") root.sortBy = "mtime"
-        root.sortDesc = (ViewState.state.sort || {}).reverse === true
+        if (!root.preserveSort || !root.hasListed) root.resetSort()
+        root.hasListed = true
         root.send({ c: "list", path: path, first: first, hidden: hidden,
                     by: root.sortBy, desc: root.sortDesc,
                     foldersFirst: ViewState.state.foldersFirst !== false,
@@ -165,6 +182,8 @@ Item {
     function undo() {
         root.send({ c: "undo" })
     }
+
+    function redo() { root.send({ c: "redo" }) }
 
     // Resolves indices to absolute paths, so a clipboard can hold a selection wider than the window.
     function askPaths(rows) {
@@ -311,12 +330,18 @@ Item {
             root.duplicated(message.ok, message.path)
         } else if (message.t === "undone") {
             root.undone(message.op, message.ok)
+        } else if (message.t === "redone") {
+            root.redone(message.op, message.ok)
+        } else if (message.t === "redostarted") {
+            root.redoStarted(message.id, message.n, message.op)
         } else if (message.t === "paths") {
             root.paths(message.paths || [])
         } else if (message.t === "trashbrowse") {
             root.trashResult(message)
         } else if (message.t === "permissions") {
             root.permissionsResult(message)
+        } else if (message.t === "menuaction") {
+            root.menuResult(message)
         } else if (message.t === "meta") {
             root.metaResult(message)
             root.meta(message.row, message.w, message.h, message.ms, message.rate, message.entries, message.unpacked, message.afailed, message.names, message.lines, message.partial, message.lfailed === true, message.target, message.targetdir, message.owner || "")
@@ -329,6 +354,7 @@ Item {
         } else if (message.t === "formats") {
             root.archiveFormats = message.archive || []
             root.canConvert = message.convert === true
+            root.extraction = message.extract || ({archive: false, sevenZip: false})
         } else if (message.t === "archivestarted") {
             root.archiveStarted(message.id)
         } else if (message.t === "archivedone") {

@@ -1,5 +1,14 @@
 .pragma library
 
+function location(original, home) {
+    var cut = String(original).lastIndexOf("/")
+    if (cut < 0) return "Unknown"
+    var folder = cut === 0 ? "/" : original.slice(0, cut)
+    if (home && (folder === home || folder.indexOf(home + "/") === 0))
+        return "~" + folder.slice(home.length)
+    return folder
+}
+
 // Sample input, GIO trash::deletion-date: "2026-09-08T10:00:00" in local time.
 function deleted(text, nowMs) {
     var date = new Date(text)

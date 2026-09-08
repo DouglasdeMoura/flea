@@ -160,7 +160,7 @@ fn a_link_to_a_folder_lands_inside_that_folder_as_a_link_while_the_folder_itself
     let landed = out.join("link");
     assert!(landed.symlink_metadata().unwrap().file_type().is_symlink(), "what landed is a link, not a copy of the tree");
     assert_eq!(std::fs::read_link(&landed).unwrap(), real, "and it still points where the source pointed");
-    assert_eq!(entry.steps, vec![Step::Created { path: landed.clone() }]);
+    assert_eq!(entry.steps, vec![undo::copied(&link, &landed, ItemIdentity::inspect(&link).unwrap()).unwrap()]);
     let (tx, rx) = channel();
     run_transfer(2, false, vec![real.to_string_lossy().to_string()], out.clone(), Arc::new(AtomicBool::new(false)), tx);
     assert_eq!(refusal(rx).3, INTO_ITSELF, "the real folder into its own subtree is still refused");
@@ -183,7 +183,7 @@ fn a_copy_transfer_records_only_what_it_created_and_leaves_the_sources() {
     let (ok, failed, _, _, entry) = done_line(rx);
     assert_eq!((ok, failed), (1, 0));
     assert_eq!(entry.op, "copy");
-    assert_eq!(entry.steps, vec![Step::Created { path: dest.join("a.txt") }]);
+    assert_eq!(entry.steps, vec![undo::copied(&src, &dest.join("a.txt"), ItemIdentity::inspect(&src).unwrap()).unwrap()]);
 }
 
 #[test]
@@ -196,7 +196,8 @@ fn a_move_transfer_records_where_each_item_came_from() {
     assert!(!src.exists(), "a move leaves nothing at the source");
     let (_, _, _, _, entry) = done_line(rx);
     assert_eq!(entry.op, "move");
-    assert_eq!(entry.steps, vec![Step::Moved { from: src, to: dest.join("b.txt") }]);
+    assert!(matches!(&entry.steps[..], [Step::Moved { from, to, after, .. }]
+        if from == &src && to == &dest.join("b.txt") && after == &ItemIdentity::inspect(to).unwrap()));
 }
 
 #[test]
@@ -245,7 +246,7 @@ fn a_copy_that_fails_short_of_a_cancel_records_the_partial_tree_and_undo_removes
     assert_eq!((ok, failed, cancelled), (0, 1, false));
     let partial = dest.join("tree");
     assert!(partial.is_dir(), "a failure that is not a cancel leaves what it copied");
-    assert_eq!(entry.steps, vec![Step::Created { path: partial.clone() }], "the partial tree is journaled");
+    assert_eq!(entry.steps, vec![undo::copied(&src, &partial, ItemIdentity::inspect(&src).unwrap()).unwrap()], "the partial tree is journaled");
     let mut j = Journal::new();
     j.push(entry);
     assert_eq!(j.undo().expect("undo"), "copy");

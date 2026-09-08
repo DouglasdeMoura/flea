@@ -31,7 +31,7 @@ ShellRoot {
                 rendererFallbackStarted = true
                 Quickshell.execDetached(retry)
             }
-            backend.quit()
+            view.quitBackends()
         }
 
         // Null while this loads and the QQuickWindow once it exists, which is before the scene graph starts.
@@ -43,8 +43,8 @@ ShellRoot {
         // Quickshell 0.3.1 has no exit API and Qt.quit() is a no-op, so the shell signals itself.
         // The backend is told first and answers when it has drained: a quit cancels the operation in
         // flight, and a cancelled copy removes its own partial, so closing never leaves a half file.
-        Connections { target: Quickshell; function onLastWindowClosed() { backend.quit() } }
-        Connections { target: backend; function onQuitReady() { Quickshell.execDetached(["kill", String(Quickshell.processId)]) } }
+        Connections { target: Quickshell; function onLastWindowClosed() { view.quitBackends() } }
+        Connections { target: backend; function onQuitReady() { view.backendDrained(0) } }
 
         // Issue 9's chords, aliased by keys.toml onto the Display section's own text size. The
         // panel writes ui/ViewState.qml directly and shows the value in the row; a chord has no
@@ -54,7 +54,7 @@ ShellRoot {
                 ViewState.followTextSize()
             else
                 ViewState.stepTextSize(direction)
-            pane.message(TextSize.announce(ViewState.textSize, ViewState.omarchyBase), false)
+            view.currentPane.message(TextSize.announce(ViewState.textSize, ViewState.omarchyBase), false)
         }
 
         // Every *Centre reader on the IPC seam is this: an item's painted box, reduced to the point a test clicks.
@@ -83,16 +83,45 @@ ShellRoot {
             id: view
             anchors.fill: parent
             color: Theme.color.background
+            readonly property bool dualMode: ViewState.state.view === "dual"
+            property int focusSide: (ViewState.state.dual || {}).focus === 1 ? 1 : 0
+            readonly property var currentPane: dualMode && focusSide === 1 && secondPane.item ? secondPane.item.pane : primaryPane
+            property bool initialized: false
+            property bool closing: false
+            property var drained: [false, false]
+
+            function focusPane(side) {
+                if (!dualMode) return
+                focusSide = side
+                ViewState.changeLeaf("dual", {focus: side})
+                currentPane.forceActiveFocus()
+            }
+            function rememberPaths() {
+                if (!initialized || !dualMode || !secondPane.item || !primaryPane.path || !secondPane.item.pane.path) return
+                ViewState.changeLeaf("dual", {paths: [primaryPane.path, secondPane.item.pane.path]})
+            }
+            function quitBackends() {
+                if (closing) return
+                closing = true
+                drained = [false, secondPane.item === null]
+                backend.quit()
+                if (secondPane.item) secondPane.item.backend.quit()
+            }
+            function backendDrained(side) {
+                var next = drained.slice()
+                next[side] = true
+                drained = next
+                if (closing && drained[0] && drained[1]) Quickshell.execDetached(["kill", String(Quickshell.processId)])
+            }
+            onDualModeChanged: {
+                if (!initialized) return
+                if (!dualMode) { focusSide = 0; primaryPane.forceActiveFocus() }
+                else if (initialized) { focusPane(focusSide); rememberPaths() }
+            }
 
             Backend {
                 id: backend
-
-                // The warm product path ends when rows first reach the UI, and only this side can see that; see AGENTS.md "Testing".
-                property real firstRowsAt: 0
-                onRows: function (start, items, ms) {
-                    if (backend.firstRowsAt === 0 && items.length > 0)
-                        backend.firstRowsAt = Date.now()
-                }
+                preserveSort: view.dualMode
             }
 
             // The canvas's own top chrome: where you are on the left, how you are looking at it on
@@ -102,32 +131,33 @@ ShellRoot {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                path: pane.path
-                home: pane.home
-                canGoBack: pane.canGoBack
-                canGoUp: pane.canGoUp
-                viewMode: pane.viewMode
-                showHidden: pane.showHidden
-                onBackRequested: pane.goBack()
-                onUpRequested: pane.openParent()
-                onSearchRequested: pane.act("search")
-                onViewChosen: function (mode) { pane.viewMode = mode }
-                // The path bar's four. The pane navigates and answers for the keyboard exactly as it
+                path: view.currentPane.trash.opened ? "Trash" : view.currentPane.path
+                home: view.currentPane.home
+                canGoBack: view.currentPane.canGoBack
+                canGoUp: view.currentPane.canGoUp
+                viewMode: view.dualMode ? "dual" : view.currentPane.viewMode
+                showPath: !view.dualMode
+                showHidden: view.currentPane.showHidden
+                onBackRequested: view.currentPane.goBack()
+                onUpRequested: view.currentPane.openParent()
+                onSearchRequested: view.currentPane.act("search")
+                onViewChosen: function (mode) { ViewState.changeKey("view", mode) }
+                // The path bar's four. The primaryPane navigates and answers for the keyboard exactly as it
                 // does for every other route in, so a path typed and a row opened end the same way.
-                onPathEntered: function (path) { pane.open(path) }
-                onEditClosed: pane.forceActiveFocus()
+                onPathEntered: function (path) { view.currentPane.open(path) }
+                onEditClosed: view.currentPane.forceActiveFocus()
                 // Tab reads the directory with the same peek the columns view makes of an ancestor,
                 // so completion adds no request type and lands in that view's own cache on the way past.
-                onCompleteRequested: function (dir, hidden) { backend.peek(dir, pane.windowSize, hidden) }
+                onCompleteRequested: function (dir, hidden) { view.currentPane.backend.peek(dir, view.currentPane.windowSize, hidden) }
                 onSaid: function (text) { bar.say(text, false) }
-                onSettingsRequested: settingsPanel.open(pane)
+                onSettingsRequested: settingsPanel.open(view.currentPane)
             }
 
             // The peek behind Tab. Every peeked line carries the directory and the hidden flag it
             // answers for, so the bar takes the reply to its own request and the columns view, which
-            // peeks the same wire for the pane's ancestors, goes on taking its own.
+            // peeks the same wire for the primaryPane's ancestors, goes on taking its own.
             Connections {
-                target: backend
+                target: view.currentPane.backend
                 function onPeeked(path, hidden, total, rows, readFailed, mode) { chrome.completeWith(path, hidden, rows) }
             }
 
@@ -136,55 +166,34 @@ ShellRoot {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: chrome.bottom
-                pane: pane
-            }
-
-            // The mark over the list area alone (the middle column in the columns view), declared before
-            // the pane so it paints under the pane's context menu and over this Rectangle's ground: a
-            // negative z put it under that ground and hid it. listArea is pane-relative, so pane.y is added.
-            Flea.EmptyState {
-                id: emptyState
-                // listSlot, not listArea: a lazy view's item sits at its Loader's local origin, and only the slot carries the sidebar and filter offsets.
-                x: pane.listSlot.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
-                y: pane.y + pane.listSlot.y
-                width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listSlot.width
-                height: pane.listSlot.height
-                visible: pane.listingState === "empty"
-                // The design's no-match answer: the search mark over the query it could not find.
-                caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery : ""
-                mark: "search"
-                // A search that found nothing keeps its own way out, because that sentence is the
-                // state's answer and not an advertisement. The empty directory's next move is a
-                // shortcut, so it draws only with the Menus section's hints row on.
-                hint: pane.searchMode === "results" ? "Press Escape to clear."
-                    : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""
-            }
-
-            // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.
-            Flea.LoadingState {
-                x: pane.listSlot.x
-                y: pane.y + pane.listSlot.y
-                width: pane.listSlot.width
-                height: pane.listSlot.height
-                visible: pane.listingState === "loading"
+                pane: view.currentPane
             }
 
             Flea.Pane {
-                id: pane
+                id: primaryPane
                 anchors.left: parent.left
-                anchors.right: parent.right
+                width: view.dualMode ? sidebarWidth + (view.width - sidebarWidth - Theme.spacing.hairline) / 2 : view.width
                 anchors.top: tabBar.bottom
                 anchors.bottom: bar.top
                 backend: backend
+                dualMode: view.dualMode
+                paneFocused: view.currentPane === primaryPane
+                railPane: view.currentPane
+                onFocusRequested: view.focusPane(0)
+                onSwitchPane: view.focusPane(1)
+                onPathChanged: view.rememberPaths()
+                onClipboardChanged: if (secondPane.item && secondPane.item.pane.clipboard !== clipboard) secondPane.item.pane.clipboard = clipboard
+                overlayParent: view
                 preview: preview
                 shareBrowser: shareBrowser
                 keymapSheet: keymapSheet
                 settingsPanel: settingsPanel
                 onMessage: function (text, isError) { bar.say(text, isError) }
+                onOperationResult: function (headline, detail, isError) { bar.say(headline, isError, detail) }
                 // A running operation's line, which stands until the operation replaces it; see ui/StatusBar.qml.
-                onSticky: function (text) { bar.sticky = text; bar.transfer = pane.transfer }
-                onConvertRequested: function (name) { convertDialog.open(name, pane) }
-                onPermissionsRequested: function (path) { permissionsDialog.open(path, pane) }
+                onSticky: function (text) { bar.sticky = text; bar.transfer = primaryPane.transfer; bar.transferOwner = primaryPane }
+                onConvertRequested: function (name) { convertDialog.open(name, primaryPane) }
+                onPermissionsRequested: function (path) { permissionsDialog.open(path, primaryPane) }
                 onPathBarRequested: chrome.startEdit()
                 // Issue 9. ViewState persists the stop and Theme derives its own tokens from it, so
                 // the whole window follows without any surface reading the chord itself.
@@ -192,28 +201,100 @@ ShellRoot {
                 onOpened: function (path) { shareBrowser.close() }
             }
 
+            Loader {
+                id: secondPane
+                anchors { left: primaryPane.right; right: parent.right; top: tabBar.bottom; bottom: bar.top }
+                anchors.leftMargin: Theme.spacing.hairline
+                property bool built: false
+                active: view.dualMode || built
+                visible: view.dualMode
+                sourceComponent: Item {
+                    readonly property alias pane: otherPane
+                    readonly property alias backend: otherBackend
+                    Backend {
+                        id: otherBackend
+                        preserveSort: true
+                        onQuitReady: view.backendDrained(1)
+                    }
+                    Flea.Pane {
+                        id: otherPane
+                        anchors.fill: parent
+                        backend: otherBackend
+                        sharedSidebar: primaryPane.sidebar
+                        dualMode: true
+                        listOnly: true
+                        paneFocused: view.currentPane === otherPane
+                        overlayParent: view
+                        preview: preview
+                        shareBrowser: shareBrowser
+                        keymapSheet: keymapSheet
+                        settingsPanel: settingsPanel
+                        onFocusRequested: view.focusPane(1)
+                        onSwitchPane: view.focusPane(0)
+                        onPathChanged: view.rememberPaths()
+                        onClipboardChanged: if (primaryPane.clipboard !== clipboard) primaryPane.clipboard = clipboard
+                        onMessage: function(text, error) { bar.say(text, error) }
+                        onOperationResult: function(headline, detail, error) { bar.say(headline, error, detail) }
+                        onSticky: function(text) { bar.sticky = text; bar.transfer = otherPane.transfer; bar.transferOwner = otherPane }
+                        onConvertRequested: function(name) { convertDialog.open(name, otherPane) }
+                        onPermissionsRequested: function(path) { permissionsDialog.open(path, otherPane) }
+                        onPathBarRequested: chrome.startEdit()
+                        onTextSizeRequested: function(direction) { fleaWindow.applyTextSize(direction) }
+                        onOpened: shareBrowser.close()
+                    }
+                }
+                onLoaded: {
+                    built = true
+                    var paths = (ViewState.state.dual || {}).paths || []
+                    item.pane.clipboard = primaryPane.clipboard
+                    item.pane.open(paths.length === 2 ? paths[1] : primaryPane.path || primaryPane.home)
+                    if (view.initialized && view.dualMode) view.focusPane(view.focusSide)
+                }
+            }
+
+            Rectangle {
+                x: primaryPane.width
+                y: primaryPane.y
+                width: Theme.spacing.hairline
+                height: primaryPane.height
+                visible: view.dualMode
+                color: Theme.color.muted
+            }
+
             Flea.StatusBar {
                 id: bar
+                property var transferOwner: primaryPane
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                path: pane.path
-                total: pane.total
-                cursorIndex: pane.cursorIndex
-                listingState: pane.listingState
-                selectionCount: pane.selectionCount()
-                fsName: pane.fsName
-                fsFree: pane.fsFree
-                searchRunning: pane.searchRunning
-                searchLine: pane.searchMode === "results"
-                            ? Search.statusLine(pane.searchRunning, pane.total, pane.searchScanned, pane.searchMs)
+                path: view.currentPane.trash.opened ? "Trash" : view.currentPane.path
+                total: view.currentPane.trash.opened ? view.currentPane.trash.total : view.currentPane.total
+                cursorIndex: view.currentPane.cursorIndex
+                listingState: view.currentPane.listingState
+                selectionCount: view.currentPane.trash.opened ? view.currentPane.trash.selectedCount : view.currentPane.selectionCount()
+                fsName: view.currentPane.fsName
+                fsFree: view.currentPane.fsFree
+                searchRunning: view.currentPane.searchRunning
+                searchLine: view.currentPane.searchMode === "results"
+                            ? Search.statusLine(view.currentPane.searchRunning, view.currentPane.total, view.currentPane.searchScanned, view.currentPane.searchMs)
                             : ""
-                searchKeys: Search.statusKeys(pane.searchRunning)
-                onTransferCancelRequested: function (id) { backend.transfercancel(id) }
-                onUndoRequested: backend.undo()
+                searchKeys: Search.statusKeys(view.currentPane.searchRunning)
+                onTransferCancelRequested: function (id) {
+                    bar.transferOwner.backend.transfercancel(id)
+                }
+                onUndoRequested: view.currentPane.backend.undo()
             }
 
-            Flea.Preview { id: preview; pane: pane }
+            Flea.Preview { id: preview; pane: view.currentPane }
+
+            MouseArea {
+                anchors.fill: parent
+                z: 4
+                visible: primaryPane.trash.confirming || (secondPane.item && secondPane.item.pane.trash.confirming)
+                hoverEnabled: true
+                acceptedButtons: Qt.AllButtons
+                onWheel: function(wheel) { wheel.accepted = true }
+            }
 
             // Every overlay below is built by its first open and kept, see AGENTS.md rule 6: a launch
             // that never opens one pays neither its compile nor its objects. Each Loader carries the
@@ -227,11 +308,12 @@ ShellRoot {
                 active: false
                 source: "ConvertDialog.qml"
                 readonly property bool opened: item !== null && item.opened
-                function open(name, holder) { active = true; item.open(name, holder) }
+                property var owner: null
+                function open(name, holder) { owner = holder; active = true; item.open(name, holder) }
             }
             Connections {
                 target: convertDialog.item
-                function onAccepted(format, strip) { Ops.convert(pane, format, strip) }
+                function onAccepted(format, strip) { Ops.convert(convertDialog.owner, format, strip) }
             }
 
             Loader {
@@ -241,15 +323,16 @@ ShellRoot {
                 active: false
                 source: "PermissionsDialog.qml"
                 readonly property bool opened: item !== null && item.opened
-                function open(path, holder) { active = true; item.open(path, holder) }
+                property var owner: null
+                function open(path, holder) { owner = holder; active = true; item.open(path, holder) }
             }
             Connections {
                 target: permissionsDialog.item
-                function onRequested(message) { backend.send(message) }
-                function onChanged() { pane.refresh(); bar.say("Permissions changed.", false) }
+                function onRequested(message) { permissionsDialog.owner.backend.send(message) }
+                function onChanged() { permissionsDialog.owner.refresh(); bar.say("Permissions changed.", false) }
             }
             Connections {
-                target: backend
+                target: permissionsDialog.owner ? permissionsDialog.owner.backend : null
                 function onPermissionsResult(message) {
                     if (permissionsDialog.item) permissionsDialog.item.receive(message)
                 }
@@ -295,13 +378,13 @@ ShellRoot {
             Connections {
                 target: networkDialog.item
                 // FocusScope remembers its own last-focused child, list or rail, and restores it.
-                function onClosed() { pane.forceActiveFocus() }
-                function onSaved() { pane.sidebar.reloadBookmarks() }
-                function onMountRequested(uri, label, password) { pane.sidebar.saveNetwork(uri, label, password) }
+                function onClosed() { view.currentPane.forceActiveFocus() }
+                function onSaved() { view.currentPane.sidebar.reloadBookmarks() }
+                function onMountRequested(uri, label, password) { view.currentPane.sidebar.saveNetwork(uri, label, password) }
             }
 
             Connections {
-                target: pane.sidebar
+                target: view.currentPane.sidebar
                 function onAddRequested() { networkDialog.open() }
                 function onSharesListed(baseUri, baseLabel, names) { shareBrowser.open(baseUri, baseLabel, names) }
                 function onNetworkRetryRequested(uri, label, password, reason, failedConnect) {
@@ -313,10 +396,10 @@ ShellRoot {
             // An Item fronts this Loader because its callers read active, which is a Loader's own load switch.
             Item {
                 id: shareBrowser
-                x: pane.listSlot.x
-                y: pane.y + pane.listSlot.y
-                width: pane.listSlot.width
-                height: pane.listSlot.height
+                x: view.currentPane.mapToItem(view, view.currentPane.listSlot.x, 0).x
+                y: view.currentPane.y + view.currentPane.listSlot.y
+                width: view.currentPane.listSlot.width
+                height: view.currentPane.listSlot.height
                 readonly property bool active: shareLoader.item !== null && shareLoader.item.active
                 function open(uri, label, names) { shareLoader.active = true; shareLoader.item.open(uri, label, names) }
                 function close() { if (shareLoader.item) shareLoader.item.close() }
@@ -327,8 +410,8 @@ ShellRoot {
             }
             Connections {
                 target: shareLoader.item
-                function onClosed() { pane.forceActiveFocus() }
-                function onActivated(uri, label) { pane.sidebar.mountShare(uri, label) }
+                function onClosed() { view.currentPane.forceActiveFocus() }
+                function onActivated(uri, label) { view.currentPane.sidebar.mountShare(uri, label) }
             }
 
             // Issue 20: the mouse's own back button, taken by the window because no row is being
@@ -339,19 +422,23 @@ ShellRoot {
             TapHandler {
                 acceptedButtons: Qt.BackButton
                 onTapped: {
-                    if (chrome.editing || convertDialog.opened || permissionsDialog.opened || keymapSheet.opened
+                    if (view.currentPane.menuActions.opened || settingsPanel.opened || view.currentPane.trash.confirming || chrome.editing || convertDialog.opened || permissionsDialog.opened || keymapSheet.opened
                             || networkDialog.opened || shareBrowser.active || preview.active
-                            || pane.renameEditor() !== null || pane.sidebar.renameEditor() !== null)
+                            || view.currentPane.renameEditor() !== null || view.currentPane.sidebar.renameEditor() !== null)
                         return
-                    Nav.mouseBack(pane)
+                    if (view.currentPane.trash.opened) view.currentPane.trash.close()
+                    else Nav.mouseBack(view.currentPane)
                 }
             }
 
             Component.onCompleted: {
                 var start = Quickshell.env("FLEA_PATH") || Quickshell.env("HOME")
                 // Read once: Pane.applyPendingSelect() forgets it after the first rows response.
-                pane.pendingSelect = Quickshell.env("FLEA_SELECT") || ""
-                pane.open(start)
+                var paths = (ViewState.state.dual || {}).paths || []
+                primaryPane.pendingSelect = Quickshell.env("FLEA_SELECT") || ""
+                primaryPane.open(view.dualMode && paths.length === 2 ? paths[0] : start)
+                view.initialized = true
+                if (view.dualMode) view.focusPane(view.focusSide)
             }
         }
     }
@@ -359,9 +446,9 @@ ShellRoot {
     // The seam the tests drive, see AGENTS.md "Testing". Every reader lives in ui/Ipc.qml.
     Flea.Ipc {
         fleaWindow: fleaWindow
-        pane: pane
+        pane: view.currentPane
         bar: bar
-        backend: backend
+        backend: view.currentPane.backend
         chrome: chrome
         tabBar: tabBar
         convertDialog: convertDialog.item
@@ -369,6 +456,6 @@ ShellRoot {
         settingsPanel: settingsPanel.item
         networkDialog: networkDialog.item
         shareBrowser: shareLoader.item
-        emptyState: emptyState
+        emptyState: view.currentPane.emptyState
     }
 }

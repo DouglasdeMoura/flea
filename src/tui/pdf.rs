@@ -141,11 +141,11 @@ impl Pdf {
             self.refresh();
         }
     }
-    fn prefix(&self) -> String {
+    pub fn prefix(&self) -> String {
         format!("Page {} / {} · {}%  ", self.page, if self.pages == 0 { "?".into() } else { self.pages.to_string() }, self.zoom)
     }
     pub fn control_at(&self, cell: usize, quicklook: bool) -> Option<usize> {
-        let mut x = super::render::text_width(&self.prefix());
+        let mut x = 0;
         for index in 0..if quicklook { 6 } else { 5 } {
             let width = if index == self.control { 3 } else { 1 };
             if cell >= x && cell < x + width { return Some(index); }
@@ -168,7 +168,7 @@ impl Pdf {
             })
             .collect::<Vec<_>>()
             .join("  ");
-        format!("{}{}", self.prefix(), buttons)
+        buttons
     }
 }
 // Sample input: Pages:           12

@@ -62,6 +62,7 @@ pub struct Model {
     pub tab: usize,
     pub error: String,
     pub message: String,
+    pub message_at: std::time::Instant,
     pub search: String,
     pub searching: bool,
     pub search_from: Option<PathBuf>,
@@ -73,6 +74,7 @@ pub struct Model {
     pub preview: Vec<String>,
     pub preview_display: Vec<String>,
     pub preview_body: String,
+    pub preview_reader: super::preview::Reader,
     pub preview_metadata: Vec<String>,
     pub preview_line_count: usize,
     pub preview_layout_scroll: usize,
@@ -86,8 +88,11 @@ pub struct Model {
     pub preview_focus: bool,
     pub quicklook: bool,
     pub sheet: bool,
+    pub properties: Option<Vec<String>>,
+    pub action_id: usize,
     pub menu: bool,
     pub menu_cursor: usize,
+    pub menu_top: usize,
     pub editor: Option<super::editor::Editor>,
     pub preset: String,
     pub player: Option<super::media::Player>,
@@ -158,6 +163,7 @@ impl Model {
             tab: 0,
             error: String::new(),
             message: String::new(),
+            message_at: std::time::Instant::now(),
             search: String::new(),
             searching: false,
             search_from: None,
@@ -169,6 +175,7 @@ impl Model {
             preview: Vec::new(),
             preview_display: Vec::new(),
             preview_body: String::new(),
+            preview_reader: super::preview::Reader::default(),
             preview_metadata: Vec::new(),
             preview_line_count: 0,
             preview_layout_scroll: 0,
@@ -185,8 +192,11 @@ impl Model {
             preview_focus: false,
             quicklook: false,
             sheet: false,
+            properties: None,
+            action_id: 0,
             menu: false,
             menu_cursor: 0,
+            menu_top: 0,
             editor: None,
             preset: match text(settings, "keys") {
                 "vim" => "vim",
@@ -277,6 +287,19 @@ impl Model {
     pub fn current_path(&self) -> Option<PathBuf> {
         self.rows.get(&self.cursor).map(|row| self.row_path(row))
     }
+    pub fn menu_enabled(&self, index: usize) -> bool {
+        if self.taildrop.submenu { return index < self.taildrop.peers.len(); }
+        match index {
+            0 => self.rows.contains_key(&self.cursor),
+            1 => true,
+            2 => self.rows.contains_key(&self.cursor) && !self.taildrop.peers.is_empty(),
+            _ => false,
+        }
+    }
+    pub fn say(&mut self, message: String) {
+        self.message = message;
+        self.message_at = std::time::Instant::now();
+    }
     pub fn shown(&self) -> Vec<usize> {
         self.rows
             .iter()
@@ -318,6 +341,13 @@ impl Model {
         self.selected.clear();
         self.selected_rows.clear();
         self.preview_path.clear();
+        self.preview_reader.cancel();
+        self.preview.clear();
+        self.preview_body.clear();
+        self.preview_metadata.clear();
+        self.preview_display.clear();
+        self.preview_loaded = false;
+        self.preview_generation = self.preview_generation.wrapping_add(1);
         self.preview_failed = None;
         self.preview_scroll = 0;
         self.image_file = None;
@@ -392,13 +422,19 @@ impl Model {
                 ])?;
                 self.window(wire)?;
                 if let Some(path) = &self.restore_path {
-                    wire.send(vec![("c", word("locate")), ("path", word(&path.to_string_lossy()))])?;
+                    wire.send(vec![
+                        ("c", word("locate")),
+                        ("path", word(&path.to_string_lossy())),
+                    ])?;
                 }
             }
             "located" => {
                 if self.pending.is_none()
                     && text(&value, "directory") == self.path.to_string_lossy()
-                    && self.restore_path.as_ref().is_some_and(|p| p.to_string_lossy() == text(&value, "path"))
+                    && self
+                        .restore_path
+                        .as_ref()
+                        .is_some_and(|p| p.to_string_lossy() == text(&value, "path"))
                 {
                     let index = value.get("index").and_then(Json::as_f64).unwrap_or(-1.0);
                     if index >= 0.0 && index < self.total as f64 {
@@ -423,7 +459,8 @@ impl Model {
                 }
                 self.remember_selection();
                 if let Some(path) = &self.restore_path {
-                    if let Some((&i, _)) = self.rows.iter().find(|(_, r)| self.row_path(r) == *path) {
+                    if let Some((&i, _)) = self.rows.iter().find(|(_, r)| self.row_path(r) == *path)
+                    {
                         self.cursor = i;
                         self.restore_path = None;
                     }
@@ -437,34 +474,85 @@ impl Model {
                 }
             }
             "meta" => {
-                if self.pending.is_none() && count(&value, "row") == self.cursor
+                if self.pending.is_none()
+                    && count(&value, "row") == self.cursor
                     && count(&value, "token") == self.preview_requested
                     && self.current_path().as_ref() == Some(&self.preview_path)
                 {
                     for (label, value) in [
-                        ("Dimensions", if count(&value, "w") > 0 && count(&value, "h") > 0 { format!("{} × {}", count(&value, "w"), count(&value, "h")) } else { String::new() }),
-                        ("Duration", if count(&value, "ms") > 0 { super::media::clock(count(&value, "ms") as f64 / 1000.0) } else { String::new() }),
-                        ("Rate", if count(&value, "rate") > 0 { format!("{} kHz", count(&value, "rate") as f64 / 1000.0) } else { String::new() }),
-                        ("Entries", if count(&value, "entries") > 0 { count(&value, "entries").to_string() } else { String::new() }),
-                        ("Unpacked", if count(&value, "unpacked") > 0 { super::render::bytes(count(&value, "unpacked")) } else { String::new() }),
+                        (
+                            "Dimensions",
+                            if count(&value, "w") > 0 && count(&value, "h") > 0 {
+                                format!("{} × {}", count(&value, "w"), count(&value, "h"))
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        (
+                            "Duration",
+                            if count(&value, "ms") > 0 {
+                                super::media::clock(count(&value, "ms") as f64 / 1000.0)
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        (
+                            "Rate",
+                            if count(&value, "rate") > 0 {
+                                format!("{} kHz", count(&value, "rate") as f64 / 1000.0)
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        (
+                            "Entries",
+                            if count(&value, "entries") > 0 {
+                                count(&value, "entries").to_string()
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        (
+                            "Unpacked",
+                            if count(&value, "unpacked") > 0 {
+                                super::render::bytes(count(&value, "unpacked"))
+                            } else {
+                                String::new()
+                            },
+                        ),
                     ] {
-                        if !value.is_empty() { self.preview_metadata.push(format!("{} · {}", label, value)); }
+                        if !value.is_empty() {
+                            self.preview_metadata.push(format!("{} · {}", label, value));
+                        }
                     }
-                    if flag(&value, "afailed") { self.preview_metadata.push("This archive could not be read.".into()); }
+                    if flag(&value, "afailed") {
+                        self.preview_metadata
+                            .push("This archive could not be read.".into());
+                    }
                     self.preview_width = 0;
                 }
             }
             "peeked" => {
-                if self.preview_children.as_ref().is_some_and(|path| path.to_string_lossy() == text(&value, "path"))
+                if self
+                    .preview_children
+                    .as_ref()
+                    .is_some_and(|path| path.to_string_lossy() == text(&value, "path"))
                     && self.current_path().as_ref() == self.preview_children.as_ref()
                 {
                     self.preview.truncate(2);
-                    if flag(&value, "failed") { self.preview.push("This folder could not be read.".into()); }
-                    else {
+                    if flag(&value, "failed") {
+                        self.preview.push("This folder could not be read.".into());
+                    } else {
                         for row in value.get("rows").and_then(Json::as_array).unwrap_or(&[]) {
-                            self.preview.push(format!("{} {}", if flag(row, "d") { "›" } else { "□" }, text(row, "n")));
+                            self.preview.push(format!(
+                                "{} {}",
+                                if flag(row, "d") { "›" } else { "□" },
+                                text(row, "n")
+                            ));
                         }
-                        if count(&value, "n") == 0 { self.preview.push("Empty folder".into()); }
+                        if count(&value, "n") == 0 {
+                            self.preview.push("Empty folder".into());
+                        }
                     }
                     self.preview_width = 0;
                     self.preview_children = None;
@@ -496,21 +584,28 @@ impl Model {
                 }
             }
             "paths" => {
-                let paths: Vec<String> = value.get("paths").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(str::to_owned).collect();
+                let paths: Vec<String> = value
+                    .get("paths")
+                    .and_then(Json::as_array)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(Json::as_str)
+                    .map(str::to_owned)
+                    .collect();
                 if let Some(peer) = self.taildrop_target.take() {
                     match self.taildrop.send(&peer, &paths) {
-                        Ok(()) => self.message = format!("Sending to {}", peer.label),
+                        Ok(()) => self.say(format!("Sending to {}", peer.label)),
                         Err(e) => self.error = format!("Taildrop: {}", e),
                     }
                 }
                 if self.pending_clipboard {
                     self.pending_clipboard = false;
                     self.clipboard = paths;
-                    self.message = format!(
+                    self.say(format!(
                         "{} items {}",
                         self.clipboard.len(),
                         if self.cut { "cut" } else { "copied" }
-                    );
+                    ));
                 }
             }
             "searching" | "searched" => {
@@ -566,18 +661,27 @@ impl Model {
                     self.error = format!("{}: {}", text(&value, "name"), text(&value, "err"));
                 }
             }
-            "transferdone" | "trashed" | "undone" | "redone" | "renamed" | "made" | "duplicated" => {
+            "transferdone" | "trashed" | "undone" | "redone" | "renamed" | "made"
+            | "duplicated" => {
                 let operation = text(&value, "t");
                 if operation == "transferdone" {
-                    if count(&value, "id") != self.transfer_id { return Ok(()); }
+                    if count(&value, "id") != self.transfer_id {
+                        return Ok(());
+                    }
                     self.transfer.clear();
                     self.transfer_id = 0;
                 }
-                if matches!(operation, "undone" | "redone" | "renamed" | "made" | "duplicated") && !flag(&value, "ok") {
-                    if let Some(editor) = &mut self.editor { editor.pending = false; }
+                if matches!(
+                    operation,
+                    "undone" | "redone" | "renamed" | "made" | "duplicated"
+                ) && !flag(&value, "ok")
+                {
+                    if let Some(editor) = &mut self.editor {
+                        editor.pending = false;
+                    }
                     return Ok(());
                 }
-                self.message = match operation {
+                self.say(match operation {
                     "renamed" => "Renamed · Undo available".into(),
                     "made" => "Folder created · Undo available".into(),
                     "duplicated" => "Duplicated · Undo available".into(),
@@ -587,8 +691,21 @@ impl Model {
                         "Moved {} items to Trash · Undo available",
                         count(&value, "ok")
                     ),
-                    _ => format!("{} {} items{}", if flag(&value, "cancelled") { "Cancelled after" } else { "Transferred" }, count(&value, "ok"), if count(&value, "skipped") > 0 { format!(" · {} skipped", count(&value, "skipped")) } else { String::new() }),
-                };
+                    _ => format!(
+                        "{} {} items{}",
+                        if flag(&value, "cancelled") {
+                            "Cancelled after"
+                        } else {
+                            "Transferred"
+                        },
+                        count(&value, "ok"),
+                        if count(&value, "skipped") > 0 {
+                            format!(" · {} skipped", count(&value, "skipped"))
+                        } else {
+                            String::new()
+                        }
+                    ),
+                });
                 if count(&value, "failed") > 0 {
                     self.error = format!("{} failed", count(&value, "failed"));
                 }
@@ -599,15 +716,40 @@ impl Model {
                 self.open(self.path.clone(), wire)?;
             }
             "menuaction" if text(&value, "op") == "newFile" => {
-                if !self.editor.as_ref().is_some_and(|e| e.kind == "newfile" && e.pending) { return Ok(()); }
+                if count(&value, "id") != self.action_id || !self
+                    .editor
+                    .as_ref()
+                    .is_some_and(|e| e.kind == "newfile" && e.pending)
+                {
+                    return Ok(());
+                }
                 if flag(&value, "ok") {
                     self.editor = None;
-                    self.message = "File created · Undo available".into();
+                    self.say("File created · Undo available".into());
                     self.restore_path = Some(PathBuf::from(text(&value, "path")));
                     self.open(self.path.clone(), wire)?;
                 } else if let Some(editor) = &mut self.editor {
                     editor.pending = false;
                     editor.error = text(&value, "error").into();
+                }
+            }
+            "menuaction" if self.sheet && self.properties.is_some() && count(&value, "id") == self.action_id => {
+                if !flag(&value, "ok") {
+                    self.properties = Some(vec![text(&value, "error").into()]);
+                } else if text(&value, "op") == "snapshot" {
+                    wire.send(vec![("c", word("menuaction")), ("op", word("properties")), ("id", number(self.action_id))])?;
+                } else if text(&value, "op") == "properties" {
+                    let mut facts = vec![
+                        text(&value, "path").into(),
+                        format!("Kind · {}", text(&value, "kind")),
+                        format!("Size · {}", super::render::bytes(count(&value, "bytes"))),
+                        format!("Modified · {}", super::render::modified(value.get("modified").and_then(Json::as_f64).unwrap_or(0.0) as i64)),
+                        format!("Permissions · {}", text(&value, "mode")),
+                        format!("Owner · {} ({})", text(&value, "owner"), count(&value, "uid")),
+                        format!("Group · {}", count(&value, "gid")),
+                    ];
+                    if flag(&value, "symlink") { facts.push(format!("Target · {}", text(&value, "target"))); }
+                    self.properties = Some(facts);
                 }
             }
             "error" => {
@@ -618,7 +760,12 @@ impl Model {
                         editor.error = text(&value, "msg").into();
                     }
                 }
-                if text(&value, "where") == "scan" && self.pending.as_ref().is_some_and(|p| p.to_string_lossy() == text(&value, "path")) {
+                if text(&value, "where") == "scan"
+                    && self
+                        .pending
+                        .as_ref()
+                        .is_some_and(|p| p.to_string_lossy() == text(&value, "path"))
+                {
                     self.pending = None;
                     self.restore_navigation();
                 }

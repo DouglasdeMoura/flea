@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Format.js" as Format
+import "js/Keymap.js" as Keymap
 
 // The destructive choice must be reached deliberately; a reflexive Enter activates Cancel.
 FocusScope {
@@ -11,10 +12,13 @@ FocusScope {
     property bool opened: false
     property var snapshot: ({})
     property bool destructiveFocus: false
+    readonly property real referenceScale: Theme.font.bodySmall / 13
+    readonly property real cardPadding: Math.round(16 * referenceScale)
+    readonly property real cardBottomPadding: Theme.spacing.rowPaddingX
     signal confirmed(int token)
     signal cancelled()
     readonly property var cardItem: card
-    function open(value) { snapshot = value; destructiveFocus = false; opened = true; forceActiveFocus() }
+    function open(value) { snapshot = value; destructiveFocus = false; body.contentY = 0; opened = true; forceActiveFocus() }
     function close() { opened = false }
     function cancel() { close(); cancelled() }
     function activate() {
@@ -25,10 +29,12 @@ FocusScope {
     }
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) root.cancel()
+        else if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) { event.accepted = true; return }
         else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) root.destructiveFocus = !root.destructiveFocus
         else if (event.key === Qt.Key_L || event.key === Qt.Key_Right) root.destructiveFocus = true
         else if (event.key === Qt.Key_H || event.key === Qt.Key_Left) root.destructiveFocus = false
         else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) root.activate()
+        if (root.opened) body.reveal(root.destructiveFocus ? dangerButton : cancelButton)
         event.accepted = true
     }
     Rectangle {
@@ -46,8 +52,9 @@ FocusScope {
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: Math.max(0, Math.min(Theme.space(340), root.width - 2 * Theme.spacing.gap))
-        height: Math.max(0, Math.min(body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * Theme.spacing.gap))
+        // TrashSidebar's 340px content width excludes its two 16px paddings and hairlines.
+        width: Math.max(0, Math.min(Math.round(340 * root.referenceScale) + 2 * root.cardPadding + 2 * Theme.spacing.hairline, root.width - 2 * Theme.spacing.gap))
+        height: Math.max(0, Math.min(body.wanted + root.cardPadding + root.cardBottomPadding + 2 * Theme.spacing.hairline, root.height - 2 * Theme.spacing.gap))
         color: Theme.color.surface
         border.color: Theme.color.muted
         border.width: Theme.spacing.hairline
@@ -61,18 +68,21 @@ FocusScope {
         Flea.CardScroll {
             id: body
             anchors.fill: parent
-            anchors.margins: Theme.spacing.rowPaddingX
+            anchors.leftMargin: root.cardPadding + Theme.spacing.hairline
+            anchors.rightMargin: root.cardPadding + Theme.spacing.hairline
+            anchors.topMargin: root.cardPadding + Theme.spacing.hairline
+            anchors.bottomMargin: root.cardBottomPadding + Theme.spacing.hairline
             Column {
                 width: body.width
                 spacing: Theme.spacing.gap
                 Row {
                     width: parent.width
                     spacing: Theme.spacing.gap
-                    Flea.Glyph { width: Theme.markSize; height: title.height; name: "alert"; color: Theme.color.error }
+                    Flea.Glyph { id: alertMark; width: Theme.font.bodySmall * 1.3; height: title.height; name: "alert"; color: Theme.color.error }
                     Text {
                         id: title
-                        width: parent.width - Theme.markSize - parent.spacing
-                        text: root.snapshot.all ? "Empty Trash?" : "Delete " + root.snapshot.count + " items permanently?"
+                        width: parent.width - alertMark.width - parent.spacing
+                        text: root.snapshot.all ? "Empty Trash?" : "Delete " + root.snapshot.count + (root.snapshot.count === 1 ? " item" : " items") + " permanently?"
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         color: Theme.color.foreground
@@ -82,19 +92,22 @@ FocusScope {
                 Text {
                     width: parent.width
                     text: root.snapshot.all
-                        ? root.snapshot.count + " items, " + (root.snapshot.partial ? "at least " : "") + Format.size(root.snapshot.bytes || 0) + ". This deletes them from disk. Undo cannot restore them and the undo journal does not cover it."
+                        ? root.snapshot.count + (root.snapshot.count === 1 ? " item, " : " items, ") + Format.size(root.snapshot.bytes || 0) + ". This deletes them from disk. " + Keymap.hintFor("undo") + " cannot undo it and the undo journal does not cover it."
                         : "These Trash items are deleted from disk. This cannot be undone."
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
+                    lineHeight: 1.6
                     color: Theme.color.foreground
                     font { family: Theme.font.family; pixelSize: Theme.font.body }
                 }
-                Row {
+                Flow {
+                    width: Math.min(parent.width, cancelButton.implicitWidth + dangerButton.implicitWidth + spacing)
                     anchors.right: parent.right
                     spacing: Theme.spacing.gap
-                    Flea.DialogButton { label: "Cancel"; primary: !root.destructiveFocus; onActivated: root.cancel() }
+                    Rectangle { width: cancelButton.width; height: cancelButton.height; color: root.destructiveFocus ? "transparent" : Qt.alpha(Theme.color.accent, 0.14); Flea.DialogButton { id: cancelButton; label: "Cancel"; primary: !root.destructiveFocus; onActivated: root.cancel() } }
                     Item {
-                        width: dangerText.implicitWidth + 2 * Theme.spacing.gap
+                        id: dangerButton
+                        implicitWidth: dangerText.implicitWidth + 2 * Theme.spacing.gap
                         height: Math.max(Theme.hitMin, dangerText.implicitHeight + Theme.spacing.gap)
                         Rectangle { anchors.fill: parent; color: "transparent"; border.width: Theme.spacing.hairline; border.color: root.destructiveFocus ? Theme.color.error : Theme.color.muted }
                         Text { id: dangerText; anchors.centerIn: parent; text: root.snapshot.all ? "Empty Trash" : "Delete"; color: Theme.color.error; font { family: Theme.font.family; pixelSize: Theme.font.body } }

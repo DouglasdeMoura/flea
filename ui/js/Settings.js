@@ -1,6 +1,7 @@
 .pragma library
 .import "TextSize.js" as TextSize
 .import "Places.js" as Places
+.import "Keymap.js" as Keymap
 
 // Sections follow the current Desktop boards; their state uses the shared ui.json updater.
 var SECTIONS = [
@@ -25,11 +26,12 @@ function sectionIndex(id) {
 // The six SettingsMenus.html puts under one master row, and the ids ui/js/Menu.js gives those rows.
 var BASIC = ["cut", "copy", "paste", "duplicate", "rename", "trash"]
 
-// Every action the listing menu can build, grouped as the board groups it. An id that this release
-// cannot draw is absent rather than switched off: a toggle over a row no menu has is a mock control.
+// Storage ids remain stable while the action dispatcher uses descriptive verbs.
 var MENU_GROUPS = [
     { label: "Basic file actions", master: true, ids: BASIC },
-    { label: "Open and inspect", master: false, ids: ["openTerminal", "copypath", "permissions"] },
+    { label: "Destructive", master: false, ids: ["delete"] },
+    { label: "Open and inspect", master: false,
+      ids: ["openwith", "openTerminal", "moveto", "copyto", "properties", "permissions", "copypath"] },
     { label: "Extras", master: false,
       ids: ["compress", "extract", "convert", "taildrop", "dropbox", "sharelink"] }
 ]
@@ -42,9 +44,10 @@ var LOCKED = ["open", "toggleHidden"]
 var LABELS = {
     cut: "Cut", copy: "Copy", paste: "Paste", duplicate: "Duplicate", rename: "Rename",
     trash: "Move to Trash", openTerminal: "Open in terminal", copypath: "Copy path", permissions: "Permissions",
+    delete: "Delete permanently", openwith: "Open With", moveto: "Move to", copyto: "Copy to", properties: "Properties",
     compress: "Compress", extract: "Extract",
     convert: "Convert", taildrop: "Send with Taildrop", dropbox: "Move to Dropbox",
-    sharelink: "Copy share link", open: "Open", toggleHidden: "Show hidden files"
+    sharelink: "Copy Share Link", open: "Open", toggleHidden: "Show hidden files"
 }
 
 // The four values of the Keys row, in SettingsKeys.html's own chooser order. The first is what a
@@ -57,6 +60,7 @@ var PRESET_LABELS = { "default": "Default", vim: "Vim", mac: "Mac", windows: "Wi
 var GLYPHS = {
     cut: "scissors", copy: "copy", paste: "clipboard", duplicate: "file-plus", rename: "rename",
     trash: "trash", openTerminal: "terminal", copypath: "file-text", permissions: "lock", compress: "archive",
+    delete: "trash", openwith: "external-link", moveto: "folder-plus", copyto: "copy", properties: "info",
     extract: "archive-out",
     convert: "sliders", sharelink: "network", open: "folder-open", toggleHidden: "eye"
 }
@@ -221,6 +225,8 @@ function menuRows(hidden, keyHints) {
         for (var i = 0; i < group.ids.length; i++) {
             out.push({ kind: "check", id: group.ids[i], label: label(group.ids[i]),
                        glyph: GLYPHS[group.ids[i]], mark: MARKS[group.ids[i]],
+                       role: group.ids[i] === "delete" ? "error" : "",
+                       value: group.ids[i] === "delete" ? "off by default" : "",
                        on: !isHidden(hidden, group.ids[i]) })
         }
     }
@@ -248,10 +254,9 @@ function keyRows(state) {
                                + "binding is shared, and the change lands in this window at once." },
         { kind: "group", label: "This preset" }
     ]
-    var table = state.presetKeys || []
+    var table = Keymap.sheetFor(state.preset, "gui")
     for (var i = 0; i < table.length; i++) {
-        if (table[i].preset === state.preset)
-            out.push({ kind: "fact", label: table[i].label, value: table[i].keys })
+        out.push({ kind: "fact", label: table[i].label, value: table[i].keys })
     }
     out.push({ kind: "hint", label: "Press ? for the keyboard sheet." })
     return out
@@ -286,8 +291,8 @@ function viewRows(state) {
     var columns = data.columns || ["name", "size", "date"]
     return [
         { kind: "group", label: "View" },
-        choice("view", "Last-used view", undefined, ["list", "columns", "grid"],
-               ["List", "Columns", "Grid"], data.view || "list", true),
+        choice("view", "Last-used view", undefined, ["list", "columns", "grid", "dual"],
+               ["List", "Columns", "Grid", "Dual pane"], data.view || "list", true),
         choice("density", "Row density", "list", ["compact", "normal", "comfortable"],
                ["Compact", "Normal", "Comfortable"], data.density || "normal"),
         { kind: "action", id: "columns", label: "Columns", glyph: "columns",
