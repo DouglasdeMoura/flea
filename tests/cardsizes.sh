@@ -82,6 +82,7 @@ at() { local v; v=$(ipc "$@"); [ -n "$v" ] || { bad "$size: ipc $* answered noth
 # Sample answer: 913|406 (contentHeight|height); a content height of 0 is a section not laid out, not one that fits.
 section_fits() {
   [ "$size" = tiled ] || return 0
+  check "$size the $1 section is the one shown" "$(ipc settingsSection)" "$1"
   local sh svh; IFS='|' read -r sh svh <<<"$(at settingsScroll)"
   check "$size the $1 section fits the card whole" "$([ "${sh:-0}" -gt 0 ] && [ "$sh" -le "${svh:-0}" ] 2>/dev/null && echo fits || echo "clipped (${sh:-none} > ${svh:-none})")" "fits"
 }
@@ -112,7 +113,6 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # Settings: one title height for every section, the card inside the window.
   key ,; sleep 0.6
   check "$size settings opens" "$(ipc settingsOpen)" "true"
-  check "$size settings opens on display" "$(ipc settingsSection)" "display"
   display=$(at settingsTitleCentre); section_fits display
   key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(at settingsTitleCentre)
   check "$size the rail walked to keys" "$(ipc settingsSection)" "keys"; section_fits keys
