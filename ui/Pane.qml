@@ -150,11 +150,13 @@ FocusScope {
     // Read once for the window: the chrome's path and the search strip's scope both shorten with it.
     readonly property string home: Quickshell.env("HOME") || ""
 
-    // "list", "columns" or "grid"; the chrome's own buttons write it and the views read it.
+    // "list", "columns" or "grid"; the views read it. The first frame draws the stored view, and
+    // chooseView (the chrome's buttons and ctrl-1/2/3) writes the same key, so a restart opens on
+    // it. Dual and a word this build cannot draw both land on the list, via ViewState.view.
     property string viewMode: "list"
     property bool preferencesReady: false
     Component.onCompleted: {
-        root.viewMode = root.listOnly || ViewState.state.view === "dual" ? "list" : ViewState.state.view || "list"
+        root.viewMode = root.listOnly ? "list" : ViewState.view
         root.preferencesReady = true
     }
     // Only the list view draws a filter, so leaving it takes the filter with it.
@@ -182,7 +184,7 @@ FocusScope {
         id: preferences
         interval: 0
         onTriggered: {
-            var desired = root.listOnly || ViewState.state.view === "dual" ? "list" : ViewState.state.view || "list"
+            var desired = root.listOnly ? "list" : ViewState.view
             if (root.viewMode !== desired) root.viewMode = desired
             if (!root.visible || !root.path || root.listInFlight || root.searchMode.length > 0
                     || root.appliedListingPreferences === root.listingPreferences) return
@@ -518,7 +520,7 @@ FocusScope {
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()
     }
     function togglePreviewColumn() { ViewState.changeLeaf("preview", { column: !ViewState.previewColumn }) }
-    function chooseView(mode) { ViewState.changeKey("view", mode) }
+    function chooseView(mode) { ViewState.setView(mode) }
     function focusPreviewColumn() {
         if (!ViewState.previewColumn || root.dualMode) return
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.focusPreview()
