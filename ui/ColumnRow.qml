@@ -64,6 +64,8 @@ Item {
             sourceSize.height: Theme.iconSize
             fillMode: Image.PreserveAspectFit
             asynchronous: true
+            // No cache by URL: a regenerated thumbnail keeps its path, and a cached decode would keep the old pixels.
+            cache: false
             source: root.thumb.length > 0 ? Format.fileUri(root.thumb) : ""
         }
 

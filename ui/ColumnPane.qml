@@ -53,7 +53,17 @@ Item {
         if (root.pane === null || !root.visible || root.pane.total === 0 || root.pane.listInFlight)
             return
         var span = Thumbs.viewport(view.contentY, Theme.rowHeight, Math.max(1, Math.ceil(view.height / Theme.rowHeight)), root.rows.length)
-        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, root.offset + span.first, root.offset + span.last)
+        var first = root.offset + span.first
+        var last = root.offset + span.last
+        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, first, last)
+        // The preview column draws the cursor row whatever this viewport shows, so its thumbnail is asked for and never dropped.
+        var cursor = root.pane.cursorIndex
+        if (cursor >= 0 && (cursor < first || cursor > last)) {
+            work.drop = work.drop.filter(function (i) { return i !== cursor })
+            var cursorRow = root.rows[cursor - root.offset]
+            if (cursorRow && cursorRow.t && root.pane.thumbState.file[cursor] === undefined)
+                work.ask.push(cursor)
+        }
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
         root.thumbsApplied(work)
