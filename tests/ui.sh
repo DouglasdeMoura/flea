@@ -6428,7 +6428,7 @@ case_overlays() {
 case_views() {
     # Four fixtures directly inside the sandbox root, which is what its guard allows; the fourth is the
     # grid again after the columns view, so a column kept alive under the grid is proven to plan nothing.
-    local root="$fixture_root" pass mode dir r lit fx fy fw fh cx cy wx wy p1 p2 p3 p4 changed before
+    local root="$fixture_root" pass mode dir r lit fx fy fw fh sx sy sw sh cx cy wx wy p1 p2 p3 p4 changed before
     for pass in grid list columns again; do views_fixture "$root/views-$pass"; done
     launch "$root"
     wait_listing "$(ls "$root" | wc -l)"
@@ -6546,6 +6546,11 @@ case_views() {
             sleep "$mark_poll_s"
         done
         (( lit > 0 )) || fail "$mode: the empty directory's hero painted nothing"
+        # And it sits inside the listing slot: a lazy view's item reports a local origin, so the hero once drew over the sidebar.
+        read -r fx fy fw fh <<< "$(ipc emptyMarkRect)"
+        read -r sx sy sw sh <<< "$(ipc listAreaRect)"
+        (( fx >= sx && fy >= sy && fx + fw <= sx + sw && fy + fh <= sy + sh )) \
+            || fail "$mode: the hero at $fx $fy $fw $fh is outside the listing slot $sx $sy $sw $sh"
         key -k Backspace >/dev/null
         sleep 1
         key -k Backspace >/dev/null

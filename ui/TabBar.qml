@@ -85,8 +85,9 @@ Item {
                     pane: root.pane
                     switchesOnHover: true
                     dest: Tabs.pathAt(root.tabs, root.currentIndex, tab.index, root.path)
+                    // Unknown while the listed reply is still out, because dirDev is then the directory a hover switch just left; unknown makes verbFor copy, never a move that turns into a cross-device delete.
                     destDev: Tabs.devAt(root.tabs, root.currentIndex, tab.index,
-                                        root.pane && root.pane.backend ? root.pane.backend.dirDev : 0)
+                                        root.pane && root.pane.backend && !root.pane.listInFlight ? root.pane.backend.dirDev : 0)
                     // Only an accepted enter arms the switch: Qt emits entered before it reads accepted,
                     // and a refused drag gets no exited, so the timer would otherwise never stop.
                     onEntered: function (drag) { if (drag.accepted) hoverSwitch.restart() }

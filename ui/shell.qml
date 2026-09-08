@@ -144,10 +144,11 @@ ShellRoot {
             // negative z put it under that ground and hid it. listArea is pane-relative, so pane.y is added.
             Flea.EmptyState {
                 id: emptyState
-                x: pane.listArea.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
-                y: pane.y + pane.listArea.y
-                width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listArea.width
-                height: pane.listArea.height
+                // listSlot, not listArea: a lazy view's item sits at its Loader's local origin, and only the slot carries the sidebar and filter offsets.
+                x: pane.listSlot.x + (pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : 0)
+                y: pane.y + pane.listSlot.y
+                width: pane.viewMode === "columns" && pane.columnsArea ? pane.columnsArea.columnWidth : pane.listSlot.width
+                height: pane.listSlot.height
                 visible: pane.listingState === "empty"
                 // The design's no-match answer: the search mark over the query it could not find.
                 caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery : ""
@@ -161,10 +162,10 @@ ShellRoot {
 
             // The loading crawl, same listArea placement; its own hold-off keeps fast listings clean.
             Flea.LoadingState {
-                x: pane.listArea.x
-                y: pane.y + pane.listArea.y
-                width: pane.listArea.width
-                height: pane.listArea.height
+                x: pane.listSlot.x
+                y: pane.y + pane.listSlot.y
+                width: pane.listSlot.width
+                height: pane.listSlot.height
                 visible: pane.listingState === "loading"
             }
 
@@ -289,10 +290,10 @@ ShellRoot {
             // An Item fronts this Loader because its callers read active, which is a Loader's own load switch.
             Item {
                 id: shareBrowser
-                x: pane.listArea.x
-                y: pane.y + pane.listArea.y
-                width: pane.listArea.width
-                height: pane.listArea.height
+                x: pane.listSlot.x
+                y: pane.y + pane.listSlot.y
+                width: pane.listSlot.width
+                height: pane.listSlot.height
                 readonly property bool active: shareLoader.item !== null && shareLoader.item.active
                 function open(uri, label, names) { shareLoader.active = true; shareLoader.item.open(uri, label, names) }
                 function close() { if (shareLoader.item) shareLoader.item.close() }

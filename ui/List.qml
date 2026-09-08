@@ -236,9 +236,10 @@ ListView {
     // The one place a drop event becomes a verb, so enter, move and drop cannot disagree. Both of
     // the things verbFor needs to know about the source come off the marker: which window sent the
     // drag, and whether ctrl was down when it did.
+    // The source device is the marker's, stamped when the drag began: after a tab hover switch the pane's own dirDev is the destination's.
     function verbAt(marker, row) {
         return DragOps.verbFor(DragOps.isOwnDrag(marker), DragOps.markerCopying(marker),
-                               root.pane.backend.dirDev, row ? row.v : 0)
+                               DragOps.markerDev(marker), row ? row.v : 0)
     }
 
     // The delegate drawing the editor, or null when the row was released past the cache buffer,
