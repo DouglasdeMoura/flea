@@ -75,7 +75,7 @@ Item {
     // and the decode, and a row whose Image failed to load has to be marked by its kind instead.
     readonly property bool thumbDrawn: root.thumb.length > 0 && thumbImage.status !== Image.Error
 
-    implicitHeight: Theme.rowHeight
+    implicitHeight: Theme.fileRowHeight
     implicitWidth: parent ? parent.width : 0
 
     Accessible.role: Accessible.ListItem

@@ -36,7 +36,7 @@ FocusScope {
         busy = true
         opened = true
         body.contentY = 0
-        forceActiveFocus()
+        cancelFocus.forceActiveFocus()
         requested({ c: "permissions", op: "inspect", id: requestId, path: path })
     }
     function receive(message) {
@@ -60,6 +60,23 @@ FocusScope {
         errorText = ""
         requested({ c: "permissions", op: "apply", id: requestId, mode: modeText })
     }
+    function focusItems(item, result) {
+        if (!item.visible || !item.enabled) return
+        if (item.activeFocusOnTab) result.push(item)
+        for (var i = 0; i < item.children.length; i++) focusItems(item.children[i], result)
+    }
+    function stepFocus(back) {
+        var items = []
+        focusItems(body, items)
+        if (!items.length) return
+        var current = -1
+        for (var i = 0; i < items.length; i++) if (items[i].activeFocus) current = i
+        var next = (current + (back ? -1 : 1) + items.length) % items.length
+        items[next].forceActiveFocus()
+    }
+    Keys.onTabPressed: function(event) { root.stepFocus(false); event.accepted = true }
+    Keys.onBacktabPressed: function(event) { root.stepFocus(true); event.accepted = true }
+    Keys.onPressed: function(event) { event.accepted = true }
     Keys.onEscapePressed: function(event) { root.close(); event.accepted = true }
     Rectangle {
         anchors.fill: parent
@@ -187,6 +204,7 @@ FocusScope {
                             font { family: Theme.font.family; pixelSize: Theme.font.body }
                             clip: true
                             onTextEdited: root.modeText = text
+                            onAccepted: if (root.editable && root.modeValue >= 0) applyFocus.forceActiveFocus()
                         }
                     }
                 }
@@ -212,13 +230,15 @@ FocusScope {
                     anchors.right: parent.right
                     spacing: Theme.spacing.gap
                     FocusScope {
+                        id: cancelFocus
                         width: cancelButton.implicitWidth; height: cancelButton.implicitHeight
                         activeFocusOnTab: true
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
-                        Flea.DialogButton { id: cancelButton; label: "Cancel"; primary: true; onActivated: root.close() }
+                        Flea.DialogButton { id: cancelButton; label: "Cancel"; primary: parent.activeFocus; onActivated: root.close() }
                     }
                     FocusScope {
+                        id: applyFocus
                         width: applyButton.implicitWidth; height: applyButton.implicitHeight
                         activeFocusOnTab: root.editable && root.modeValue >= 0
                         Keys.onReturnPressed: root.apply()

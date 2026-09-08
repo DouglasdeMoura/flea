@@ -100,6 +100,7 @@ Item {
     function childEmptyItem() { return childColumn.emptyItem }
     function frameItem() { return preview.frameItem }
     function playerLoaded() { return preview.playerLoaded() }
+    readonly property int previewIndex: preview.visible ? preview.loadedIndex : -1
     function thumbShown() { return preview.thumbShown }
     function frameReady() { return preview.frameStatus === Image.Ready }
     function textLines() { return preview.textLines() }

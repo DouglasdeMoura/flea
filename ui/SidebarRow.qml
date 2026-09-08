@@ -25,6 +25,8 @@ Item {
 
     // A share or a removable volume carries a mount-state dot; the internal disk is always there
     // and always mounted, so a dot on it would say nothing, and a favourite is not a mount at all.
+    readonly property string detail: root.modelData.kind === "trash" ? (root.modelData.count > 0 ? String(root.modelData.count) : "")
+        : root.modelData.group === "device" && ((ViewState.state.places || {}).driveSize !== false) ? (root.modelData.size || "") : ""
     readonly property bool showsDot: (root.modelData.group === "network" && root.modelData.kind !== "dropbox")
         || (root.modelData.group === "device" && root.modelData.kind === "volume")
     // Small and fixed: a status dot is not part of the type or icon scale.
@@ -92,7 +94,7 @@ Item {
         anchors.rightMargin: Style.spacing.rowGap
         anchors.verticalCenter: parent.verticalCenter
         text: root.modelData.label
-        color: Theme.color.foreground
+        color: root.modelData.error ? Theme.color.error : Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.body
         elide: Text.ElideRight
@@ -126,18 +128,30 @@ Item {
     // NETWORK header's "+" share one centre line whatever their ink does: align by slot, never by ink.
     Item {
         id: dot
-        visible: root.showsDot
+        visible: root.showsDot || root.detail.length > 0
         anchors.right: parent.right
         anchors.rightMargin: Style.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
         // A row with no badge gives the slot back to its label, which is how the canvas fits "minipc . nvme0n1".
-        width: root.showsDot ? Theme.font.caption : 0
+        width: detailText.implicitWidth + (root.showsDot ? Theme.font.caption + (root.detail.length > 0 ? Style.spacing.rowGap : 0) : 0)
         height: Theme.font.caption
 
         // Green once gio mount -l lists it, muted at half strength while it is only a bookmark waiting
         // to be mounted. A square, not a disc: the cut is hard corners, and the canvas draws it square.
+        Text {
+            id: detailText
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.detail
+            color: Theme.color.foreground
+            font.family: Theme.font.family
+            font.pixelSize: Theme.font.caption
+            textFormat: Text.PlainText
+        }
         Rectangle {
-            anchors.centerIn: parent
+            visible: root.showsDot
+            x: (Theme.font.caption - root.dotSize) / 2
+            anchors.verticalCenter: parent.verticalCenter
             width: root.dotSize
             height: root.dotSize
             color: root.modelData.mounted ? Theme.color.executable : Theme.color.muted

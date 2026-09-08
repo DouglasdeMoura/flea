@@ -27,6 +27,7 @@ Item {
     // For ui/Ipc.qml's contextMenuRowProbe: whether the pointer is over this row and where, before a test judges a move.
     function probe() { return pointer.hovered + " " + Math.round(pointer.point.position.x) + " " + Math.round(pointer.point.position.y) + " " + Math.round(pointer.restingAt.x) + " " + Math.round(pointer.restingAt.y) }
 
+    readonly property bool available: root.entry.disabled !== true
     readonly property bool isSeparator: root.entry.separator === true
     // Menu.hasSubmenu and not a local test, because a local one read submenu === true and the menu sets an array.
     readonly property bool isSubmenu: Menu.hasSubmenu(root.entry)
@@ -35,11 +36,11 @@ Item {
     // The key this row's action answers to, right-aligned per Menus.html. Derived from keys.toml
     // through the generated map, so an unbound action leaves the slot empty rather than guessing.
     // Empty with the Menus section's hints row off, which takes the slot's width with it.
-    readonly property string hint: root.isSeparator || !ViewState.keyHints
-                                 ? "" : Keymap.hintFor(root.entry.action)
-    readonly property color markColor: root.danger ? Theme.color.error
+    readonly property string hint: root.isSeparator ? "" : root.entry.hint !== undefined ? root.entry.hint
+                                 : ViewState.keyHints ? Keymap.hintFor(root.entry.action) : ""
+    readonly property color markColor: !root.available ? Theme.color.muted : root.danger ? Theme.color.error
                                      : root.picked ? Theme.color.accent : Theme.color.muted
-    readonly property color labelColor: root.danger ? Theme.color.error
+    readonly property color labelColor: !root.available ? Theme.color.muted : root.danger ? Theme.color.error
                                       : root.picked ? Theme.color.accent : Theme.color.foreground
 
     // The hover lift Row.qml uses, so a menu row and a list row read alike.
@@ -79,6 +80,7 @@ Item {
     Item {
         id: markSlot
         visible: !root.isSeparator
+        opacity: root.available ? 1 : 0.55
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
@@ -117,6 +119,7 @@ Item {
         anchors.rightMargin: Theme.spacing.gap
         anchors.verticalCenter: parent.verticalCenter
         text: root.entry.label !== undefined ? root.entry.label : ""
+        opacity: root.available ? 1 : 0.55
         color: root.labelColor
         font.family: Theme.font.family
         font.pixelSize: Theme.font.body
@@ -133,9 +136,15 @@ Item {
         anchors.rightMargin: root.isSubmenu ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         text: root.hint
-        // Menus.html paints an enabled row's hint in its label's own ink and keeps muted for the
-        // disabled row's; no menu entry in this tree can be disabled, so every hint follows the label.
-        color: root.labelColor
+        // Permissions.html leaves its refusal span wrappable; keep the label whole within the fixed menu width.
+        width: root.entry.hint !== undefined
+               ? Math.max(0, Math.min(implicitWidth, root.width - 2 * Theme.spacing.rowPaddingX
+                                     - root.slotSize - 2 * Theme.spacing.gap - label.implicitWidth))
+               : implicitWidth
+        wrapMode: root.entry.hint !== undefined ? Text.WordWrap : Text.NoWrap
+        horizontalAlignment: Text.AlignRight
+        // An unavailable row retains its reason while its label takes the muted role.
+        color: root.available ? root.labelColor : Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         textFormat: Text.PlainText
@@ -160,7 +169,7 @@ Item {
 
     HoverHandler {
         id: pointer
-        enabled: !root.isSeparator
+        enabled: !root.isSeparator && root.available
         // The first point after entry is where the pointer rested; only a later, different one is motion.
         property bool armed: false
         property point restingAt
@@ -179,7 +188,7 @@ Item {
     }
 
     TapHandler {
-        enabled: !root.isSeparator
+        enabled: !root.isSeparator && root.available
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.ReleaseWithinBounds
         onTapped: root.activated()

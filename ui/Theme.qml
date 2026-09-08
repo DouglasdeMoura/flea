@@ -69,7 +69,7 @@ Singleton {
     readonly property QtObject spacing: QtObject {
         readonly property int hairline: Style.spacing.hairline
         readonly property int rowPaddingX: Math.round(Style.spacing.rowPaddingX * root.sizeRatio)
-        readonly property int rowPaddingY: Math.round(Style.spacing.controlPaddingY * root.sizeRatio * root.densityRatio)
+        readonly property int rowPaddingY: Math.round(Style.spacing.controlPaddingY * root.sizeRatio)
         readonly property int gap: Math.round(Style.spacing.rowGap * root.sizeRatio)
     }
 
@@ -97,6 +97,7 @@ Singleton {
 
     // Row height follows the font so it scales with omarchy display text size.
     readonly property int rowHeight: Math.round(font.bodySmall * lineBoxRatio) + 2 * spacing.rowPaddingY
+    readonly property int fileRowHeight: Math.round(font.bodySmall * lineBoxRatio) + 2 * Math.round(spacing.rowPaddingY * densityRatio)
     // The icon slot is the row's text line box, so an icon can never change the row height.
     readonly property int iconSize: root.rowHeight - 2 * root.spacing.rowPaddingY
     // A mark is sized from the type scale, never from its slot: 19, the canvas's own M.mark, is the row and menu one.
@@ -119,7 +120,7 @@ Singleton {
         readonly property real multiplier: 4
     }
     // Wide enough for "Send with Taildrop" at bodySmall, 257 at base-size 14; ui/ContextMenu.qml draws it.
-    readonly property int menuWidth: Math.round(Style.space(220) * root.sizeRatio)
+    readonly property int menuWidth: Math.round(Style.space(257) * root.sizeRatio)
 
     // Leading a row gives its text, above and below, before the padding is added.
     readonly property real lineBoxRatio: 1.8

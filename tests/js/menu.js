@@ -9,6 +9,14 @@
 
 function run(check) {
     runMenu(check)
+    check("Permissions accepts one ordinary file", Menu.permissionsEntry(0o100644, 1).disabled, false)
+    check("Permissions accepts one directory", Menu.permissionsEntry(0o040755, 1).disabled, false)
+    check("Permissions refuses multiple items", Menu.permissionsEntry(0o100644, 2).disabled, true)
+    check("Permissions never follows symlinks", Menu.permissionsEntry(0o120777, 1).disabled, true)
+    check("Permissions explains symlink refusal", Menu.permissionsEntry(0o120777, 1).hint, "Symlink target not changed")
+    check("Permissions refuses a fifo", Menu.permissionsEntry(0o010644, 1).disabled, true)
+    check("Permissions refuses missing metadata", Menu.permissionsEntry(undefined, 1).disabled, true)
+    check("Permissions preserves special-bit read-only inspection", Menu.permissionsEntry(0o104755, 1).disabled, false)
     check("a Compress row carrying the probed formats is a submenu row",
           Menu.hasSubmenu({ label: "Compress", action: "compress",
                             submenu: Archive.formatEntries(["zip", "7z"]) }),
@@ -166,7 +174,7 @@ function runBackground(check) {
     check("Sort by is a submenu row over the three orders the backend can produce",
           Menu.hasSubmenu(findEntry(rows, "sort")) + "|"
           + findEntry(rows, "sort").submenu.map(function (e) { return e.id + "=" + e.label }).join("|"),
-          "true|name=Name|size=Size|mtime=Date Modified")
+          "true|name=Name|size=Size|mtime=Date Modified|kind=Kind")
     check("and its flyout takes the sort mark, not the archive one the other flyouts default to",
           Menu.submenuGlyph("sort") + "|" + Menu.submenuGlyph("taildrop") + "|"
           + Menu.submenuGlyph("compress"), "sort|server|archive")
@@ -192,15 +200,15 @@ function runHidden(check, full) {
     check("an undefined set is the same as an empty one", menu(undefined), labels(full))
     check("one hidden action loses its row and nothing else",
           menu(["paste"]),
-          "Open|Copy path|-|Cut|Copy|Duplicate|Rename|-|Compress|-|Send with Taildrop|"
+          "Open|Copy path|Permissions|-|Cut|Copy|Duplicate|Rename|-|Compress|-|Send with Taildrop|"
           + "Move to Dropbox|-|Move to Trash|-|Open in terminal|New folder|Show hidden files")
     // A group that loses every member loses its separator too, which is the board's own rule and
     // the reason the answer below has three rules and not six.
     check("a group emptied by the settings takes its rule with it",
-          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath"]),
+          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath", "permissions"]),
           "Open|-|Compress|-|Send with Taildrop|Move to Dropbox|-|Open in terminal|New folder|Show hidden files")
     check("hiding everything hideable still leaves the two locked rows and New folder",
-          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath", "openTerminal",
+          menu(["cut", "copy", "paste", "duplicate", "rename", "trash", "copypath", "permissions", "openTerminal",
                 "compress", "taildrop", "dropbox", "open", "toggleHidden"]),
           "Open|-|New folder|Show hidden files")
     // The shipped set named this row "terminal" while the menu built it as "openTerminal", so the

@@ -104,7 +104,7 @@ Item {
             var r = rows[i]
             var label = r.kind === "disk" ? root.hostLabel(r.label) : r.label
             out.push({ path: r.path, label: label, group: "device", kind: r.kind,
-                       device: r.device, mounted: r.mounted, glyph: "drive" })
+                       device: r.device, mounted: r.mounted, size: r.size, glyph: "drive" })
         }
         // Same rule as ui/NetworkMounts.qml's: an unchanged poll assigns nothing, see Mounts.sameEntries.
         if (!Mounts.sameEntries(root.entries, out))

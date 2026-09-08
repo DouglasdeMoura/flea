@@ -27,6 +27,7 @@ Item {
     signal duplicated(bool ok, string path)
     signal undone(string op, bool ok)
     signal paths(var list)
+    signal trashResult(var message)
     signal permissionsResult(var message)
     signal metaResult(var message)
     property int metaToken: 0
@@ -312,6 +313,8 @@ Item {
             root.undone(message.op, message.ok)
         } else if (message.t === "paths") {
             root.paths(message.paths || [])
+        } else if (message.t === "trashbrowse") {
+            root.trashResult(message)
         } else if (message.t === "permissions") {
             root.permissionsResult(message)
         } else if (message.t === "meta") {

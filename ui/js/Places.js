@@ -91,3 +91,47 @@ function relabel(body, path, name) {
         out += "\n"
     return out + target + " " + trimmed + "\n"
 }
+
+var WIDTH_STOPS = [160, 192, 224, 256]
+function sidebarWidth(value) {
+    if (typeof value !== "number" || !isFinite(value)) return 192
+    var nearest = WIDTH_STOPS[0]
+    for (var i = 1; i < WIDTH_STOPS.length; i++) {
+        if (Math.abs(WIDTH_STOPS[i] - value) < Math.abs(nearest - value)) nearest = WIDTH_STOPS[i]
+    }
+    return nearest
+}
+
+function recordError(record) {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return "invalid favourite record"
+    if (typeof record.label !== "string" || record.label.trim().length === 0) return "label needs visible text"
+    if (typeof record.path !== "string" || /[\u0000-\u001f\u007f]/.test(record.path)) return "invalid path"
+    if (record.path.charAt(0) === "/" || record.path === "~" || record.path.indexOf("~/") === 0) return ""
+    var schemes = ["smb://", "sftp://", "ftp://", "dav://", "davs://", "afp://", "nfs://", "file://"]
+    for (var i = 0; i < schemes.length; i++) {
+        if (record.path.indexOf(schemes[i]) === 0 && record.path.length > schemes[i].length) return ""
+    }
+    return "path must be absolute, ~/ relative, or a supported URI"
+}
+
+function storedEntries(records, home) {
+    var out = []
+    for (var i = 0; Array.isArray(records) && i < records.length; i++) {
+        var record = records[i]
+        var error = recordError(record)
+        var label = record && typeof record.label === "string" ? record.label : JSON.stringify(record)
+        var path = record && typeof record.path === "string" ? record.path : ""
+        var resolved = path === "~" ? home : path.indexOf("~/") === 0 ? home + path.substring(1) : path
+        out.push({ label: label || "Invalid favourite", path: resolved, storedPath: path,
+            error: error, original: record, favouriteIndex: i, group: "favourite", kind: "favourite",
+            glyph: path.indexOf("://") >= 0 ? "network" : "folder" })
+    }
+    return out
+}
+
+function homeEntries(home, dirsText, glyphFor) {
+    var entries = [{ label: "Home", path: home }].concat(userDirs(dirsText, home))
+    return entries.map(function (entry) {
+        return { label: entry.label, path: entry.path, group: "home", kind: "home", glyph: glyphFor(entry.label) }
+    })
+}

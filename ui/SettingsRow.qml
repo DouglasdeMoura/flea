@@ -14,6 +14,7 @@ Item {
 
     signal activated()
     signal pointerMoved()
+    signal favouriteMoved(int to)
     // Every steppable row steps the same way, so h/l and the two chevrons fire one signal, never two.
     signal stepped(int direction)
     // The ruler's own way in: the same writer a step reaches, addressed by stop instead of direction.
@@ -22,6 +23,7 @@ Item {
     readonly property string kind: root.row.kind || "fact"
     readonly property bool isGroup: root.kind === "group"
     readonly property bool isHint: root.kind === "hint"
+    readonly property bool isFavourite: root.kind === "favourite" || root.kind === "favouriteActions"
     readonly property bool isHero: root.kind === "hero"
     readonly property bool isLock: root.kind === "lock"
     readonly property bool isRuler: root.kind === "ruler"
@@ -38,8 +40,18 @@ Item {
         ? (root.row.state === "all" ? "check" : (root.row.state === "some" ? "minus" : ""))
         : (root.row.on === true ? "check" : "")
 
-    height: root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
+    height: root.isFavourite ? favourite.implicitHeight : root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
             : root.isHint ? hint.implicitHeight + 2 * Theme.spacing.rowPaddingY : Theme.rowHeight
+
+    Flea.SettingsFavourite {
+        id: favourite
+        anchors.fill: parent
+        visible: root.isFavourite
+        row: root.row
+        onActivated: root.activated()
+        onActionPicked: function (action) { root.stopPicked(action) }
+        onMoved: function (to) { root.favouriteMoved(to) }
+    }
 
     Column {
         id: hero
@@ -116,7 +128,7 @@ Item {
     // is the pattern, brand marks included, and the slot sets the label's indent the same way.
     Item {
         id: markSlot
-        visible: !root.isGroup && !root.isHint && !root.isHero
+        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
@@ -162,7 +174,7 @@ Item {
     }
 
     Text {
-        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isRuler
+        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite && !root.isRuler
         anchors.left: markSlot.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: trailing.left
@@ -252,7 +264,7 @@ Item {
 
     HoverHandler {
         id: pointer
-        enabled: root.hasBox || root.kind === "choice" || root.kind === "action"
+        enabled: root.hasBox || root.kind === "choice" || root.kind === "action" || root.isFavourite
         property bool armed: false
         property point restingAt
         onHoveredChanged: pointer.armed = false

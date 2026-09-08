@@ -1,6 +1,20 @@
 .import "../../ui/js/Places.js" as Places
 
 function run(check) {
+    var records = [{ label: "A", path: "/a" }, { label: "Again", path: "/a" }, 17, { label: "", path: "bad" }]
+    var stored = Places.storedEntries(records, "/home/test")
+    check("Flea keeps duplicate paths", stored.length, 4)
+    check("Flea preserves each duplicate label", stored[1].label, "Again")
+    check("invalid favourite remains identifiable", stored[2].original, 17)
+    check("invalid favourite is marked", stored[2].error.length > 0, true)
+    check("new favourites starts empty", Places.storedEntries([], "/home/test").length, 0)
+    check("sidebar width clamps low", Places.sidebarWidth(0), 160)
+    check("sidebar width clamps high", Places.sidebarWidth(999), 256)
+    check("sidebar width snaps to nearer stop", Places.sidebarWidth(231), 224)
+    check("bad width type falls back", Places.sidebarWidth("224"), 192)
+    check("tilde expands only for consumption", Places.storedEntries([{label:"Home",path:"~/docs"}], "/home/test")[0].path, "/home/test/docs")
+    check("stored tilde stays intact", Places.storedEntries([{label:"Home",path:"~/docs"}], "/home/test")[0].storedPath, "~/docs")
+
     var dirs = 'XDG_DESKTOP_DIR="$HOME/"\n'
              + 'XDG_DOWNLOAD_DIR="$HOME/Downloads"\n'
              + 'XDG_DOCUMENTS_DIR="$HOME/Documents"\n'

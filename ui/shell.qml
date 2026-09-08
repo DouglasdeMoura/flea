@@ -184,6 +184,7 @@ ShellRoot {
                 // A running operation's line, which stands until the operation replaces it; see ui/StatusBar.qml.
                 onSticky: function (text) { bar.sticky = text; bar.transfer = pane.transfer }
                 onConvertRequested: function (name) { convertDialog.open(name, pane) }
+                onPermissionsRequested: function (path) { permissionsDialog.open(path, pane) }
                 onPathBarRequested: chrome.startEdit()
                 // Issue 9. ViewState persists the stop and Theme derives its own tokens from it, so
                 // the whole window follows without any surface reading the chord itself.
@@ -231,6 +232,27 @@ ShellRoot {
             Connections {
                 target: convertDialog.item
                 function onAccepted(format, strip) { Ops.convert(pane, format, strip) }
+            }
+
+            Loader {
+                id: permissionsDialog
+                z: 2
+                anchors.fill: parent
+                active: false
+                source: "PermissionsDialog.qml"
+                readonly property bool opened: item !== null && item.opened
+                function open(path, holder) { active = true; item.open(path, holder) }
+            }
+            Connections {
+                target: permissionsDialog.item
+                function onRequested(message) { backend.send(message) }
+                function onChanged() { pane.refresh(); bar.say("Permissions changed.", false) }
+            }
+            Connections {
+                target: backend
+                function onPermissionsResult(message) {
+                    if (permissionsDialog.item) permissionsDialog.item.receive(message)
+                }
             }
 
             // The keymap sheet ? opens, over the whole window as the convert popup is.
@@ -317,7 +339,7 @@ ShellRoot {
             TapHandler {
                 acceptedButtons: Qt.BackButton
                 onTapped: {
-                    if (chrome.editing || convertDialog.opened || keymapSheet.opened
+                    if (chrome.editing || convertDialog.opened || permissionsDialog.opened || keymapSheet.opened
                             || networkDialog.opened || shareBrowser.active || preview.active
                             || pane.renameEditor() !== null || pane.sidebar.renameEditor() !== null)
                         return

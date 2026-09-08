@@ -76,6 +76,7 @@ FocusScope {
     signal sticky(string text)
     // The one popup, hosted in shell.qml beside the network dialog rather than inside the pane.
     signal convertRequested(string name)
+    signal permissionsRequested(string path)
     signal pathBarRequested()  // ":" and Ctrl+L; the bar is chrome, so shell.qml opens it as it does the popup above
     signal textSizeRequested(int direction)  // issue 9's zoom pair, +1, -1 or 0 to follow Omarchy again; the size is the window's
 
@@ -94,7 +95,7 @@ FocusScope {
     readonly property int defaultBuffer: 150
     property int bufferRows: defaultBuffer
     readonly property int buffer: Math.max(minBuffer, Math.min(maxBuffer, bufferRows))
-    readonly property int visibleRows: Math.max(1, Math.ceil(list.height / Theme.rowHeight))
+    readonly property int visibleRows: Math.max(1, Math.ceil(list.height / Theme.fileRowHeight))
     readonly property int windowSize: visibleRows + 2 * buffer
     readonly property int refetchMargin: 25
     readonly property int cacheRows: 4
@@ -130,11 +131,17 @@ FocusScope {
     readonly property string home: Quickshell.env("HOME") || ""
 
     // "list", "columns" or "grid"; the chrome's own buttons write it and the views read it.
-    property string viewMode: ViewState.state.view || "list"
+    property string viewMode: "list"
+    property bool preferencesReady: false
+    Component.onCompleted: {
+        root.viewMode = ViewState.state.view || "list"
+        root.preferencesReady = true
+    }
     // Only the list view draws a filter, so leaving it takes the filter with it.
     onViewModeChanged: {
         Filter.close(root)
-        ViewState.changeKey("view", root.viewMode)
+        if (root.preferencesReady && ViewState.state.view !== root.viewMode)
+            ViewState.changeKey("view", root.viewMode)
     }
     readonly property string listingPreferences: JSON.stringify([ViewState.state.hidden, ViewState.state.sort,
         ViewState.state.foldersFirst, ViewState.state.groupByKind])
@@ -234,7 +241,23 @@ FocusScope {
     function thumbFor(index) { return list.thumbFor(index) }
 
     // Lifted to Focus.act, see ui/js/Focus.js, which routes "settings" here from the list and the rail alike.
-    function act(action) { if (action === "settings") { root.settingsPanel.open(root); return } Focus.act(action, root) }
+    function act(action) {
+        if (action === "settings") { root.settingsPanel.open(root); return }
+        if (action === "permissions") { root.openPermissions(); return }
+        Focus.act(action, root)
+    }
+    function permissionSelection() {
+        var indices = Ops.targetIndices(root)
+        return indices.length === 1 ? root.rowFor(indices[0]) : null
+    }
+    function openPermissions() {
+        var row = root.permissionSelection()
+        if (!row || Menu.permissionsEntry(row.p, Ops.targetIndices(root).length).disabled) {
+            root.message("Permissions is available for one file or directory; symbolic links are not followed.", true)
+            return
+        }
+        root.permissionsRequested(root.join(root.path, row.n))
+    }
 
     // index is a listing row, which is what every caller outside ui/js/Filter.js holds; the clamp
     // and the scroll both happen in view space, because a filter can be narrowing what is drawn.
@@ -373,7 +396,9 @@ FocusScope {
             onThumbsApplied: function (work) { root.thumbState = Thumbs.applied(root.thumbState, work) }
         }
     }
-    readonly property int previewIndex: selectionPreview.item ? selectionPreview.item.loadedIndex : -1
+    readonly property int previewIndex: root.viewMode === "columns"
+        ? (columnsLoader.item ? columnsLoader.item.previewIndex : -1)
+        : (selectionPreview.item ? selectionPreview.item.loadedIndex : -1)
     function loadSelectionPreview() {
         if (!ViewState.previewColumn) ViewState.changeLeaf("preview", { column: true })
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()
@@ -412,6 +437,8 @@ FocusScope {
         taildropPeers: (root.cursorRow && !root.cursorRow.d) ? wire.taildrop.peers : []
         archiveFormats: root.backend.archiveFormats
         canConvert: root.backend.canConvert
+        rowMode: root.permissionSelection() ? root.permissionSelection().p : 0
+        selectionCount: Ops.targetIndices(root).length
         rowIsArchive: root.cursorRow !== null && !root.cursorRow.d && Archive.isArchive(root.cursorRow.n)
         rowIsImage: root.cursorRow !== null && root.cursorRow.i === "image-x-generic"
         dropboxPath: sidebar.dropboxReady ? root.home + "/Dropbox" : ""

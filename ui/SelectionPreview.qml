@@ -15,7 +15,7 @@ Flea.PreviewColumn {
 
     readonly property bool canRead: root.visible && root.pane !== null && !root.pane.listInFlight
     overlayOpen: root.pane && root.pane.preview ? root.pane.preview.active : false
-    thumb: root.pane && root.loadedIndex >= 0 ? root.pane.thumbFor(root.loadedIndex) : ""
+    thumb: root.pane && root.loadedIndex >= 0 ? Thumbs.fileFor(root.pane.thumbState, root.loadedIndex) : ""
     noThumbComing: root.row !== null && (root.row.t !== true || !root.pane
         || Thumbs.refused(root.pane.thumbState, root.loadedIndex))
 

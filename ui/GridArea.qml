@@ -169,6 +169,7 @@ GridView {
             return
         var range = root.visibleRange()
         var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, range.first, range.last, ViewState.thumbnailMode)
+        work.drop = work.drop.filter(function (index) { return index !== root.pane.previewIndex })
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
         root.thumbsApplied(work)

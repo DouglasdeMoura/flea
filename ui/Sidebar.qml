@@ -19,18 +19,37 @@ Item {
     // this tree took the keyboard away from the list, see ui/SidebarRow.qml's own note.
     property var menu: null
     property int cursorIndex: 0
-    property var favoriteEntries: []
-    readonly property var networkEntries: mounts.entries
+    readonly property var placesState: ViewState.state.places || ({})
+    readonly property var userFavouriteEntries: Places.storedEntries(Favourites.records, Quickshell.env("HOME")).map(function (entry) {
+        entry.error = entry.error || Favourites.statuses[entry.favouriteIndex] || ""
+        return entry
+    })
+    property var homeEntries: []
+    readonly property var favoriteEntries: root.userFavouriteEntries.concat(root.homeEntries)
+    readonly property int trashCount: trashMonitor.count
+    signal trashChanged()
+    function refreshTrash() { trashMonitor.refresh() }
+    TrashMonitor {
+        id: trashMonitor
+        enabled: root.placesState.showTrash !== false
+        onChanged: root.trashChanged()
+        onFailed: function(text) { root.message(text, true) }
+    }
+    readonly property var trashEntries: root.placesState.showTrash === false ? []
+        : [{ label: "Trash", path: "trash:///", group: "trash", kind: "trash", glyph: "trash", count: root.trashCount }]
+    signal trashRequested()
+
+    readonly property var networkEntries: root.placesState.showNetwork === false ? [] : mounts.entries
     // A changed rail is a changed row under any open editor, so the rename is void: the poll rebinds
     // its delegates in place, and an editor left standing came up empty over a different share.
     onNetworkEntriesChanged: root.cancelRename()
-    readonly property var deviceEntries: devices.entries
-    readonly property var entries: root.favoriteEntries.concat(root.networkEntries).concat(root.deviceEntries)
+    readonly property var deviceEntries: root.placesState.showDevices === false ? [] : devices.entries
+    readonly property var entries: root.favoriteEntries.concat(root.networkEntries).concat(root.deviceEntries).concat(root.trashEntries)
 
     // Clamped on the aggregate, never on a group: reading root.entries from onDeviceEntriesChanged
     // forces the entries binding's own first evaluation, which fires networkEntriesChanged, which
     // re-enters clampCursor before entries has a value. That threw a TypeError once per launch.
-    onEntriesChanged: root.clampCursor()
+    onEntriesChanged: { root.clampCursor(); availability.restart() }
 
     function clampCursor() {
         root.cursorIndex = Math.max(0, Math.min(root.entries.length - 1, root.cursorIndex))
@@ -53,7 +72,7 @@ Item {
     // Sized in characters, because a monospace makes that exact where a pixel constant would be an accident.
     readonly property int widthChars: 18
     // The mark and its gap count too, because ui/SidebarRow.qml draws them before the label: without them an 18-character entry elided at 15.
-    implicitWidth: metrics.advanceWidth * root.widthChars + 2 * Style.spacing.rowPaddingX + Theme.railIconSize + Style.spacing.rowGap
+    implicitWidth: Places.sidebarWidth(root.placesState.sidebarWidth)
 
     TextMetrics {
         id: metrics
@@ -109,9 +128,15 @@ Item {
 
     // Home is always first and is not in either file, so it is prepended rather than parsed; the
     // merge and its first-position-wins rule are Places.favorites', which tests/js/places.js checks.
+    onPlacesStateChanged: root.rebuild()
+    Connections {
+        target: Favourites
+        function onFailed(message) { root.message(message, true) }
+    }
+
     function rebuild() {
         var home = Quickshell.env("HOME")
-        root.favoriteEntries = Places.favorites(home, userDirsFile.text(), bookmarksFile.text(), Icons.sidebarGlyphFor)
+        root.homeEntries = root.placesState.showHome === false ? [] : Places.homeEntries(home, userDirsFile.text(), Icons.sidebarGlyphFor)
     }
 
     // ui/NetworkDialog.qml writes this same file; a watch set up before its parent directory
@@ -147,6 +172,11 @@ Item {
             return
         }
         root.cursorIndex = index
+        if (entry.kind === "favourite") {
+            root.menu.openForRail("favourite:" + entry.favouriteIndex + ":" + JSON.stringify(entry.original),
+                [{ label: "Remove", action: "removeFavourite", glyph: "minus" }], scenePosition)
+            return
+        }
         root.menu.openForRail(Mounts.railKey(entry), Mounts.rowMenu(entry), scenePosition)
     }
 
@@ -163,6 +193,13 @@ Item {
     // A chosen menu row, arriving with the row's key rather than its position; which row that
     // names is Mounts.release', so tests/js/network.js drives the resolution with no rail.
     function releaseChosen(action, key) {
+        if (action === "removeFavourite" && key.indexOf("favourite:") === 0) {
+            var end = key.indexOf(":", 10)
+            var index = Number(key.substring(10, end))
+            if (JSON.stringify(Favourites.records[index]) === key.substring(end + 1)) Favourites.remove(index)
+            else root.message("Favourites changed; reopen the menu before removing this row.", true)
+            return
+        }
         Mounts.release(action, key, devices, mounts, root)
     }
 
@@ -173,19 +210,29 @@ Item {
 
     // A favourite's path is already real and opens directly; a network share or a removable volume
     // may need mounting first, which is its own Service's job.
+    function openFavourite(index) {
+        var entry = root.userFavouriteEntries[index]
+        if (!entry) return
+        var error = Places.recordError(entry.original)
+        if (error) { root.message("Could not open " + entry.label + " · " + error, true); return }
+        if (entry.path.indexOf("://") >= 0 && entry.path.indexOf("file://") !== 0) {
+            mounts.openChildShare(entry.path, entry.label)
+        } else {
+            root.opened(entry.path.indexOf("file://") === 0 ? Mounts.decodePath(entry.path.substring(7)) : entry.path)
+        }
+    }
+
     function activate(index) {
         root.cancelRename()
         root.cursorIndex = index
-        if (index < root.favoriteEntries.length) {
-            root.opened(root.favoriteEntries[index].path)
-            return
-        }
+        var entry = root.entries[index]
+        if (!entry) return
+        if (entry.kind === "favourite") { root.openFavourite(entry.favouriteIndex); return }
+        if (entry.kind === "home") { root.opened(entry.path); return }
+        if (entry.kind === "trash") { root.trashRequested(); return }
         var rest = index - root.favoriteEntries.length
-        if (rest < root.networkEntries.length) {
-            mounts.activate(rest)
-            return
-        }
-        devices.activate(rest - root.networkEntries.length)
+        if (rest < root.networkEntries.length) mounts.activate(rest)
+        else devices.activate(rest - root.networkEntries.length)
     }
 
     // Network only: neither a favourite nor a device has a bookmark line of its own shape for
@@ -247,8 +294,23 @@ Item {
 
     // The rail's rows live in a viewport, not the bare Column they were: a rail taller than its
     // own height could not show its bottom rows by any means, wheel included.
+    Timer {
+        id: availability
+        interval: 120
+        onTriggered: {
+            var indices = []
+            for (var i = 0; i < favRepeater.count; i++) {
+                var item = favRepeater.itemAt(i)
+                var point = item ? item.mapToItem(scroller.contentItem, 0, 0) : null
+                if (point && point.y + item.height > scroller.contentY && point.y < scroller.contentY + scroller.height)
+                    indices.push(i)
+            }
+            Favourites.inspect(indices)
+        }
+    }
     Flickable {
         id: scroller
+        onContentYChanged: availability.restart()
         anchors.fill: parent
         clip: true
         contentWidth: width
@@ -271,7 +333,8 @@ Item {
                 id: placesHeading
                 x: Style.spacing.rowPaddingX
                 bottomPadding: Style.spacing.rowGap
-                text: "PLACES"
+                visible: root.userFavouriteEntries.length > 0
+                text: "FAVOURITES"
                 color: Theme.color.muted
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.caption
@@ -280,12 +343,33 @@ Item {
 
             Repeater {
                 id: favRepeater
-                model: root.favoriteEntries
+                model: root.userFavouriteEntries
                 delegate: SidebarRow {
                     cursor: index === root.cursorIndex
                     focused: root.focused
                     onActivated: function (idx) { root.activate(idx) }
                     onMenuRequested: function (idx, pos) { root.openRailMenu(idx, pos) }
+                }
+            }
+
+            Text {
+                visible: root.homeEntries.length > 0
+                x: Style.spacing.rowPaddingX
+                topPadding: root.userFavouriteEntries.length > 0 ? Style.spacing.panelGap : 0
+                bottomPadding: Style.spacing.rowGap
+                text: "HOME"
+                color: Theme.color.muted
+                font.family: Theme.font.family
+                font.pixelSize: Theme.font.caption
+                font.letterSpacing: 1
+            }
+            Repeater {
+                id: homeRepeater
+                model: root.homeEntries
+                delegate: SidebarRow {
+                    cursor: index + root.userFavouriteEntries.length === root.cursorIndex
+                    focused: root.focused
+                    onActivated: function (idx) { root.activate(idx + root.userFavouriteEntries.length) }
                 }
             }
 
@@ -383,6 +467,15 @@ Item {
                     onMenuRequested: function (idx, pos) { root.openRailMenu(idx + root.favoriteEntries.length + root.networkEntries.length, pos) }
                 }
             }
+            Repeater {
+                id: trashRepeater
+                model: root.trashEntries
+                delegate: SidebarRow {
+                    cursor: index + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length === root.cursorIndex
+                    focused: root.focused
+                    onActivated: root.trashRequested()
+                }
+            }
         }
     }
 
@@ -390,12 +483,14 @@ Item {
     function networkMarkItems() { var netRow = netRepeater.itemAt(0); return [addGlyph, addMark, netRow ? netRow.indicatorSlot : null] }
     // The rail has no ListView virtualization, so every row already exists; the same itemFor idiom ui/Pane.qml uses for the list, so a test can find a rail row's on-screen box.
     function railItemFor(index) {
-        if (index < root.favoriteEntries.length)
-            return favRepeater.itemAt(index)
+        if (index < root.userFavouriteEntries.length) return favRepeater.itemAt(index)
+        if (index < root.favoriteEntries.length) return homeRepeater.itemAt(index - root.userFavouriteEntries.length)
         var rest = index - root.favoriteEntries.length
         if (rest < root.networkEntries.length)
             return netRepeater.itemAt(rest)
-        return devRepeater.itemAt(rest - root.networkEntries.length)
+        rest -= root.networkEntries.length
+        if (rest < root.deviceEntries.length) return devRepeater.itemAt(rest)
+        return trashRepeater.itemAt(rest - root.deviceEntries.length)
     }
     // The one divider in the whole design.
     Rectangle {

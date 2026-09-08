@@ -95,9 +95,9 @@ QtObject {
     // value already on screen owes nothing, so a chord clamped at the end of its range writes nothing.
     function owe(key, next, owed) {
         var before = JSON.stringify(root.state[key])
-        root.state = next
         if (JSON.stringify(next[key]) === before)
             return
+        root.state = next
         root.unsaved = owed
         root.saveStatus = "Saving…"
         root.save()

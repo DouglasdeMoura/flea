@@ -17,6 +17,9 @@ Item {
     // carries, and the rail keeps the boards' own relative order around it.
     property string section: "view"
     property int cursor: 0
+    property int selectedFavourite: -1
+    property int favouriteActionIndex: 0
+    property int favouriteMoveTarget: -1
     // "rail" or "pane", which side Tab last gave the cursor to.
     property string side: "pane"
 
@@ -40,6 +43,10 @@ Item {
     // Everything ui/js/Settings.js rows() reads, built once here for the keyboard's rows and the pane's.
     readonly property var settingsState: ({
         data: ViewState.state,
+        home: Quickshell.env("HOME"),
+        favouriteStatuses: Favourites.statuses,
+        selectedFavourite: root.selectedFavourite,
+        favouriteAction: root.favouriteActionIndex,
         about: aboutFacts.facts,
         saveStatus: ViewState.saveStatus,
         textSize: ViewState.textSize,
@@ -92,6 +99,12 @@ Item {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
             return
+        if (row.kind === "favourite") {
+            root.selectedFavourite = row.favouriteIndex
+            if (root.focusHolder && root.focusHolder.sidebar) root.focusHolder.sidebar.openFavourite(row.favouriteIndex)
+            return
+        }
+        if (row.kind === "favouriteActions") { root.favouriteAction(root.favouriteActionIndex); return }
         if (row.id === "columns") { root.showSection("columns"); return }
         if (row.id === "backView") { root.showSection("view"); return }
         if (row.id === "keyboardSheet") {
@@ -127,6 +140,9 @@ Item {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
             return
+        if (row.kind === "favouriteActions") {
+            root.favouriteActionIndex = Math.max(0, Math.min(1, root.favouriteActionIndex + direction)); return
+        }
         if (row.id === "textMode") {
             ViewState.toggleTextFollow()
             return
@@ -151,10 +167,21 @@ Item {
 
     // A tick on the ruler names a stop outright. It lands in the same ViewState writer stepTextSize
     // itself calls, so a click, an h and a Ctrl+Shift+Plus cannot leave two different sizes stored.
+    function favouriteAction(action) {
+        if (action === 0 && root.focusHolder) {
+            var path = root.focusHolder.path
+            var label = path.substring(path.lastIndexOf("/") + 1) || path
+            Favourites.add(path, label)
+        } else if (action === 1 && root.selectedFavourite >= 0) {
+            Favourites.remove(root.selectedFavourite)
+        }
+    }
+
     function pickRowStop(index, stop) {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
             return
+        if (row.kind === "favouriteActions") { root.favouriteAction(stop); return }
         // A segment names the value it was clicked on where the ruler names a stop, so both arrive
         // here addressed by index and the row decides which writer that index belongs to.
         if (row.id === "textMode") {
@@ -180,10 +207,19 @@ Item {
             return
         }
         root.cursor = Settings.stepRow(root.rows, root.cursor, delta)
+        if (root.rows[root.cursor] && root.rows[root.cursor].kind === "favourite")
+            root.selectedFavourite = root.rows[root.cursor].favouriteIndex
         root.showCursor()
     }
 
     function showCursor() { pane.showCursor(root.cursor) }
+    function sectionsText() { return JSON.stringify(Settings.SECTIONS) }
+    function rowItemForId(id) {
+        for (var i = 0; i < root.rows.length; i++) {
+            if (root.rows[i].id === id) return pane.rowItem(i)
+        }
+        return null
+    }
     function railItemFor(id) { return rail.itemFor(id) }
     function paneScroll() { return Math.round(pane.contentHeight) + "|" + Math.round(pane.height) }
 
@@ -346,12 +382,30 @@ Item {
                 values: root.settingsState
                 cursor: root.cursor
                 side: root.side
-                onPointerMoved: function (index) { root.side = "pane"; root.cursor = index }
+                onPointerMoved: function (index) {
+                    root.side = "pane"; root.cursor = index
+                    if (root.rows[index].kind === "favourite") root.selectedFavourite = root.rows[index].favouriteIndex
+                }
+                onFavouriteMoved: function (index, to) {
+                    if (Favourites.move(root.rows[index].favouriteIndex, to)) root.favouriteMoveTarget = to
+                }
                 onActivated: function (index) { root.side = "pane"; root.cursor = index; root.activate(index) }
                 onStepped: function (index, direction) { root.side = "pane"; root.cursor = index; root.stepRowValue(index, direction) }
                 onStopPicked: function (index, stop) { root.side = "pane"; root.cursor = index; root.pickRowStop(index, stop) }
             }
         }
+    }
+
+    Connections {
+        target: Favourites
+        function onWrote() {
+            if (root.favouriteMoveTarget < 0) return
+            root.selectedFavourite = root.favouriteMoveTarget
+            root.cursor = root.favouriteMoveTarget + 1
+            root.favouriteMoveTarget = -1
+            root.showCursor()
+        }
+        function onFailed(message) { root.favouriteMoveTarget = -1 }
     }
 
     Flea.AboutFacts { id: aboutFacts; active: root.opened && root.section === "about" }
@@ -369,6 +423,14 @@ Item {
             }
             if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                 root.side = root.side === "rail" ? "pane" : "rail"
+                return
+            }
+            var row = root.rows[root.cursor]
+            if (root.side === "pane" && row && row.kind === "favourite" && (event.modifiers & Qt.ShiftModifier)
+                    && (event.key === Qt.Key_J || event.key === Qt.Key_K)) {
+                var direction = event.key === Qt.Key_J ? 1 : -1
+                var to = Math.max(0, Math.min(Favourites.records.length - 1, row.favouriteIndex + direction))
+                if (to !== row.favouriteIndex && Favourites.move(row.favouriteIndex, to)) root.favouriteMoveTarget = to
                 return
             }
             if (event.key === Qt.Key_Down || event.text === "j") {

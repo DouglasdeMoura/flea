@@ -35,7 +35,7 @@ ListView {
     focus: true
     model: pane.shownTotal
     clip: true
-    cacheBuffer: Theme.rowHeight * pane.cacheRows
+    cacheBuffer: Theme.fileRowHeight * pane.cacheRows
     boundsBehavior: Flickable.StopAtBounds
     highlightMoveDuration: 0
     // Every property the delegate draws is a binding on index, so a row leaving the buffer is re-bound rather than rebuilt.
@@ -198,7 +198,7 @@ ListView {
 
     onContentYChanged: {
         // The wheel moves the view and not the cursor, so the cursor follows the viewport here.
-        var first = Math.floor(root.contentY / Theme.rowHeight)
+        var first = Math.floor(root.contentY / Theme.fileRowHeight)
         var last = Math.min(root.pane.shownTotal - 1, first + root.pane.visibleRows - 1)
         if (last >= first) {
             root.cursorClamped(first, last)
@@ -332,7 +332,7 @@ ListView {
     function requestThumbs() {
         if (root.pane.shownTotal === 0 || root.pane.listInFlight)
             return
-        var view = Thumbs.viewport(root.contentY, Theme.rowHeight, root.pane.visibleRows, root.pane.shownTotal)
+        var view = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)
         // A filtered viewport covers a set and not a run, so the run it spans is what the planner
         // gets and Filter.cut takes back every row inside that run the filter is hiding.
         var span = Filter.span(root.pane.shown, view.first, view.last)
@@ -359,7 +359,7 @@ ListView {
         if (root.pane.shownTotal === 0 || root.pane.listInFlight)
             return
         // Thumbs.viewport() is reused: it takes no thumb-specific state, only geometry.
-        var view = Thumbs.viewport(root.contentY, Theme.rowHeight, root.pane.visibleRows, root.pane.shownTotal)
+        var view = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)
         var span = Filter.span(root.pane.shown, view.first, view.last)
         var ask = Filter.keep(DirSizes.plan(root.pane.dirSizeState, root.pane.rows, root.pane.held, span.first, span.last, ViewState.thumbnailMode), root.pane.shown)
         if (ask.length > 0) {
@@ -375,7 +375,7 @@ ListView {
         // window request goes out while one stands, which is what "no round trip" means here.
         if (root.pane.total === 0 || root.pane.shown !== null)
             return
-        var firstVisible = Math.floor(root.contentY / Theme.rowHeight)
+        var firstVisible = Math.floor(root.contentY / Theme.fileRowHeight)
         var lastVisible = firstVisible + root.pane.visibleRows
         if (root.pane.rows.length === 0) {
             root.requestAround(firstVisible)

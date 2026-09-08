@@ -30,6 +30,7 @@ function listingEntries(p) {
     var out = []
     out.push({ label: "Open", action: "open", glyph: "folder-open" })
     out.push({ label: "Copy path", action: "copypath", glyph: "file-text" })
+    out.push(permissionsEntry(p.rowMode, p.selectionCount))
     out.push({ separator: true })
     // SettingsMenus.html's six basic rows, in its own order. Cut, Copy and Paste were keyboard
     // only until the Menus section grew a switch for each of them, and a switch over a row no
@@ -78,6 +79,15 @@ function listingEntries(p) {
     return applyHidden(out, p.hiddenActions)
 }
 
+// The mode describes the selected object itself, so a symlink never grants access to its unseen target.
+function permissionsEntry(mode, count) {
+    var kind = (Number(mode) || 0) & 0o170000
+    var single = count === 1
+    var allowed = single && (kind === 0o100000 || kind === 0o040000)
+    return { label: "Permissions", action: "permissions", glyph: "lock", disabled: !allowed,
+             hint: !single ? "Unavailable" : kind === 0o120000 ? "Symlink target not changed" : allowed ? "" : "Unavailable" }
+}
+
 // Menus.html's background column, drawn on a right click that landed on no row: the directory's
 // own actions, in the board's order and with its rules. Its New File row is not built, because
 // this release's backend has mkdir and no create-empty-file of any kind, and a row that cannot
@@ -99,7 +109,7 @@ function backgroundEntries(p) {
 
 // The Sort by flyout, built from ui/js/Sort.js's own ORDERS so it can only ever offer an order the
 // backend really produces; a fourth key would earn a refusal instead of a listing.
-var SORT_LABELS = { name: "Name", size: "Size", mtime: "Date Modified" }
+var SORT_LABELS = { name: "Name", size: "Size", mtime: "Date Modified", kind: "Kind" }
 
 function sortEntries() {
     var out = []

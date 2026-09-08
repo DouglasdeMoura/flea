@@ -25,6 +25,8 @@ Item {
     // Whether the cursor row is an archive, and whether it is an image; both decided client-side.
     property bool rowIsArchive: false
     property bool rowIsImage: false
+    property int rowMode: 0
+    property int selectionCount: 0
     // Empty until the stock Dropbox service is installed and authenticated, which is what gates the row.
     property string dropboxPath: ""
     // True when the cursor row already lives under ~/Dropbox, where a share link is the useful action.
@@ -98,6 +100,8 @@ Item {
             rowIsArchive: root.rowIsArchive,
             rowIsImage: root.rowIsImage,
             canConvert: root.canConvert,
+            rowMode: root.rowMode,
+            selectionCount: root.selectionCount,
             // The Menus settings section's stored set; ui/js/Menu.js applyHidden is what reads it.
             hiddenActions: ViewState.menuHidden
         })
@@ -111,7 +115,7 @@ Item {
     function stepCursor(from, delta) {
         var i = from + delta
         while (i >= 0 && i < root.entries.length) {
-            if (root.entries[i].separator !== true)
+            if (root.entries[i].separator !== true && root.entries[i].disabled !== true)
                 return i
             i += delta
         }
@@ -208,6 +212,9 @@ Item {
 
     // The menu closes before the action runs, so it never hangs over the listing that action opened.
     function choose(action) {
+        for (var i = 0; i < root.entries.length; i++) {
+            if (root.entries[i].action === action && root.entries[i].disabled === true) return
+        }
         // Both read before close(), which is what clears them.
         var key = root.railKey
         var rail = root.forRail
@@ -228,6 +235,7 @@ Item {
     }
 
     function openSubmenu(index) {
+        if (!root.entries[index] || root.entries[index].disabled === true) return
         root.openSubmenuRow = index
         root.submenuCursor = 0
     }
@@ -258,7 +266,7 @@ Item {
 
     Rectangle {
         id: frame
-        width: Theme.menuWidth
+        width: Math.min(root.width, Theme.menuWidth)
         // The vertical inset keeps the first and last row's square highlight off the rounded corners.
         height: rows.implicitHeight + 2 * Theme.spacing.rowPaddingY
         // The height this menu is actually going to have, arriving after place() has already run.

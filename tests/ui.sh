@@ -5659,7 +5659,7 @@ case_renamelife() {
     kill_flea
 }
 
-# The settings panel: its doors, its three control groups, and the one thing a settings window
+# The settings panel: its doors, its seven sections, and the one thing a settings window
 # has to do that a menu does not, which is outlive the process that wrote it. XDG_STATE_HOME and
 # XDG_CONFIG_HOME both point inside the fixture root for the whole case, so nothing here can write
 # the operator's own ~/.local/state/flea/ui.json; hard rule 9 covers writes and not only deletes.
@@ -5687,6 +5687,10 @@ case_settings() {
     wait_listing 2
 
     settings_doors
+    settings_view
+    settings_preview
+    settings_places "$dir"
+    settings_about
     settings_display
     settings_menus
     settings_keys
@@ -5724,11 +5728,12 @@ case_settings() {
     wait_listing 2
     [[ "$(token_of baseSize)" == "$pinned_base" ]] \
         || fail "settings: a restart lost the ${pinned_base}px override, it draws at $(token_of baseSize)"
-    key , >/dev/null
+    settings_open_key
     settle
+    settings_section display
     [[ "$(ipc settingsRows)" == *"ruler|Effective|${pinned_base}px"* ]] \
         || fail "settings: a restart brought the panel back on a different stop"
-    # settingsRows draws the section the panel is ON and a new process always opens on Display, so
+    # A new process opens on View; the explicit Display selection above reads the pinned size, while
     # the master row is not reachable until the rail has been walked. The master is derived from the
     # stored set, so a restart that read only menu.hidden must still draw the five of six the panel
     # left behind, and the six rows under it must agree with it.
@@ -5761,10 +5766,195 @@ case_settings() {
 
     settings_read_refused "$stored" "$dir"
 
-    printf 'SETTINGS doors=ok display=ok menus=ok keys=ok restart=ok backend=ok refused=ok unread=ok\n'
+    printf 'SETTINGS doors=ok view=ok places=ok preview=ok about=ok display=ok menus=ok keys=ok restart=ok backend=ok refused=ok unread=ok\n'
     if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
     if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
     kill_flea
+}
+
+# Preset-specific native delivery, with no mutation through the IPC seam.
+settings_open_key() {
+    case "$(ipc keymapPreset)" in
+        mac|windows) key -M ctrl -k comma -m ctrl >/dev/null ;;
+        *) key , >/dev/null ;;
+    esac
+}
+
+settings_focus_row() {
+    local id="$1" target cursor count attempt
+    target=$(ipc settingsModel | jq -r --arg id "$id" 'map(.id) | index($id) // empty')
+    count=$(ipc settingsModel | jq 'length')
+    [[ "$target" =~ ^[0-9]+$ ]] || fail "settings: no control with id $id"
+    [[ "$(ipc settingsSide)" == "pane" ]] || { key -k Tab >/dev/null; settle; }
+    for (( attempt = 0; attempt <= count; attempt++ )); do
+        cursor=$(ipc settingsCursor)
+        [[ "$cursor" == "$target" ]] && return
+        if (( cursor < target )); then key j >/dev/null; else key k >/dev/null; fi
+        settle
+    done
+    fail "settings: keyboard could not focus $id at row $target"
+}
+
+settings_wait_value() {
+    local filter="$1" attempt
+    for attempt in $(seq 1 30); do
+        if ipc uiSettings | jq -e "$filter" >/dev/null \
+            && jq -e "$filter" "$XDG_STATE_HOME/flea/ui.json" >/dev/null; then return; fi
+        sleep 0.1
+    done
+    fail "settings: session and persisted state never agreed on $filter"
+}
+
+settings_click_control() {
+    local id="$1" wx wy ww wh cx cy
+    settings_focus_row "$id"
+    read -r wx wy ww wh < <(window_box)
+    read -r cx cy <<< "$(ipc settingsRowCentre "$id")"
+    [[ "$cx" =~ ^[0-9]+$ && "$cy" =~ ^[0-9]+$ ]] || fail "settings: no real centre for $id"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    settle
+}
+
+settings_view() {
+    settings_open_key
+    settle
+    settings_section view
+    local inventory
+    inventory=$(ipc settingsSections | jq -r 'map(.id) | join(",")')
+    [[ "$inventory" == "view,places,preview,keys,display,menus,about" ]] || fail "settings: wrong rail order $inventory"
+    settings_focus_row view
+    key l >/dev/null; settle
+    [[ "$(ipc viewMode)" == "columns" ]] || fail "settings: View choice did not change the listing"
+    key h >/dev/null; settle
+    [[ "$(ipc viewMode)" == "list" ]] || fail "settings: View choice did not restore List"
+    settings_focus_row addressBar
+    key h >/dev/null; settle
+    settings_wait_value '.addressBar == "path"'
+    key l >/dev/null; settle
+    settings_wait_value '.addressBar == "breadcrumb"'
+    settings_focus_row density
+    local chrome rail before_card
+    chrome=$(token_of chromeHeight)
+    rail=$(token_of railRowHeight)
+    before_card=$(ipc settingsCardRect)
+    key h >/dev/null; settle
+    settings_wait_value '.density == "compact"'
+    [[ "$(token_of chromeHeight)" == "$chrome" && "$(token_of railRowHeight)" == "$rail" && "$(ipc settingsCardRect)" == "$before_card" ]] \
+        || fail "settings: row density changed shared chrome, rail, or Settings card geometry"
+    key l >/dev/null; settle
+    settings_wait_value '.density == "normal"'
+    settings_click_control hidden
+    settings_wait_value '.hidden == true'
+    [[ "$(ipc showHidden)" == "true" ]] || fail "settings: Show hidden control has no listing consumer"
+    key -k Space >/dev/null; settle
+    settings_wait_value '.hidden == false'
+    settings_focus_row wrapAtEnds
+    key -k Space >/dev/null; settle
+    settings_wait_value '.wrapAtEnds == true'
+    key -k Escape >/dev/null; settle
+    key -k End >/dev/null; key j >/dev/null; settle
+    [[ "$(ipc cursor)" == "0" ]] || fail "settings: Wrap at list ends did not wrap the native cursor"
+    settings_open_key; settle
+    settings_section view
+    settings_focus_row wrapAtEnds
+    key -k Space >/dev/null; settle
+    settings_wait_value '.wrapAtEnds == false'
+    shot settings-view
+    key -k Escape >/dev/null; settle
+}
+
+settings_preview() {
+    settings_open_key; settle
+    settings_section preview
+    settings_focus_row preview.loadOn
+    key l >/dev/null; settle
+    settings_wait_value '.preview.loadOn == "manual"'
+    key h >/dev/null; settle
+    settings_wait_value '.preview.loadOn == "automatic"'
+    settings_click_control preview.column
+    settings_wait_value '.preview.column == false'
+    key -k Space >/dev/null; settle
+    settings_wait_value '.preview.column == true'
+    settings_focus_row preview.thumbnails
+    key l >/dev/null; settle
+    settings_wait_value '.preview.thumbnails == "off"'
+    key h >/dev/null; settle
+    settings_wait_value '.preview.thumbnails == "media"'
+    settings_focus_row preview.thumbSize
+    key l >/dev/null; settle
+    settings_wait_value '.preview.thumbSize == "large"'
+    key h >/dev/null; settle
+    settings_wait_value '.preview.thumbSize == "medium"'
+    settings_click_control preview.ctrlZoom
+    settings_wait_value '.preview.ctrlZoom == false'
+    key -k Space >/dev/null; settle
+    settings_wait_value '.preview.ctrlZoom == true'
+    shot settings-preview
+    key -k Escape >/dev/null; settle
+}
+
+settings_places() {
+    local dir="$1" flag group
+    settings_open_key; settle
+    settings_section places
+    settings_wait_value '.places.favourites == []'
+    settings_focus_row favouriteActions
+    key -k Return >/dev/null; settle
+    settings_wait_value '.places.favourites | length == 1'
+    key -k Return >/dev/null; settle
+    settings_wait_value '.places.favourites | length == 2'
+    ipc uiSettings | jq -e --arg path "$dir" '.places.favourites | length == 2 and all(.[]; .path == $path)' >/dev/null \
+        || fail "settings: Add current folder did not preserve duplicate paths"
+    settings_focus_row favourite:0
+    key -M shift -k j -m shift >/dev/null; settle
+    [[ "$(ipc settingsCursor)" == "2" ]] || fail "settings: Shift+J did not keep focus on the moved favourite"
+    settings_focus_row favouriteActions
+    key l >/dev/null; key -k Return >/dev/null; settle
+    settings_wait_value '.places.favourites | length == 1'
+    settings_focus_row favourite:0
+    settings_focus_row favouriteActions
+    key -k Return >/dev/null; settle
+    settings_wait_value '.places.favourites == []'
+    for flag in showHome showNetwork showDevices showTrash driveSize; do
+        settings_click_control "places.$flag"
+        settings_wait_value ".places.$flag == false"
+        case "$flag" in
+            showHome) group=home ;;
+            showNetwork) group=network ;;
+            showDevices) group=device ;;
+            showTrash) group=trash ;;
+            *) group= ;;
+        esac
+        if [[ -n "$group" ]]; then
+            ipc railEntries | jq -e --arg group "$group" 'all(.[]; .group != $group)' >/dev/null \
+                || fail "settings: $flag did not remove its actual rail rows"
+        fi
+        key -k Space >/dev/null; settle
+        settings_wait_value ".places.$flag == true"
+    done
+    settings_focus_row places.sidebarWidth
+    key l >/dev/null; settle
+    settings_wait_value '.places.sidebarWidth == 256'
+    key h >/dev/null; settle
+    settings_wait_value '.places.sidebarWidth == 224'
+    shot settings-places
+    key -k Escape >/dev/null; settle
+}
+
+settings_about() {
+    settings_open_key; settle
+    settings_section about
+    local rows
+    rows=$(ipc settingsModel)
+    printf '%s' "$rows" | jq -e 'any(.[]; .kind == "fact" and .label == "Language" and .value == "English · read-only")' >/dev/null \
+        || fail "settings: About language is not passive metadata"
+    printf '%s' "$rows" | jq -e 'any(.[]; .id == "support" and .kind == "action") and any(.[]; .id == "reportIssue" and .kind == "action")' >/dev/null \
+        || fail "settings: About omitted support routes"
+    shot settings-about
+    settings_focus_row keyboardSheet
+    key -k Return >/dev/null; settle
+    [[ "$(ipc keymapSheetOpen)" == "true" && "$(ipc settingsOpen)" == "false" ]] || fail "settings: About Keyboard sheet did not open the real sheet"
+    key -k Escape >/dev/null; settle
 }
 
 # The state this case starts from, laid down through flea --ui-state so the schema sees it too. The
@@ -5772,7 +5962,7 @@ case_settings() {
 settings_seed() {
     local state="$1" config="$2" stored="$3"
     env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$config" "$flea_bin" --ui-state \
-        '{"columns":["name","size"],"places":{"sidebarWidth":240},"sort":{"key":"size"}}' >/dev/null \
+        '{"columns":["name","size"],"places":{"sidebarWidth":224},"sort":{"key":"size"}}' >/dev/null \
         || fail "settings: the seeding write through flea --ui-state failed"
     jq '. + {fromANewerFlea: {aKeyThisBuildHasNeverHeardOf: true}}' "$stored" > "$stored.seed" \
         || fail "settings: the newer-Flea key could not be added to the seed"
@@ -5794,7 +5984,7 @@ settings_assert_backend() {
     # The preservation half, and the whole point of one store: four settings writes are four merges,
     # so the retained view state, the backend's own keys and a newer Flea's key are all still here.
     settings_backend_holds "$doc" '.columns == ["name","size"]' "the stored column set"
-    settings_backend_holds "$doc" '.places.sidebarWidth == 240' "places.sidebarWidth"
+    settings_backend_holds "$doc" '.places.sidebarWidth == 224' "places.sidebarWidth"
     settings_backend_holds "$doc" '.sort.key == "size"' "sort.key"
     settings_backend_holds "$doc" '.fromANewerFlea.aKeyThisBuildHasNeverHeardOf == true' \
         "the key only a newer Flea knows"
@@ -5842,7 +6032,7 @@ settings_write_refused() {
     local state="$1" pinned_base="$2" before refused_base retried_base
     before=$(cat "$state/flea/ui.json")
     chmod 500 "$state/flea" || fail "settings: the state directory could not be made read-only"
-    key , >/dev/null
+    settings_open_key
     settle
     # The stop row is Display's, and the panel reopens on whatever section the last block left it on.
     settings_section display
@@ -5875,12 +6065,12 @@ settings_write_refused() {
 # All three doors the Settings board draws: the comma key from either view, the toolbar's sliders
 # button, and the Settings row on the background menu.
 settings_doors() {
-    key , >/dev/null
+    settings_open_key
     settle
     [[ "$(ipc settingsOpen)" == "true" ]] || fail "settings: the comma key did not open the panel"
-    [[ "$(ipc settingsSection)" == "display" ]] \
-        || fail "settings: the panel did not open on Display, it is on $(ipc settingsSection)"
-    shot settings-display
+    [[ "$(ipc settingsSection)" == "view" ]] \
+        || fail "settings: the panel did not open on View, it is on $(ipc settingsSection)"
+    shot settings-view-initial
     key -k Escape >/dev/null
     settle
     [[ "$(ipc settingsOpen)" == "false" ]] || fail "settings: Escape did not close the panel"
@@ -5929,8 +6119,9 @@ settings_doors() {
 settings_title_on_display=""
 
 settings_display() {
-    key , >/dev/null
+    settings_open_key
     settle
+    settings_section display
     settings_title_on_display=$(ipc settingsTitleCentre)
     [[ -n "$settings_title_on_display" ]] || fail "settings: the panel has no title to measure"
     local omarchy_base
@@ -6003,7 +6194,7 @@ settings_chord_alias() {
         || fail "settings: Ctrl+Shift+Plus did not grow the text size, still $grown"
     [[ "$(ipc lastMessage)" == "Text size ${grown}px. Ctrl+Shift+0 follows Omarchy again." ]] \
         || fail "settings: the chord did not announce its stop, got $(ipc lastMessage)"
-    key , >/dev/null
+    settings_open_key
     settle
     [[ "$(ipc settingsRows)" == *"ruler|Effective|${grown}px"* ]] \
         || fail "settings: the panel does not show the stop the chord set, got $(ipc settingsRows)"
@@ -6017,7 +6208,7 @@ settings_chord_alias() {
     settle
     [[ "$(ipc lastMessage)" == "Text size follows Omarchy, ${omarchy_base}px." ]] \
         || fail "settings: Ctrl+Shift+0 did not announce following Omarchy, got $(ipc lastMessage)"
-    key , >/dev/null
+    settings_open_key
     settle
     [[ "$(ipc settingsRows)" == *"choice|Text size|Follow Omarchy"* ]] \
         || fail "settings: the chord's reset did not reach the panel's own mode row"
@@ -6076,7 +6267,7 @@ assert_monitor_scale_row() {
 # The Menus section, whose consumer is ui/js/Menu.js: every assertion here is made against the real
 # context menu, never against the stored set alone.
 settings_menus() {
-    key , >/dev/null
+    settings_open_key
     settle
     settings_section menus
     [[ "$(ipc settingsTitleCentre)" == "$settings_title_on_display" ]] \
@@ -6101,7 +6292,7 @@ settings_menus() {
     settle
 
     # The master itself: a partial one enables all six, and a checked one switches all six off.
-    key , >/dev/null
+    settings_open_key
     settle
     key -k Space >/dev/null
     settle
@@ -6128,7 +6319,7 @@ settings_menus() {
     settle
 
     # Back to all six, then off with Paste alone, which is the state the restart check reads back.
-    key , >/dev/null
+    settings_open_key
     settle
     key -k Space >/dev/null
     settle
@@ -6141,33 +6332,20 @@ settings_menus() {
     settle
 }
 
-# The rail walk to a named section, with the panel already open, from wherever it was last left. The
-# section outlives a close, so a block that needs one says so rather than inheriting it: leaving the
-# panel on Menus after the restart check sent the whole refusal block's h presses to a menu row.
-# ui/SettingsPanel.qml clamps the rail rather than wrapping it, so two k presses reach the top row
-# from any of the three and j walks down from there.
+# Section selection survives a close; walk the current seven-row rail through real keys.
 settings_section() {
-    local want="$1" down step
-    case "$want" in
-        keys) down=0 ;;
-        display) down=1 ;;
-        menus) down=2 ;;
-        *) fail "settings: $want is not a rail section" ;;
-    esac
-    key -k Tab >/dev/null
-    settle
+    local want="$1" sections down count step
+    sections=$(ipc settingsSections)
+    down=$(printf '%s' "$sections" | jq -r --arg id "$want" 'map(.id) | index($id) // empty')
+    count=$(printf '%s' "$sections" | jq 'length')
+    [[ "$down" =~ ^[0-9]+$ && "$count" == 7 ]] || fail "settings: section inventory is not the seven boards: $sections"
+    if [[ "$(ipc settingsSide)" != "rail" ]]; then key -k Tab >/dev/null; settle; fi
     [[ "$(ipc settingsSide)" == "rail" ]] || fail "settings: Tab did not give the cursor to the rail"
-    key k >/dev/null
-    key k >/dev/null
+    for (( step = 1; step < count; step++ )); do key k >/dev/null; done
     settle
-    [[ "$(ipc settingsSection)" == "keys" ]] \
-        || fail "settings: two k presses did not reach the top of the rail, it is on $(ipc settingsSection)"
-    for (( step = 0; step < down; step++ )); do
-        key j >/dev/null
-        settle
-    done
-    [[ "$(ipc settingsSection)" == "$want" ]] \
-        || fail "settings: the rail did not reach $want, it is on $(ipc settingsSection)"
+    [[ "$(ipc settingsSection)" == "view" ]] || fail "settings: rail did not reach View"
+    for (( step = 0; step < down; step++ )); do key j >/dev/null; settle; done
+    [[ "$(ipc settingsSection)" == "$want" ]] || fail "settings: rail did not reach $want"
     key -k Tab >/dev/null
     settle
 }
@@ -6186,7 +6364,7 @@ settings_menu_lacks() {
 # The Default/Windows toggle, proved by the keys themselves: a chord one preset binds and the other
 # does not, driven through the real window in both states.
 settings_keys() {
-    key , >/dev/null
+    settings_open_key
     settle
     settings_section keys
     [[ "$(ipc settingsTitleCentre)" == "$settings_title_on_display" ]] \

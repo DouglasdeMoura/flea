@@ -114,6 +114,13 @@ QtObject {
         // One row per line, kind|label|value, so a test reads what the panel draws without OCR and
         // the stored value behind each control is assertable from the same string.
         function settingsRows(): string { return root.settingsPanel ? root.settingsPanel.rowsText() : "" }
+        function settingsModel(): string { return root.settingsPanel ? JSON.stringify(root.settingsPanel.rows) : "[]" }
+        function settingsSections(): string { return root.settingsPanel ? root.settingsPanel.sectionsText() : "[]" }
+        function settingsRowCentre(id: string): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.rowItemForId(id)) : "" }
+        function uiSettings(): string { return JSON.stringify(ViewState.state) }
+        function keymapPreset(): string { return ViewState.keysPreset }
+        function railEntries(): string { return JSON.stringify(root.pane.sidebar.entries) }
+
         // The panel's own title, a spot on the card with no control under it: a click there must leave the panel open.
         function settingsTitleCentre(): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.titleItem) : "" }
         // A rail row's centre, clicked over the list by tests/ui.sh clickthrough to prove the press stops at the panel.

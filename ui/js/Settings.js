@@ -1,9 +1,11 @@
 .pragma library
 .import "TextSize.js" as TextSize
+.import "Places.js" as Places
 
 // Sections follow the current Desktop boards; their state uses the shared ui.json updater.
 var SECTIONS = [
     { id: "view", label: "View", glyph: "sliders" },
+    { id: "places", label: "Places", glyph: "star" },
     { id: "preview", label: "Preview", glyph: "columns" },
     { id: "keys", label: "Keys", glyph: "keyboard" },
     { id: "display", label: "Display", glyph: "maximize" },
@@ -27,7 +29,7 @@ var BASIC = ["cut", "copy", "paste", "duplicate", "rename", "trash"]
 // cannot draw is absent rather than switched off: a toggle over a row no menu has is a mock control.
 var MENU_GROUPS = [
     { label: "Basic file actions", master: true, ids: BASIC },
-    { label: "Open and inspect", master: false, ids: ["openTerminal", "copypath"] },
+    { label: "Open and inspect", master: false, ids: ["openTerminal", "copypath", "permissions"] },
     { label: "Extras", master: false,
       ids: ["compress", "extract", "convert", "taildrop", "dropbox", "sharelink"] }
 ]
@@ -39,7 +41,7 @@ var LOCKED = ["open", "toggleHidden"]
 
 var LABELS = {
     cut: "Cut", copy: "Copy", paste: "Paste", duplicate: "Duplicate", rename: "Rename",
-    trash: "Move to Trash", openTerminal: "Open in terminal", copypath: "Copy path",
+    trash: "Move to Trash", openTerminal: "Open in terminal", copypath: "Copy path", permissions: "Permissions",
     compress: "Compress", extract: "Extract",
     convert: "Convert", taildrop: "Send with Taildrop", dropbox: "Move to Dropbox",
     sharelink: "Copy share link", open: "Open", toggleHidden: "Show hidden files"
@@ -54,7 +56,7 @@ var PRESET_LABELS = { "default": "Default", vim: "Vim", mac: "Mac", windows: "Wi
 // ui/js/Menu.js's own glyphs by action id, which tests/js/settings.js asserts the two agree on.
 var GLYPHS = {
     cut: "scissors", copy: "copy", paste: "clipboard", duplicate: "file-plus", rename: "rename",
-    trash: "trash", openTerminal: "terminal", copypath: "file-text", compress: "archive",
+    trash: "trash", openTerminal: "terminal", copypath: "file-text", permissions: "lock", compress: "archive",
     extract: "archive-out",
     convert: "sliders", sharelink: "network", open: "folder-open", toggleHidden: "eye"
 }
@@ -141,13 +143,15 @@ function toggleId(hidden, id) {
 function focusable(row) {
     if (row.kind === "ruler")
         return row.on === true
-    return row.kind === "check" || row.kind === "master" || row.kind === "choice" || row.kind === "action"
+    return row.kind === "check" || row.kind === "master" || row.kind === "choice" || row.kind === "action" || row.kind === "favourite" || row.kind === "favouriteActions"
 }
 
 // state: { textSize, hidden, keyHints, preset, baseSize, monitorScale, cornerRadius, presetKeys }
 function rows(section, state) {
     if (section === "columns")
         return columnRows(state)
+    if (section === "places")
+        return placesRows(state)
     if (section === "view")
         return viewRows(state)
     if (section === "preview")
@@ -348,5 +352,28 @@ function columnRows(state) {
         rows.push({ kind: "check", id: "column:" + id, label: ["Mode", "Size", "Date", "Kind"][i], on: columns.indexOf(id) >= 0 })
     }
     rows.push({ kind: "action", id: "backView", label: "Back to View", value: "Back" })
+    return rows
+}
+
+function placesRows(state) {
+    var data = (state.data || {}).places || {}
+    var entries = Places.storedEntries(data.favourites || [], state.home || "")
+    var rows = [{ kind: "group", label: "Favourites" }]
+    for (var i = 0; i < entries.length; i++) {
+        rows.push({ kind: "favourite", id: "favourite:" + i, label: entries[i].label,
+            value: entries[i].storedPath, glyph: entries[i].glyph, error: entries[i].error || (state.favouriteStatuses || {})[i] || "", favouriteIndex: i })
+    }
+    rows.push({ kind: "favouriteActions", id: "favouriteActions", label: "Add current folder", value: "Remove",
+        actionIndex: state.favouriteAction || 0, canRemove: state.selectedFavourite >= 0 && state.selectedFavourite < entries.length })
+    rows.push({ kind: "group", label: "Built in" })
+    var builtins = [["showHome", "Home", "house"], ["showNetwork", "Network", "network"],
+                    ["showDevices", "Devices", "drive"], ["showTrash", "Trash", "trash"]]
+    for (var b = 0; b < builtins.length; b++) {
+        rows.push({ kind: "check", id: "places." + builtins[b][0], label: builtins[b][1], glyph: builtins[b][2], on: data[builtins[b][0]] !== false })
+    }
+    rows.push({ kind: "group", label: "Rail" })
+    rows.push({ kind: "check", id: "places.driveSize", label: "Show drive size", glyph: "drive", on: data.driveSize !== false })
+    rows.push(choice("places.sidebarWidth", "Sidebar width", "maximize", Places.WIDTH_STOPS,
+        ["160 px", "192 px", "224 px", "256 px"], Places.sidebarWidth(data.sidebarWidth)))
     return rows
 }

@@ -34,7 +34,7 @@ Item {
                                 : root.dim ? Theme.color.muted
                                 : Theme.color.foreground
 
-    implicitHeight: Theme.rowHeight
+    implicitHeight: Theme.fileRowHeight
 
     Rectangle {
         anchors.fill: parent
