@@ -25,6 +25,11 @@ Item {
     // duration, so browsing a folder of clips builds no MediaPlayer at all: it costs nothing, makes
     // no sound, and stops QtMultimedia logging a teardown warning on every cursor move.
     property bool wantsPlayback: false
+    // The shared Space preview, handed in by ui/ColumnsArea.qml: one file plays in one place.
+    property bool overlayOpen: false
+    // Where a player may exist at all: this column on screen, no overlay over it, and a strip to drive it; losing any of them ends the play intent.
+    readonly property bool playerAllowed: root.visible && !root.overlayOpen && mediaLoader.active
+    onPlayerAllowedChanged: if (!root.playerAllowed) root.wantsPlayback = false
 
     // A new row is a new subject, so whatever was playing stops being this column's business, and
     // the player it needed is torn down with it.
@@ -117,8 +122,7 @@ Item {
                 id: playerLoader
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.hairline
-                // Its life is the strip's: a state that hides the strip (a multi-selection, a directory) tears the player down.
-                active: root.wantsPlayback && mediaLoader.active
+                active: root.wantsPlayback && root.playerAllowed
                 visible: active && root.previewState === Facts.VIDEO
                 source: "PreviewMedia.qml"
                 onLoaded: {
@@ -277,8 +281,6 @@ Item {
             height: active ? Theme.chromeHeight : 0
             active: root.previewState === Facts.VIDEO || root.previewState === Facts.AUDIO
             sourceComponent: mediaTransport
-            // Play is a fresh press after the strip returns, never a player that survived its absence.
-            onActiveChanged: if (!active) root.wantsPlayback = false
         }
 
         // corner: a filename is arbitrary text, so PlainText, the same rule every name on this surface follows.
@@ -340,6 +342,10 @@ Item {
     function mediaStripItem() { return mediaLoader.item ? mediaLoader.item.strip : null }
     // Whether a player object exists at all, for the teardown check; playing false alone would mask one that survived.
     function playerLoaded() { return playerLoader.item !== null }
+    // What the text, archive and failure surfaces actually draw, for ui/Ipc.qml: the lines, the member names, the sentence.
+    function textLines() { return lines.tooLarge ? "too large" : lines.lines.join("|") }
+    function archiveNames() { return root.meta && root.meta.names ? root.meta.names.join("|") : "" }
+    function failureText() { return root.failure }
 
     // A multi-selection describes a count, not a file, so it names the count instead of a name.
     function nameText() {

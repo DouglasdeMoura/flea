@@ -114,6 +114,9 @@ Item {
     function playerLoaded() { return preview.playerLoaded() }
     function thumbShown() { return preview.thumbShown }
     function frameReady() { return preview.frameStatus === Image.Ready }
+    function textLines() { return preview.textLines() }
+    function archiveNames() { return preview.archiveNames() }
+    function failureText() { return preview.failureText() }
 
     function activateNeighbour(base, name, isDir) {
         var target = root.pane.join(base, name)
@@ -277,6 +280,7 @@ Item {
                 meta: root.cursorMeta
                 kindName: root.kindName(root.pane.cursorIndex)
                 thumb: root.pane.thumbFor(root.pane.cursorIndex)
+                overlayOpen: root.pane.preview.active
                 noThumbComing: Thumbs.refused(root.pane.thumbState, root.pane.cursorIndex)
                                || (root.cursorRow !== null && root.cursorRow.t !== true)
                 selectionCount: root.pane.selectionCount()
