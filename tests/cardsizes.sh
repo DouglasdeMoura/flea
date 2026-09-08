@@ -113,11 +113,11 @@ for size in tiled 1258x1386 1258x688 832x1386 832x688 560x400 fullscreen; do
   # Settings: the rail is walked to every section, since the panel reopens on the section last shown.
   key ,; sleep 0.6
   check "$size settings opens" "$(ipc settingsOpen)" "true"
-  key -k Tab; sleep 0.2; key k; key k; sleep 0.3; keys=$(at settingsTitleCentre); shown=$(ipc settingsSection); walked=$shown
+  key -k Tab; sleep 0.2; key k; key k; sleep 0.3; shown=$(ipc settingsSection); walked=$shown; keys=$(at settingsTitleCentre)
   check "$size the rail walked to keys" "$shown" "keys"; section_fits keys "$shown"
-  key j; sleep 0.3; display=$(at settingsTitleCentre); shown=$(ipc settingsSection); walked="$walked $shown"
+  key j; sleep 0.3; shown=$(ipc settingsSection); walked="$walked $shown"; display=$(at settingsTitleCentre)
   check "$size and on to display" "$shown" "display"; section_fits display "$shown"
-  key j; sleep 0.3; menus=$(at settingsTitleCentre); shown=$(ipc settingsSection); walked="$walked $shown"
+  key j; sleep 0.3; shown=$(ipc settingsSection); walked="$walked $shown"; menus=$(at settingsTitleCentre)
   check "$size and on to menus" "$shown" "menus"; section_fits menus "$shown"
   # Three titles from three sections, or the equality would hold trivially on one section read three times.
   if [ "$walked" = "keys display menus" ]; then check "$size settings title height is the same on keys, display and menus" "$keys|$menus" "$display|$display"; else bad "$size settings title heights not compared, the walk reached $walked"; fi
