@@ -617,10 +617,13 @@ extends the selection to it, and neither ever opens anything whatever the tap co
 click moves the cursor to a row and opens the context menu there: raised inside a multi-row
 selection it acts on all of it, and raised outside one the selection collapses to that row,
 because every entry the menu draws describes the row under the pointer. `m` opens the same menu
-under the cursor row; `j` and `k` step it, and it closes on Escape, on a click outside, on
-scrolling, and when its action runs. The columns view's two neighbour columns are peeks with no cursor of
+under the cursor row; `j` and `k` step it, the pointer moving over a row moves it too, while a menu
+that opens under a resting pointer keeps its first row, and it closes on Escape, on a click outside,
+on scrolling, and when its action runs. The listing under an open menu or card neither lifts,
+scrolls nor takes that click. The columns view's two neighbour columns are peeks with no cursor of
 their own, so one click there shows a directory in the middle column, the way a column view
-reveals rather than opens, and a file still waits for the second click. The rail is one
+reveals rather than opens, and a file still waits for the second click; a right click there makes
+that column's directory the listing with the row under the cursor and opens the menu on it. The rail is one
 place a single click opens, as Finder's own sidebar does, and a parent segment of the path above
 the listing is the other; the segment the pane is already in is not a target. `keys.toml` carries the whole table,
 its `[[pointer]]` half included.
