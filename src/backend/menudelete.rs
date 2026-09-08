@@ -23,6 +23,7 @@ pub(crate) struct Review {
     pub count: usize,
     pub bytes: u64,
     roots: Vec<Root>,
+    selection: Vec<Selected>,
 }
 
 impl Review {
@@ -49,7 +50,8 @@ impl Review {
             roots.push(Root { review, path: item.path.clone(), selected: 1 });
         }
         for item in &selected { check_cancel(cancel)?; item.current()?; }
-        let review = Self { token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed), count: selected.len(), bytes, roots };
+        let selection = selected.into_iter().cloned().collect::<Vec<_>>();
+        let review = Self { token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed), count: selection.len(), bytes, roots, selection };
         review.validate(cancel)?;
         Ok(review)
     }
@@ -84,7 +86,13 @@ impl Review {
         let error = if failed > 0 {
             format!("{} selected items were not completely deleted. First failure: {}", failed, first_error)
         } else { String::new() };
-        Ok(format!(r#""deleted":{},"failed":{},"cancelled":{},"error":"{}""#, deleted, failed, cancelled, escape(&error)))
+        Ok(format!(r#""deleted":{},"failed":{},"cancelled":{},"error":"{}","remaining":[{}]"#,
+            deleted, failed, cancelled, escape(&error), self.remaining()))
+    }
+
+    fn remaining(&self) -> String {
+        self.selection.iter().filter(|item| item.current().is_ok())
+            .map(|item| format!(r#""{}""#, escape(&item.path.to_string_lossy()))).collect::<Vec<_>>().join(",")
     }
 }
 
@@ -120,6 +128,7 @@ mod tests {
         assert!(!folder.exists());
         assert!(link.symlink_metadata().is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
+        assert!(result.contains(r#""remaining":[]"#));
     }
 
     #[test]
@@ -138,5 +147,19 @@ mod tests {
         cancel.next();
         assert!(current.delete(&recovery, &cancel).unwrap_err().contains("cancelled"));
         assert!(folder.join("new-arrival").exists());
+    }
+
+    #[test]
+    fn surviving_selection_never_reports_a_replacement_identity() {
+        let d = TestDir::new("menu-delete-survivors");
+        let first = d.file("first", "original");
+        let kept = d.file("kept", "survivor");
+        let review = Review::prepare(&[selected(&first), selected(&kept)], d.path(), &Cancellation::default()).unwrap();
+        let moved = d.join("first-moved");
+        deletion_sandbox(&d, &[&first, &kept, &moved]);
+        std::fs::rename(&first, &moved).unwrap();
+        d.file("first", "replacement");
+        assert_eq!(review.remaining(), format!(r#""{}""#, escape(kept.to_str().unwrap())));
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "replacement");
     }
 }

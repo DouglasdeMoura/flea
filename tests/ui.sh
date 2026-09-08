@@ -2252,7 +2252,9 @@ case_columns() {
     printf 'packed\n' > "$dir/inner/pack/a.txt"
     printf 'packed\n' > "$dir/inner/pack/b.txt"
     bsdtar -a -c -f "$dir/backup.tar.zst" -C "$dir/inner/pack" . 2>/dev/null
-    rm -rf "$dir/inner/pack"
+    sandbox_require "$dir/inner/pack"
+    sandbox_under "$SANDBOX_PATH" "$dir" || fail "columns: archive fixture escaped its own sandbox"
+    rm -rf -- "$SANDBOX_PATH"
     # The pdf logic is covered in tests/js/facts.js, but PdfDocument, the page render, the page count
     # and the error state had never met a real file anywhere in this suite. Each page is built in its
     # own parentheses: without them magick applies one -draw to the whole list and both pages come out
@@ -7253,8 +7255,10 @@ case_previewviews() {
     kill_flea
 }
 
+. "$repo/tests/ui-pdf.sh"
+
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)
 
 : > "$run_log"
 : > "$flea_log"

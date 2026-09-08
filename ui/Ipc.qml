@@ -178,6 +178,14 @@ QtObject {
         function previewPdfPage(): int { var p = root.pane.preview.pdfItem; return p ? p.page : -1 }
         function previewPdfZoom(): string { var p = root.pane.preview.pdfItem; return p ? String(p.zoom) : "" }
         function previewPdfFocus(): int { var p = root.pane.preview.pdfItem; return p ? p.pdfControlIndex : -1 }
+        function pdfState(overlay: bool): string {
+            var p = overlay ? root.pane.preview.pdfItem : root.pane.previewColumnItem
+            if (!p) return "null"
+            return JSON.stringify({ page: overlay ? p.page : p.pdfPage(), pages: overlay ? p.pageCount : p.pdfPages,
+                zoom: overlay ? p.zoom : p.pdfZoom, scrollY: p.pdfScrollY, focused: p.activeFocus, control: p.pdfControlIndex,
+                controls: p.pdfControls.map(function (control) { return { name: control.accessName, enabled: control.enabled,
+                    visible: control.visible, centre: root.fleaWindow.centreOf(control) } }) })
+        }
         function previewExpanded(): string { var p = root.pane.preview.pdfItem; return p ? String(p.expanded) : "" }
         function rowNameColor(i: int): string {
             var item = root.pane.itemFor(i)

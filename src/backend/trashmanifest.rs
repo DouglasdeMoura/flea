@@ -1,6 +1,7 @@
 // Anonymous files retain complete Trash reviews without retaining every descendant in memory.
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -55,6 +56,9 @@ impl Manifest {
     pub fn open_inactive(path: &Path) -> Result<Option<Self>, String> {
         let file = crate::backend::regfile::open_if_regular(path, crate::oflags::O_NOFOLLOW)
             .map_err(|e| format!("Could not open recovery record {}: {}", path.display(), e))?;
+        // Reopen the verified inode, so replay can append its durable completion marker without a path race.
+        let file = OpenOptions::new().read(true).write(true).open(format!("/proc/self/fd/{}", file.as_raw_fd()))
+            .map_err(|e| format!("Could not reopen recovery record for completion: {}", e))?;
         match file.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => return Ok(None),

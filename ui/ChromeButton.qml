@@ -10,13 +10,14 @@ Item {
     property string glyph: "file"
     property bool active: false
     property bool keyboardFocused: false
+    property color restingColor: Theme.color.muted
 
     signal activated()
 
     // A control with nowhere to go still occupies its slot, so the bar never reflows as history changes.
-    readonly property real disabledOpacity: 0.35
+    property real disabledOpacity: 0.35
 
-    readonly property string accessName: {
+    property string accessName: {
         if (root.glyph === "arrow-left")
             return "Back"
         if (root.glyph === "arrow-up")
@@ -61,7 +62,7 @@ Item {
         width: Theme.chromeMarkSize
         height: Theme.chromeMarkSize
         name: root.glyph
-        color: root.active || root.keyboardFocused ? Theme.color.accent : Theme.color.muted
+        color: !root.enabled ? Theme.color.muted : root.active || root.keyboardFocused ? Theme.color.accent : root.restingColor
         opacity: root.enabled ? 1 : root.disabledOpacity
     }
 

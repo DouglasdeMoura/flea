@@ -24,6 +24,7 @@ Item {
     property string path: ""
     property int pdfControlIndex: -1
     property real pdfZoom: 1
+    readonly property real pdfScrollY: pdfFlick.contentY
     readonly property var pdfControls: [pagePrev, pageNext, pdfZoomOut, pdfZoomIn, pdfExpand]
     signal expandRequested()
     // No player exists until the operator presses play. The strip draws from the probe's own

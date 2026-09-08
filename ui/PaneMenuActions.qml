@@ -14,6 +14,7 @@ Loader {
     property string folder: ""
     property bool ready: false
     property string pendingAction: ""
+    property int launchingId: 0
 
     function snapshot() {
         requestId++
@@ -43,6 +44,13 @@ Loader {
     Connections {
         target: root.pane.backend
         function onMenuResult(message) {
+            if (message.op === "openWith" && message.id === root.launchingId) {
+                root.launchingId = 0
+                if (!root.opened || message.id !== root.requestId) {
+                    if (!message.ok && !message.cancelled) root.pane.message(message.error || "The application could not be opened.", true)
+                    return
+                }
+            }
             if (message.id !== root.requestId) return
             if (message.op === "snapshot") {
                 root.ready = message.ok === true && root.identity === root.pane.menuSelectionIdentity
@@ -65,7 +73,10 @@ Loader {
     }
     Connections {
         target: root.item
-        function onRequested(message) { root.pane.backend.send(message) }
+        function onRequested(message) {
+            if (message.op === "openWith") root.launchingId = message.id
+            root.pane.backend.send(message)
+        }
         function onApproved(message) {
             root.pane.backend.send({c: "transfer", op: message.action === "moveTo" ? "move" : "copy",
                 menuId: message.id, dest: message.dest})

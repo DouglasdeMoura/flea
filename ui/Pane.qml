@@ -465,6 +465,8 @@ FocusScope {
     readonly property int previewIndex: root.viewMode === "columns"
         ? (columnsLoader.item ? columnsLoader.item.previewIndex : -1)
         : (selectionPreview.item ? selectionPreview.item.loadedIndex : -1)
+    readonly property var previewColumnItem: root.viewMode === "columns"
+        ? (columnsLoader.item ? columnsLoader.item.previewColumn : null) : selectionPreview.item
     function loadSelectionPreview() {
         if (!ViewState.previewColumn || root.dualMode) return
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()

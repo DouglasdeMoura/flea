@@ -1,4 +1,8 @@
 // Claim the exact reviewed payload and metadata before deletion; later arrivals keep their original names.
+mod recovery;
+pub use recovery::{recover, recovery_root, RecoveryReport};
+use recovery::Recovery;
+
 use crate::backend::trashmanifest::{Cancellation, Manifest, Records};
 use crate::json::{escape, field_str, field_usize};
 use crate::oflags::O_NOFOLLOW;
@@ -63,6 +67,12 @@ impl Identity {
             mode: meta.mode(),
         }
     }
+    fn matches_survivor(&self, current: &Self) -> bool {
+        if self.mode & 0o170000 == 0o040000 {
+            // Removing reviewed children changes directory size and mtime, but never its inode or mode.
+            self.dev == current.dev && self.ino == current.ino && self.mode == current.mode
+        } else { self == current }
+    }
 }
 struct Node {
     relative: PathBuf,
@@ -97,10 +107,7 @@ impl Node {
     }
     fn directory(&self) -> bool { self.identity.mode & 0o170000 == 0o040000 }
     fn deletion_identity_matches(&self, current: &Identity) -> bool {
-        if self.directory() {
-            // Deleting reviewed children changes directory size and mtime, but never its inode or mode.
-            self.identity.dev == current.dev && self.identity.ino == current.ino && self.identity.mode == current.mode
-        } else { self.identity == *current }
+        self.identity.matches_survivor(current)
     }
     fn claim_remove(&self, parent: &File, name: &OsStr, quarantine: &File, record_offset: u64) -> Result<(), String> {
         if !self.deletion_identity_matches(&identity(&fd_path(parent, name))?) {
@@ -469,15 +476,15 @@ impl Reviewed {
             .map_err(|e| format!("Could not create Trash quarantine: {}", e))?;
         let quarantine = open_dir(&quarantine_path)?;
         let recovery = self.path.parent().unwrap().join(&quarantine_name);
-        let journal = match Recovery::begin(recovery_root, &self.path, &files, &self.payload,
-            Some((&self.info, &self.metadata)), &recovery, &quarantine,
+        let mut journal = match Recovery::begin(recovery_root, &self.path, &files, &self.payload,
+            Some((&self.info, &self.metadata, &infos)), &recovery, &quarantine,
             if destination.is_some() { None } else { self.tree.as_ref() }, destination) {
             Ok(journal) => journal,
             Err(error) => { let _ = std::fs::remove_dir(&quarantine_path); return Err(error); }
         };
         before_claim();
         if let Err(error) = rename(&files, name, &quarantine, OsStr::new("payload")) {
-            if std::fs::remove_dir(&quarantine_path).is_ok() { journal.complete()?; }
+            if journal.remove_empty(&quarantine_path, &quarantine, &files).is_ok() { journal.complete()?; }
             return Err(format!("Could not claim Trash item: {}", error));
         }
         let info_claim = rename(&infos, info_name, &quarantine, OsStr::new("metadata"));
@@ -497,7 +504,7 @@ impl Reviewed {
                     recovery.display()
                 ));
             }
-            if std::fs::remove_dir(&quarantine_path).is_ok() { journal.complete()?; }
+            if journal.remove_empty(&quarantine_path, &quarantine, &files).is_ok() { journal.complete()?; }
             return Err(
                 "Trash changed; no operation attempted. Review a fresh confirmation.".into(),
             );
@@ -513,7 +520,7 @@ impl Reviewed {
                     recovery.display()
                 ));
             }
-            if std::fs::remove_dir(&quarantine_path).is_err() {
+            if journal.remove_empty(&quarantine_path, &quarantine, &files).is_err() {
                 return Err(format!("{} failed: {}. Remaining data is preserved in Trash and at {}.", operation, error, recovery.display()));
             }
             journal.complete()?;
@@ -526,7 +533,7 @@ impl Reviewed {
                 e
             )
         })?;
-        std::fs::remove_dir(&quarantine_path)
+        journal.remove_empty(&quarantine_path, &quarantine, &files)
             .map_err(|e| format!("{} completed; empty quarantine cleanup failed: {}", operation, e))?;
         journal.complete()?;
         Ok(())
@@ -570,14 +577,14 @@ impl PathReview {
             .map_err(|e| format!("Could not create deletion quarantine: {}", e))?;
         let quarantine = open_dir(&quarantine_path)?;
         let recovery = parent_path.join(&quarantine_name);
-        let journal = match Recovery::begin(recovery_root, &self.path, &parent, &self.payload,
+        let mut journal = match Recovery::begin(recovery_root, &self.path, &parent, &self.payload,
             None, &recovery, &quarantine, Some(&self.tree), None) {
             Ok(journal) => journal,
             Err(error) => { let _ = std::fs::remove_dir(&quarantine_path); return Err(error); }
         };
         before_claim();
         if let Err(error) = rename(&parent, name, &quarantine, OsStr::new("payload")) {
-            if std::fs::remove_dir(&quarantine_path).is_ok() { journal.complete()?; }
+            if journal.remove_empty(&quarantine_path, &quarantine, &parent).is_ok() { journal.complete()?; }
             return Err(format!("Could not claim item for deletion: {}", error));
         }
         let removal = match matches(&self.tree, &quarantine, OsStr::new("payload"), &Cancellation::default()) {
@@ -589,454 +596,15 @@ impl PathReview {
             if rename(&quarantine, OsStr::new("payload"), &parent, name).is_err() {
                 return Err(format!("Deletion failed: {}. Recover preserved items from {}.", error, recovery.display()));
             }
-            if std::fs::remove_dir(&quarantine_path).is_err() {
+            if journal.remove_empty(&quarantine_path, &quarantine, &parent).is_err() {
                 return Err(format!("Deletion failed: {}. Remaining data is preserved at the original path and {}.", error, recovery.display()));
             }
             journal.complete()?;
             return Err(format!("Deletion failed: {}. Surviving data remains at the original path; a directory may be partly deleted.", error));
         }
-        std::fs::remove_dir(&quarantine_path).map_err(|e| format!("Payload deleted; empty quarantine cleanup failed: {}", e))?;
+        journal.remove_empty(&quarantine_path, &quarantine, &parent).map_err(|e| format!("Payload deleted; empty quarantine cleanup failed: {}", e))?;
         journal.complete()?;
         Ok(())
-    }
-}
-
-pub fn recovery_root() -> Result<PathBuf, String> {
-    let state = match crate::userfile::env_dir("XDG_STATE_HOME") {
-        Some(path) => path,
-        None => crate::userfile::home()?.join(".local/state"),
-    };
-    Ok(state.join("flea/recovery"))
-}
-
-struct Recovery {
-    path: PathBuf,
-    record: Manifest,
-}
-impl Recovery {
-    fn begin(root: &Path, source: &Path, parent: &File, payload: &Identity,
-        paired: Option<(&Path, &Identity)>, quarantine_path: &Path, quarantine: &File,
-        tree: Option<&Records>, destination: Option<&Path>) -> Result<Self, String> {
-        if !root.is_absolute() { return Err("Recovery storage requires an absolute directory.".into()); }
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(root)
-            .map_err(|e| format!("Could not create recovery directory {}: {}", root.display(), e))?;
-        let directory = open_dir(root)?;
-        let name = quarantine_path.file_name().ok_or("Missing quarantine name.")?.to_string_lossy();
-        let path = root.join(format!("{}.review", name));
-        let mut record = Manifest::create(&path)?;
-        let (info, metadata) = paired.map(|(path, identity)| (path.to_string_lossy().into_owned(), identity.saved()))
-            .unwrap_or_default();
-        let text = format!(r#"{{"version":1,"source":"{}","parent":"{}","payload":"{}","info":"{}","metadata":"{}","quarantine":"{}","quarantineIdentity":"{}","destination":"{}"}}"#,
-            escape(source.to_str().ok_or("Recovery source path is not valid text.")?),
-            Identity::of(&parent.metadata().map_err(|e| e.to_string())?).saved(), payload.saved(),
-            escape(&info), metadata, escape(quarantine_path.to_str().ok_or("Recovery path is not valid text.")?),
-            Identity::of(&quarantine.metadata().map_err(|e| e.to_string())?).saved(),
-            escape(destination.map(|path| path.to_string_lossy().into_owned()).unwrap_or_default().as_str()));
-        record.append(text.as_bytes())?;
-        if let Some(tree) = tree {
-            let mut offset = tree.start();
-            while let Some(bytes) = tree.next(&mut offset)? { record.append(&bytes)?; }
-        }
-        record.sync()?;
-        directory.sync_all().map_err(|e| format!("Could not sync recovery directory: {}", e))?;
-        Ok(Self { path, record })
-    }
-    fn complete(self) -> Result<(), String> {
-        if identity(&self.path)? != Identity::of(&self.record.file().metadata().map_err(|e| e.to_string())?) {
-            return Err("Recovery record changed; it was preserved.".into());
-        }
-        std::fs::remove_file(&self.path)
-            .map_err(|e| format!("Could not finish recovery record {}: {}", self.path.display(), e))?;
-        open_dir(self.path.parent().ok_or("Missing recovery directory.")?)?.sync_all()
-            .map_err(|e| format!("Could not sync completed recovery record: {}", e))
-    }
-    fn replay(&self) -> Result<(), String> {
-        let records = self.record.records();
-        let mut tree_start = 0;
-        let header = records.next(&mut tree_start)?.ok_or("Recovery record has no header.")?;
-        let header = String::from_utf8(header).map_err(|_| "Recovery header is not valid text.")?;
-        if field_usize(&header, "version") != Some(1) { return Err("Unsupported recovery record version.".into()); }
-        let path = |key: &str| -> Result<PathBuf, String> {
-            let value = PathBuf::from(field_str(&header, key).ok_or_else(|| format!("Recovery record has no {}.", key))?);
-            if !value.is_absolute() || value.file_name().is_none() || value.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
-                return Err(format!("Recovery record has an invalid {} path.", key));
-            }
-            Ok(value)
-        };
-        let expected = |key: &str| Identity::from_saved(&field_str(&header, key).ok_or_else(|| format!("Recovery record has no {} identity.", key))?);
-        let source = path("source")?;
-        let quarantine_path = path("quarantine")?;
-        let quarantine_name = quarantine_path.file_name().ok_or("Missing quarantine name.")?.to_string_lossy();
-        let expected_name = format!("{}.review", quarantine_name);
-        if !quarantine_name.starts_with(".flea-delete-") || self.path.file_name().and_then(OsStr::to_str) != Some(expected_name.as_str())
-            || quarantine_path.parent() != source.parent() {
-            return Err("Recovery record does not name its own quarantine.".into());
-        }
-        let quarantine = match open_dir(&quarantine_path) {
-            Ok(directory) => directory,
-            Err(error) => {
-                if matches!(quarantine_path.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound) { return Ok(()); }
-                return Err(error);
-            }
-        };
-        if !same_node(&Identity::of(&quarantine.metadata().map_err(|e| e.to_string())?), &expected("quarantineIdentity")?) {
-            return Err(format!("Recovery quarantine changed; data preserved at {}.", quarantine_path.display()));
-        }
-        let parent = open_dir(source.parent().ok_or("Missing recovery source parent.")?)?;
-        if !same_node(&Identity::of(&parent.metadata().map_err(|e| e.to_string())?), &expected("parent")?) {
-            return Err("Recovery source directory changed; no item was moved.".into());
-        }
-        let payload = expected("payload")?;
-        let name = source.file_name().ok_or("Missing recovery source name.")?;
-        for entry in std::fs::read_dir(fd_path(&quarantine, OsStr::new("."))).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let claimed_name = entry.file_name();
-            let Some(offset) = claimed_name.to_str().and_then(|name| name.strip_prefix("entry-")).and_then(|value| value.parse::<u64>().ok()) else { continue; };
-            let mut offset = tree_start.checked_add(offset).ok_or("Invalid recovery child offset.")?;
-            let node = Node::decode(&records.next(&mut offset)?.ok_or("Recovery child has no review record.")?)?;
-            if !same_node(&identity(&fd_path(&quarantine, &claimed_name))?, &node.identity) {
-                return Err("Claimed recovery child changed; no item was moved.".into());
-            }
-            let (child_parent, child_name) = if node.relative.as_os_str().is_empty() || identity(&fd_path(&quarantine, OsStr::new("payload"))).is_ok() {
-                parent_at(&quarantine, OsStr::new("payload"), &node.relative)?
-            } else {
-                if !same_node(&identity(&fd_path(&parent, name))?, &payload) { return Err("Recovery payload is unavailable.".into()); }
-                parent_at(&parent, name, &node.relative)?
-            };
-            rename(&quarantine, &claimed_name, &child_parent, &child_name)
-                .map_err(|e| format!("Could not return interrupted child without overwriting: {}", e))?;
-        }
-        let claimed_payload = fd_path(&quarantine, OsStr::new("payload"));
-        let had_payload = match claimed_payload.symlink_metadata() {
-            Ok(metadata) => {
-                if !same_node(&Identity::of(&metadata), &payload) { return Err("Recovery payload identity changed.".into()); }
-                rename(&quarantine, OsStr::new("payload"), &parent, name)
-                    .map_err(|e| format!("Could not return interrupted item without overwriting: {}", e))?;
-                true
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-            Err(error) => return Err(error.to_string()),
-        };
-        let metadata_path = fd_path(&quarantine, OsStr::new("metadata"));
-        let metadata = match metadata_path.symlink_metadata() {
-            Ok(metadata) => Some(metadata),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(format!("Could not inspect interrupted Trash metadata: {}", error)),
-        };
-        if let Some(metadata) = metadata {
-            if !same_node(&Identity::of(&metadata), &expected("metadata")?) { return Err("Recovery Trash metadata changed.".into()); }
-            if had_payload || identity(&fd_path(&parent, name)).map(|current| same_node(&current, &payload)).unwrap_or(false) {
-                let info = path("info")?;
-                let infos = open_dir(info.parent().ok_or("Missing Trash metadata parent.")?)?;
-                rename(&quarantine, OsStr::new("metadata"), &infos, info.file_name().ok_or("Missing Trash metadata name.")?)
-                    .map_err(|e| format!("Could not return interrupted Trash metadata without overwriting: {}", e))?;
-            } else {
-                let destination = field_str(&header, "destination").unwrap_or_default();
-                if !destination.is_empty() && !identity(Path::new(&destination)).map(|current| same_node(&current, &payload)).unwrap_or(false) {
-                    return Err("Interrupted restore has no verified destination; metadata was preserved.".into());
-                }
-                std::fs::remove_file(&metadata_path).map_err(|e| format!("Could not clean completed Trash metadata: {}", e))?;
-            }
-        }
-        std::fs::remove_dir(&quarantine_path).map_err(|e| format!("Unrecognized recovery data remains at {}: {}", quarantine_path.display(), e))?;
-        Ok(())
-    }
-}
-fn same_node(left: &Identity, right: &Identity) -> bool {
-    left.dev == right.dev && left.ino == right.ino && left.mode & 0o170000 == right.mode & 0o170000
-}
-
-#[derive(Default)]
-pub struct RecoveryReport {
-    pub recovered: usize,
-    pub failures: Vec<String>,
-}
-pub fn recover(root: &Path) -> Result<RecoveryReport, String> {
-    if !root.is_absolute() { return Err("Recovery storage requires an absolute directory.".into()); }
-    let entries = match std::fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(RecoveryReport::default()),
-        Err(error) => return Err(format!("Could not read recovery directory {}: {}", root.display(), error)),
-    };
-    let mut result = RecoveryReport::default();
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        if !name.to_str().map(|name| name.starts_with(".flea-delete-") && name.ends_with(".review")).unwrap_or(false) { continue; }
-        let path = entry.path();
-        let result_for_record = (|| {
-            let Some(record) = Manifest::open_inactive(&path)? else { return Ok(false); };
-            let recovery = Recovery { path: path.clone(), record };
-            recovery.replay()?;
-            recovery.complete()?;
-            Ok::<bool, String>(true)
-        })();
-        match result_for_record {
-            Ok(true) => result.recovered += 1,
-            Ok(false) => {}
-            Err(error) => result.failures.push(format!("{}: {}", path.display(), error)),
-        }
-    }
-    Ok(result)
-}
-
-#[cfg(test)]
-mod recovery_tests {
-    use super::*;
-    use crate::backend::testdir::TestDir;
-
-    fn guard(d: &TestDir, path: &Path) {
-        assert!(path.is_absolute() && !path.as_os_str().is_empty()
-            && path.starts_with(d.path()) && path != d.path());
-    }
-    fn move_path(d: &TestDir, from: &Path, to: &Path) {
-        guard(d, from);
-        guard(d, to);
-        std::fs::rename(from, to).unwrap();
-    }
-    fn remove_file(d: &TestDir, path: &Path) {
-        guard(d, path);
-        std::fs::remove_file(path).unwrap();
-    }
-    fn fixture(d: &TestDir, directory: bool, destination: Option<&Path>) -> (Reviewed, PathBuf, Recovery) {
-        d.dir("files");
-        d.dir("info");
-        let source = if directory {
-            let source = d.dir("files/item");
-            d.file("files/item/child", "payload");
-            source
-        } else { d.file("files/item", "payload") };
-        d.file("info/item.trashinfo", "[Trash Info]\nPath=/original\n");
-        let metadata = source.symlink_metadata().unwrap();
-        let mut reviewed = Reviewed::inspect(source.clone(), &format!("l{}:{}", metadata.dev(), metadata.ino())).unwrap();
-        reviewed.snapshot(&mut Manifest::new(d.path()).unwrap(), d.path(), &Cancellation::default()).unwrap();
-        let quarantine = d.dir("files/.flea-delete-test");
-        let recovery_root = d.dir("recovery");
-        for path in [&source, &reviewed.info, &quarantine, &recovery_root] { guard(d, path); }
-        if let Some(destination) = destination { guard(d, destination); }
-        let journal = Recovery::begin(&recovery_root, &source, &open_dir(&d.join("files")).unwrap(),
-            &reviewed.payload, Some((&reviewed.info, &reviewed.metadata)), &quarantine,
-            &open_dir(&quarantine).unwrap(), if destination.is_none() { reviewed.tree.as_ref() } else { None }, destination).unwrap();
-        (reviewed, quarantine, journal)
-    }
-    fn claim(d: &TestDir, reviewed: &Reviewed, quarantine: &Path, metadata: bool) {
-        move_path(d, &reviewed.path, &quarantine.join("payload"));
-        if metadata { move_path(d, &reviewed.info, &quarantine.join("metadata")); }
-    }
-    fn claim_node(d: &TestDir, reviewed: &Reviewed, quarantine: &Path, relative: &Path) -> PathBuf {
-        let tree = reviewed.tree.as_ref().unwrap();
-        let mut cursor = tree.start();
-        loop {
-            let offset = cursor - tree.start();
-            let node = Node::decode(&tree.next(&mut cursor).unwrap().expect("reviewed child")).unwrap();
-            if node.relative == relative {
-                let claimed = quarantine.join(format!("entry-{}", offset));
-                let payload = quarantine.join("payload");
-                let source = if relative.as_os_str().is_empty() { payload } else { payload.join(relative) };
-                move_path(d, &source, &claimed);
-                return claimed;
-            }
-        }
-    }
-    fn replay(d: &TestDir) -> RecoveryReport {
-        let root = d.join("recovery");
-        guard(d, &root);
-        guard(d, &d.join("files"));
-        guard(d, &d.join("info"));
-        recover(&root).unwrap()
-    }
-    fn clean(d: &TestDir, quarantine: &Path, journal: &Path) {
-        let report = replay(d);
-        assert_eq!(report.failures, Vec::<String>::new());
-        assert_eq!(report.recovered, 1);
-        assert!(!quarantine.exists());
-        assert!(!journal.exists());
-        let repeated = replay(d);
-        assert_eq!(repeated.recovered, 0);
-        assert!(repeated.failures.is_empty());
-    }
-
-    #[test]
-    fn recovery_skips_a_live_record_lock() {
-        let d = TestDir::new("recovery-active");
-        let (reviewed, quarantine, journal) = fixture(&d, false, None);
-        claim(&d, &reviewed, &quarantine, true);
-        let report = replay(&d);
-        assert_eq!(report.recovered, 0);
-        assert!(report.failures.is_empty());
-        assert!(!reviewed.path.exists());
-        assert!(quarantine.join("payload").exists());
-        let record = journal.path.clone();
-        drop(journal);
-        clean(&d, &quarantine, &record);
-        assert_eq!(std::fs::read_to_string(&reviewed.path).unwrap(), "payload");
-        assert!(reviewed.info.exists());
-    }
-
-    #[test]
-    fn recovery_returns_payload_only_and_paired_root_claims() {
-        for metadata in [false, true] {
-            let d = TestDir::new("recovery-roots");
-            let (reviewed, quarantine, journal) = fixture(&d, false, None);
-            claim(&d, &reviewed, &quarantine, metadata);
-            let record = journal.path.clone();
-            drop(journal);
-            clean(&d, &quarantine, &record);
-            assert_eq!(std::fs::read_to_string(&reviewed.path).unwrap(), "payload");
-            assert_eq!(identity(&reviewed.info).unwrap(), reviewed.metadata);
-        }
-    }
-
-    #[test]
-    fn recovery_returns_interrupted_child_and_entry_zero_claims() {
-        for relative in [Path::new("child"), Path::new("")] {
-            let d = TestDir::new("recovery-child");
-            let (reviewed, quarantine, journal) = fixture(&d, !relative.as_os_str().is_empty(), None);
-            claim(&d, &reviewed, &quarantine, true);
-            let interrupted = claim_node(&d, &reviewed, &quarantine, relative);
-            let record = journal.path.clone();
-            drop(journal);
-            clean(&d, &quarantine, &record);
-            assert!(!interrupted.exists());
-            let source = if relative.as_os_str().is_empty() { reviewed.path.clone() } else { reviewed.path.join(relative) };
-            assert_eq!(std::fs::read_to_string(source).unwrap(), "payload");
-            assert!(reviewed.info.exists());
-        }
-    }
-
-    #[test]
-    fn recovery_never_overwrites_an_original_name_collision() {
-        let d = TestDir::new("recovery-collision");
-        let (reviewed, quarantine, journal) = fixture(&d, false, None);
-        claim(&d, &reviewed, &quarantine, true);
-        d.file("files/item", "later arrival");
-        let record = journal.path.clone();
-        drop(journal);
-        let report = replay(&d);
-        assert_eq!(report.recovered, 0);
-        assert_eq!(report.failures.len(), 1);
-        assert_eq!(std::fs::read_to_string(&reviewed.path).unwrap(), "later arrival");
-        assert_eq!(std::fs::read_to_string(quarantine.join("payload")).unwrap(), "payload");
-        assert!(quarantine.join("metadata").exists());
-        assert!(record.exists());
-    }
-
-    #[test]
-    fn recovery_never_overwrites_an_interrupted_child_collision() {
-        let d = TestDir::new("recovery-child-collision");
-        let (reviewed, quarantine, journal) = fixture(&d, true, None);
-        claim(&d, &reviewed, &quarantine, true);
-        let interrupted = claim_node(&d, &reviewed, &quarantine, Path::new("child"));
-        std::fs::write(quarantine.join("payload/child"), "later arrival").unwrap();
-        drop(journal);
-        let report = replay(&d);
-        assert_eq!(report.failures.len(), 1);
-        assert_eq!(std::fs::read_to_string(interrupted).unwrap(), "payload");
-        assert_eq!(std::fs::read_to_string(quarantine.join("payload/child")).unwrap(), "later arrival");
-    }
-
-    #[test]
-    fn recovery_refuses_a_replaced_quarantine() {
-        let d = TestDir::new("recovery-quarantine-replacement");
-        let (reviewed, quarantine, journal) = fixture(&d, false, None);
-        claim(&d, &reviewed, &quarantine, true);
-        let saved = d.join("files/saved-quarantine");
-        move_path(&d, &quarantine, &saved);
-        std::fs::create_dir(&quarantine).unwrap();
-        std::fs::write(quarantine.join("payload"), "replacement").unwrap();
-        drop(journal);
-        assert_eq!(replay(&d).failures.len(), 1);
-        assert_eq!(std::fs::read_to_string(saved.join("payload")).unwrap(), "payload");
-        assert_eq!(std::fs::read_to_string(quarantine.join("payload")).unwrap(), "replacement");
-        assert!(!reviewed.path.exists());
-    }
-
-    #[test]
-    fn recovery_validates_payload_before_returning_a_child() {
-        let d = TestDir::new("recovery-payload-replacement");
-        let (reviewed, quarantine, journal) = fixture(&d, true, None);
-        claim(&d, &reviewed, &quarantine, true);
-        let interrupted = claim_node(&d, &reviewed, &quarantine, Path::new("child"));
-        move_path(&d, &quarantine.join("payload"), &d.join("files/saved-payload"));
-        std::fs::create_dir(quarantine.join("payload")).unwrap();
-        drop(journal);
-        assert_eq!(replay(&d).failures.len(), 1);
-        assert_eq!(std::fs::read_to_string(interrupted).unwrap(), "payload");
-        assert!(!quarantine.join("payload/child").exists());
-        assert!(!reviewed.path.exists());
-    }
-
-    #[test]
-    fn recovery_cleans_a_completed_deletion_and_its_record() {
-        let d = TestDir::new("recovery-completed-delete");
-        let (reviewed, quarantine, journal) = fixture(&d, false, None);
-        claim(&d, &reviewed, &quarantine, true);
-        remove_file(&d, &quarantine.join("payload"));
-        let record = journal.path.clone();
-        drop(journal);
-        clean(&d, &quarantine, &record);
-        assert!(!reviewed.path.exists());
-        assert!(!reviewed.info.exists());
-    }
-
-    #[test]
-    fn recovery_cleans_restore_metadata_only_for_its_verified_destination() {
-        for replace_destination in [false, true] {
-            let d = TestDir::new("recovery-completed-restore");
-            let destination = d.join("restored");
-            let (reviewed, quarantine, journal) = fixture(&d, false, Some(&destination));
-            claim(&d, &reviewed, &quarantine, true);
-            move_path(&d, &quarantine.join("payload"), &destination);
-            if replace_destination {
-                move_path(&d, &destination, &d.join("saved-destination"));
-                std::fs::write(&destination, "replacement").unwrap();
-            }
-            let record = journal.path.clone();
-            drop(journal);
-            if replace_destination {
-                assert_eq!(replay(&d).failures.len(), 1);
-                assert!(quarantine.join("metadata").exists());
-                assert!(record.exists());
-                assert_eq!(std::fs::read_to_string(destination).unwrap(), "replacement");
-            } else {
-                clean(&d, &quarantine, &record);
-                assert_eq!(std::fs::read_to_string(destination).unwrap(), "payload");
-            }
-        }
-    }
-
-    #[test]
-    fn recovery_keeps_malformed_and_nonregular_records() {
-        let d = TestDir::new("recovery-malformed");
-        d.dir("recovery");
-        d.file("recovery/.flea-delete-truncated.review", "short");
-        let malformed = d.join("recovery/.flea-delete-malformed.review");
-        let mut record = Manifest::create(&malformed).unwrap();
-        record.append(b"{}").unwrap();
-        drop(record);
-        d.dir("recovery/.flea-delete-directory.review");
-        let target = d.file("link-target", "keep");
-        std::os::unix::fs::symlink(&target, d.join("recovery/.flea-delete-link.review")).unwrap();
-        assert!(std::process::Command::new("mkfifo").arg(d.join("recovery/.flea-delete-pipe.review")).status().unwrap().success());
-        let report = replay(&d);
-        assert_eq!(report.recovered, 0);
-        assert_eq!(report.failures.len(), 5);
-        assert_eq!(std::fs::read_dir(d.join("recovery")).unwrap().count(), 5);
-        assert_eq!(std::fs::read_to_string(target).unwrap(), "keep");
-    }
-
-    #[test]
-    fn recovery_retains_unknown_quarantine_contents() {
-        let d = TestDir::new("recovery-unknown");
-        let (reviewed, quarantine, journal) = fixture(&d, false, None);
-        claim(&d, &reviewed, &quarantine, true);
-        std::fs::write(quarantine.join("unrecognized"), "keep").unwrap();
-        let record = journal.path.clone();
-        drop(journal);
-        assert_eq!(replay(&d).failures.len(), 1);
-        assert!(record.exists());
-        assert_eq!(std::fs::read_to_string(quarantine.join("unrecognized")).unwrap(), "keep");
-        assert_eq!(std::fs::read_to_string(reviewed.path).unwrap(), "payload");
     }
 }
 

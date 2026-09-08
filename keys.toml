@@ -1402,7 +1402,7 @@ keys = "j"
 action = "cursorDown"
 label = "cursorDown"
 frontend = "all"
-context = "rail,menu,panel,preview,pdf,media"
+context = "rail,menu,panel,preview,media"
 
 [[preset]]
 name = "all"
@@ -1412,7 +1412,7 @@ keys = "k"
 action = "cursorUp"
 label = "cursorUp"
 frontend = "all"
-context = "rail,menu,panel,preview,pdf,media"
+context = "rail,menu,panel,preview,media"
 
 [[preset]]
 name = "all"

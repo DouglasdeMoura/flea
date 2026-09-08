@@ -58,6 +58,11 @@ function run(check) {
         key(preset, "E", "e", none, "expand", "pdf")
         key(preset, "Tab", "", shift, "focusPrevious", "pdf")
         key(preset, "Tab", "", ctrl, "focusPreview", "preview")
+        key(preset, "J", "j", none, "", "pdf")
+        key(preset, "K", "k", none, "", "pdf")
+        key(preset, "Up", "", none, "cursorUp", "pdf")
+        key(preset, "Down", "", none, "cursorDown", "pdf")
+        key(preset, "Return", "", none, "open", "pdf")
         key(preset, "Return", "", none, "", "editor")
     }
     key("default", "Return", "", none, "open")

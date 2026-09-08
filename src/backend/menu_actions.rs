@@ -5,9 +5,7 @@ use super::trashmanifest::Cancellation;
 use crate::json::{escape, field_str, field_usize};
 use std::fs::{Metadata, OpenOptions};
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::mpsc::{sync_channel, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -32,9 +30,12 @@ impl MenuActions {
         std::thread::spawn(move || {
             while let Ok((line, paths, cancel)) = receiver.recv() {
                 let mut state = published.lock().unwrap().clone();
-                let reply = if cancel.check().is_ok() {
+                let mut reply = if cancel.check().is_ok() {
                     state.handle_request(&line, paths, &queries, &cancel)
                 } else { response(&line, Err("Menu request cancelled.".into())) };
+                if cancel.check().is_err() && field_str(&line, "op").as_deref() != Some("delete") {
+                    reply.insert_str(reply.len() - 1, r#", "cancelled":true"#);
+                }
                 if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close" | "prepareDelete" | "delete")) {
                     publish_snapshot(published.lock().unwrap(), state, &cancel);
                 }
@@ -207,7 +208,7 @@ impl Snapshot {
                 let app = menu_registry::applications(registry, &item.path, cancel)?.into_iter().find(|a| a.id == requested)
                     .ok_or("That application is no longer registered for the selected item.")?;
                 item.current()?;
-                launch(&app.path, &item.path)?;
+                registry.launch(&app.path, &item.path, cancel)?;
                 Ok(format!(r#""path":"{}""#, escape(&item.path.to_string_lossy())))
             }
             _ => Err("Unknown menu operation.".into()),
@@ -242,17 +243,6 @@ pub fn create_file(parent: &Path, name: &str) -> Result<(PathBuf, super::undo::I
         .map_err(|e| format!("Could not create {}: {}.", path.display(), e))?;
     let meta = file.metadata().map_err(|e| format!("Created {}, but could not record its identity: {}.", path.display(), e))?;
     Ok((path, super::undo::ItemIdentity::record(&meta)))
-}
-
-fn launch(desktop: &Path, path: &Path) -> Result<(), String> {
-    // Restore foreign-child THP with an allocation-free syscall between fork and exec.
-    const PR_SET_THP_DISABLE: i32 = 41;
-    extern "C" { fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32; }
-    let mut command = Command::new("gio");
-    command.arg("launch").arg(desktop).arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0);
-    unsafe { command.pre_exec(|| if prctl(PR_SET_THP_DISABLE, 0, 0, 0, 0) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }); }
-    let status = command.status().map_err(|e| format!("Could not launch selected application: {}.", e))?;
-    if status.success() { Ok(()) } else { Err("GIO could not open this item with the selected application.".into()) }
 }
 
 #[cfg(test)]

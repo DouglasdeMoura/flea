@@ -64,7 +64,7 @@ FocusScope {
         close()
     }
     function close() {
-        if (!opened || busy && committing && (action === "openWith" || action === "newFile")) return
+        if (!opened || busy && committing && action === "newFile") return
         requested({c: "menuaction", op: "close", id: requestId})
         opened = false
         closed()
