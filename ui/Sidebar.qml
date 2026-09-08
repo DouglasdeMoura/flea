@@ -7,11 +7,7 @@ import "js/Mounts.js" as Mounts
 import "js/Menu.js" as Menu
 import "js/Places.js" as Places
 
-// The rail is Favorites, Network and Devices, three groups sharing one flat cursor space and one
-// row delegate, ui/SidebarRow.qml. Each group occupies a contiguous run of "entries" in that
-// order, so RailKeys.act's plain index math in ui/js/RailKeys.js needs no change and no existing index
-// moves. Each group's own sourcing and process management lives in its Service, ui/NetworkMounts.qml
-// and ui/DeviceMounts.qml, the OEM pattern: this file only reads "entries" from them and renders.
+// Places (Favourites, Home, Trash), Network and Devices share one flat cursor in visual order.
 Item {
     id: root
 
@@ -27,7 +23,7 @@ Item {
         return entry
     })
     property var homeEntries: []
-    readonly property var favoriteEntries: root.userFavouriteEntries.concat(root.homeEntries)
+    readonly property var placesEntries: root.userFavouriteEntries.concat(root.homeEntries, root.trashEntries)
     readonly property int trashCount: trashMonitor.count
     signal trashChanged()
     function refreshTrash() { trashMonitor.refresh() }
@@ -46,7 +42,7 @@ Item {
     // its delegates in place, and an editor left standing came up empty over a different share.
     onNetworkEntriesChanged: root.cancelRename()
     readonly property var deviceEntries: root.placesState.showDevices === false ? [] : devices.entries
-    readonly property var entries: root.favoriteEntries.concat(root.networkEntries).concat(root.deviceEntries).concat(root.trashEntries)
+    readonly property var entries: root.placesEntries.concat(root.networkEntries, root.deviceEntries)
 
     // Clamped on the aggregate, never on a group: reading root.entries from onDeviceEntriesChanged
     // forces the entries binding's own first evaluation, which fires networkEntriesChanged, which
@@ -237,7 +233,7 @@ Item {
         if (entry.kind === "favourite") { root.openFavourite(entry.favouriteIndex); return }
         if (entry.kind === "home") { root.opened(entry.path); return }
         if (entry.kind === "trash") { root.trashRequested(); return }
-        var rest = index - root.favoriteEntries.length
+        var rest = index - root.placesEntries.length
         if (rest < root.networkEntries.length) mounts.activate(rest)
         else devices.activate(rest - root.networkEntries.length)
     }
@@ -245,9 +241,9 @@ Item {
     // Network only: neither a favourite nor a device has a bookmark line of its own shape for
     // Places.relabel to find, and a volume's label lives on the filesystem, not in a rail file.
     function startRename(index) {
-        if (index < root.favoriteEntries.length)
+        if (index < root.placesEntries.length)
             return
-        if (index >= root.favoriteEntries.length + root.networkEntries.length)
+        if (index >= root.placesEntries.length + root.networkEntries.length)
             return
         root.renamingIndex = index
     }
@@ -256,7 +252,7 @@ Item {
     function renameEditor() {
         if (root.renamingIndex < 0)
             return null
-        var item = netRepeater.itemAt(root.renamingIndex - root.favoriteEntries.length)
+        var item = netRepeater.itemAt(root.renamingIndex - root.placesEntries.length)
         return item && item.renaming ? item : null
     }
 
@@ -274,7 +270,7 @@ Item {
         var trimmed = String(name || "").trim()
         if (trimmed.length === 0)
             return
-        var entry = root.networkEntries[index - root.favoriteEntries.length]
+        var entry = root.networkEntries[index - root.placesEntries.length]
         if (!entry)
             return
         mounts.rename(entry.uri, trimmed)
@@ -379,6 +375,16 @@ Item {
                     onActivated: function (idx) { root.activate(idx + root.userFavouriteEntries.length) }
                 }
             }
+            Repeater {
+                id: trashRepeater
+                model: root.trashEntries
+                delegate: SidebarRow {
+                    cursor: index + root.userFavouriteEntries.length + root.homeEntries.length === root.cursorIndex
+                    focused: root.focused || root.trashActive
+                    onActivated: root.activate(index + root.userFavouriteEntries.length + root.homeEntries.length)
+                    onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.userFavouriteEntries.length + root.homeEntries.length, pos) }
+                }
+            }
 
             // The OEM panel idiom's own group gap, not the tighter row-to-row rhythm rows keep inside a group.
             Item {
@@ -434,12 +440,12 @@ Item {
                 id: netRepeater
                 model: root.networkEntries
                 delegate: SidebarRow {
-                    cursor: (index + root.favoriteEntries.length) === root.cursorIndex
+                    cursor: (index + root.placesEntries.length) === root.cursorIndex
                     focused: root.focused
-                    renaming: (index + root.favoriteEntries.length) === root.renamingIndex
-                    onActivated: function (idx) { root.activate(idx + root.favoriteEntries.length) }
-                    onMenuRequested: function (idx, pos) { root.openRailMenu(idx + root.favoriteEntries.length, pos) }
-                    onRenameCommitted: function (idx, text) { root.commitRename(idx + root.favoriteEntries.length, text) }
+                    renaming: (index + root.placesEntries.length) === root.renamingIndex
+                    onActivated: function (idx) { root.activate(idx + root.placesEntries.length) }
+                    onMenuRequested: function (idx, pos) { root.openRailMenu(idx + root.placesEntries.length, pos) }
+                    onRenameCommitted: function (idx, text) { root.commitRename(idx + root.placesEntries.length, text) }
                     onRenameCancelled: root.cancelRename()
                 }
             }
@@ -468,20 +474,10 @@ Item {
                 id: devRepeater
                 model: root.deviceEntries
                 delegate: SidebarRow {
-                    cursor: (index + root.favoriteEntries.length + root.networkEntries.length) === root.cursorIndex
+                    cursor: (index + root.placesEntries.length + root.networkEntries.length) === root.cursorIndex
                     focused: root.focused
-                    onActivated: function (idx) { root.activate(idx + root.favoriteEntries.length + root.networkEntries.length) }
-                    onMenuRequested: function (idx, pos) { root.openRailMenu(idx + root.favoriteEntries.length + root.networkEntries.length, pos) }
-                }
-            }
-            Repeater {
-                id: trashRepeater
-                model: root.trashEntries
-                delegate: SidebarRow {
-                    cursor: index + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length === root.cursorIndex
-                    focused: root.focused || root.trashActive
-                    onActivated: root.activate(index + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length)
-                    onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.favoriteEntries.length + root.networkEntries.length + root.deviceEntries.length, pos) }
+                    onActivated: function (idx) { root.activate(idx + root.placesEntries.length + root.networkEntries.length) }
+                    onMenuRequested: function (idx, pos) { root.openRailMenu(idx + root.placesEntries.length + root.networkEntries.length, pos) }
                 }
             }
         }
@@ -492,13 +488,15 @@ Item {
     // The rail has no ListView virtualization, so every row already exists; the same itemFor idiom ui/Pane.qml uses for the list, so a test can find a rail row's on-screen box.
     function railItemFor(index) {
         if (index < root.userFavouriteEntries.length) return favRepeater.itemAt(index)
-        if (index < root.favoriteEntries.length) return homeRepeater.itemAt(index - root.userFavouriteEntries.length)
-        var rest = index - root.favoriteEntries.length
+        var rest = index - root.userFavouriteEntries.length
+        if (rest < root.homeEntries.length) return homeRepeater.itemAt(rest)
+        rest -= root.homeEntries.length
+        if (rest < root.trashEntries.length) return trashRepeater.itemAt(rest)
+        rest -= root.trashEntries.length
         if (rest < root.networkEntries.length)
             return netRepeater.itemAt(rest)
         rest -= root.networkEntries.length
-        if (rest < root.deviceEntries.length) return devRepeater.itemAt(rest)
-        return trashRepeater.itemAt(rest - root.deviceEntries.length)
+        return devRepeater.itemAt(rest)
     }
     // The one divider in the whole design.
     Rectangle {

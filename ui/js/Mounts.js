@@ -276,7 +276,7 @@ function release(action, key, devices, mounts, sidebar) {
     if (action === "unmount")
         mounts.unmount(share)
     else if (action === "rename")
-        sidebar.startRename(sidebar.favoriteEntries.length + share)
+        sidebar.startRename(sidebar.placesEntries.length + share)
     else if (action === "remove")
         mounts.forget(sidebar.networkEntries[share].uri)
 }

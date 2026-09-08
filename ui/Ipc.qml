@@ -436,7 +436,7 @@ QtObject {
             }
             return out.join("\n")
         }
-        function networkStartIndex(): int { return root.pane.sidebar.favoriteEntries.length }
+        function networkStartIndex(): int { return root.pane.sidebar.placesEntries.length }
 
         // One line per entry, "label|group|kind|mounted", the same shape networkEntries answers.
         function deviceEntries(): string {
