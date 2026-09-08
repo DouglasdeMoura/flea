@@ -10,7 +10,7 @@ pdf_expect() {
 }
 
 pdf_controls() {
-    local overlay="$1" before
+    local overlay="$1" before ignored
     pdf_expect "$overlay" '.pages == 3 and .focused and .control == 1 and (.controls[0].enabled | not)' "initial focus"
     key -k Return >/dev/null
     pdf_expect "$overlay" '.page == 1' "Enter activates Next"
@@ -61,10 +61,12 @@ pdf_controls() {
     key -k Up >/dev/null
     pdf_expect "$overlay" '.scrollY == 0' "Up scrolls page back"
     before=$(ipc cursor)
-    key j k r d >/dev/null
-    pdf_expect "$overlay" '.scrollY == 0 and .page == 1 and .focused' "listing keys ignored"
+    for ignored in j k r d; do
+        key -- "$ignored" >/dev/null
+        pdf_expect "$overlay" '.scrollY == 0 and .page == 1 and .focused' "listing key $ignored ignored"
+    done
     [[ "$(ipc cursor)" == "$before" ]] || fail "PDF listing keys changed listing cursor"
-    key '-' >/dev/null
+    key -- '-' >/dev/null
     pdf_expect "$overlay" '.zoom == 1' "minus zooms out"
 }
 
