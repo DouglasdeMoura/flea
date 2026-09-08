@@ -34,6 +34,9 @@ QtObject {
             var c = Theme.color;
             return [c.background, c.surface, c.foreground, c.muted, c.accent, c.error, c.symlink, c.executable].join(" ");
         }
+        // The size running text really draws at, and a row name's own: the settings case pins both to the stop.
+        function bodyPx(): int { return Theme.font.body }
+        function rowNamePx(i: int): int { var item = root.pane.itemFor(i); return item ? item.namePx : -1 }
         function metrics(): string { return Theme.font.bodySmall + " " + Theme.font.caption + " " + Theme.spacing.rowPaddingX + " " + Theme.rowHeight }
         // Every token the Blueprint board states, one key=value per line; tools/flea-metrics-gate diffs it. metrics() above stays positional for tests/ui.sh.
         function tokens(): string { return Theme.tokens() }

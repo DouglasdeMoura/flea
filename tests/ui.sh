@@ -5613,6 +5613,9 @@ case_settings() {
     settle
     local pinned_base
     pinned_base=$(token_of baseSize)
+    # Running text draws at the stop itself (GM, 2026-09-07); the row name is the rendered proof, bodySmall stays the geometry token.
+    [[ "$(ipc bodyPx)" == "$pinned_base" && "$(ipc rowNamePx 0)" == "$pinned_base" ]] \
+        || fail "settings: at the ${pinned_base}px stop the body draws $(ipc bodyPx) and row 0's name $(ipc rowNamePx 0)"
 
     # Restart survival, which is what separates a setting from a session's mood. Every value is
     # asserted in the file the panel wrote, again through the backend that owns it, and again in the
@@ -5667,6 +5670,9 @@ case_settings() {
     # Back to following, so nothing after this case runs at a size it did not ask for.
     key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
     settle
+    # Following, running text is Omarchy's own regular body, which is its base size, and the row name draws it.
+    [[ "$(ipc bodyPx)" == "$(token_of baseSize)" && "$(ipc rowNamePx 0)" == "$(ipc bodyPx)" ]] \
+        || fail "settings: following Omarchy the body draws $(ipc bodyPx) against base $(token_of baseSize), row 0's name $(ipc rowNamePx 0)"
 
     settings_read_refused "$stored" "$dir"
 
