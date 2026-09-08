@@ -15,6 +15,8 @@ Item {
 
     property var pane: null
     property var menu: null
+    // The active column's thumbnail plan, relayed for ui/Pane.qml to write, the grid's own contract.
+    signal thumbsApplied(var work)
     // Whichever view is up owns the keyboard, and Focus.handleKey is the one route all three take.
     Keys.onPressed: function (event) { event.accepted = Focus.handleKey(event, root.pane, root.pane.sidebar) }
 
@@ -82,12 +84,10 @@ Item {
                                   kind === Facts.ARCHIVE)
     }
 
-    // The listArea contract every caller of the pane's own navigation uses. A column view has no
-    // scrolling viewport of its own to plan work for: the only per-row cost it pays is one thumbnail
-    // for the row the preview column is actually drawing.
+    // The listArea contract every caller of the pane's own navigation uses: the listing's column plans its own viewport's thumbnails, the way the list and the grid do.
     function primeSettle() {}
     function restartCoalesce() {}
-    function restartSettle() { root.askThumb() }
+    function restartSettle() { active.restartSettle() }
     function positionViewAtIndex(index, mode) { active.positionViewAtIndex(index - root.pane.held, mode) }
     // The one column whose rows are the pane's own, for ui/Ipc.qml: the two beside it are peeks and
     // answer for another directory, so neither is where a background right click belongs.
@@ -113,6 +113,7 @@ Item {
     function frameItem() { return preview.frameItem }
     function playerLoaded() { return preview.playerLoaded() }
     function thumbShown() { return preview.thumbShown }
+    function frameReady() { return preview.frameStatus === Image.Ready }
 
     function activateNeighbour(base, name, isDir) {
         var target = root.pane.join(base, name)
@@ -122,12 +123,7 @@ Item {
             root.pane.openFile(target)
     }
 
-    function askThumb() {
-        var row = root.cursorRow
-        if (!row || row.d || row.t !== true)
-            return
-        root.pane.backend.thumb([root.pane.cursorIndex])
-    }
+    function askThumb() { active.restartSettle() }
 
     // "Kind=MPEG-4 video|Duration=1:12|...", so a test reads the preview column's own table.
     function factsLine() {
@@ -254,6 +250,7 @@ Item {
             onPicked: function (index, tapCount, modifiers) { Tap.tapped(index, tapCount, modifiers, root.pane) }
             onMenuRequested: function (index, eventPoint) { Tap.tappedMenu(index, eventPoint, root.pane, root.menu) }
             onBackgroundMenuRequested: function (eventPoint) { root.menu.openBackground(eventPoint.scenePosition) }
+            onThumbsApplied: function (work) { root.thumbsApplied(work) }
         }
 
         // The cursor row: what is inside it when it is a directory, what it is when it is a file.

@@ -322,6 +322,11 @@ FocusScope {
 
     // The grid's plans land the way the list's do below: it computes, and only the pane writes the two states.
     Connections {
+        target: columnsLoader.item
+        function onThumbsApplied(work) { root.thumbState = Thumbs.applied(root.thumbState, work) }
+    }
+
+    Connections {
         target: gridLoader.item
         function onThumbsApplied(work) { root.thumbState = Thumbs.applied(root.thumbState, work) }
         function onDirSizesApplied(ask) { root.dirSizeState = DirSizes.applied(root.dirSizeState, ask) }

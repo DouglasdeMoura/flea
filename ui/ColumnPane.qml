@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Tap.js" as Tap
+import "js/Thumbs.js" as Thumbs
 
 // One Miller column: a scrolling list of ColumnRows over either a peeked directory or the pane's
 // own listing window. It owns no state; the area above it decides which row is which.
@@ -37,11 +38,33 @@ Item {
     signal backgroundMenuRequested(var eventPoint)
     // A right click on a peek's row: the peek's directory becomes the listing with this row as the cursor, and the menu opens there.
     signal neighbourMenuRequested(string name)
+    // The thumbnail plan for this column's viewport, computed here and written by the pane, the grid's own contract.
+    signal thumbsApplied(var work)
 
     // The listArea contract ui/ColumnsArea.qml drives the middle column through; the view is private.
     function positionViewAtIndex(index, mode) { view.positionViewAtIndex(index, mode) }
     function itemAtIndex(index) { return view.itemAtIndex(index) }
     function contentY() { return view.contentY }
+    function restartSettle() { settle.restart() }
+
+    // The viewport's rows and no more, rule 1: the same plan the list and the grid run, over this column's own scroll position.
+    function requestThumbs() {
+        if (root.pane === null || root.pane.total === 0 || root.pane.listInFlight)
+            return
+        var span = Thumbs.viewport(view.contentY, Theme.rowHeight, Math.max(1, Math.ceil(view.height / Theme.rowHeight)), root.rows.length)
+        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, root.offset + span.first, root.offset + span.last)
+        root.pane.backend.thumbcancel(work.drop)
+        root.pane.backend.thumb(work.ask)
+        root.thumbsApplied(work)
+    }
+
+    Timer {
+        id: settle
+        interval: root.pane ? root.pane.settleMs : 120
+        repeat: false
+        onTriggered: root.requestThumbs()
+    }
+    onRowsChanged: if (root.pane !== null) settle.restart()
 
     ListView {
         id: view
@@ -50,6 +73,7 @@ Item {
         model: root.rows.length
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        onContentYChanged: if (root.pane !== null) settle.restart()
         reuseItems: true
 
         Flea.FastScrollHandler {
@@ -74,6 +98,7 @@ Item {
             // A shrunk listing subscripts out of range under a delegate not yet released, and QML
             // hands that back as undefined; every row reader in the tree tests against a real null.
             row: root.rows[index] !== undefined ? root.rows[index] : null
+            thumb: root.pane !== null ? root.pane.thumbFor(root.offset + index) : ""
             cursor: root.selectedIndex >= 0 && root.offset + index === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(root.offset + index)
