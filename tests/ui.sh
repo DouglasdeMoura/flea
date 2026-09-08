@@ -4591,6 +4591,31 @@ EOS
     [[ "$(ipc networkEntries)" == "StubNAS|network|share|false" ]] \
         || fail "sharebrowser: the stub NAS bookmark did not appear, got $(ipc networkEntries)"
 
+    # The overlay's box in the lazy views first: placed on a lazy view's item it sat at the Loader's origin, and that is where the old coordinates put it.
+    local mode
+    for mode in grid columns; do
+        switch_view "$mode"
+        key -k Tab >/dev/null
+        settle
+        key g >/dev/null
+        key j >/dev/null
+        settle
+        key l >/dev/null
+        for _attempt in $(seq 1 100); do
+            [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
+            sleep 0.05
+        done
+        [[ "$(ipc shareBrowserOpen)" == "true" ]] || fail "sharebrowser: $mode: l on the bare root never opened the overlay"
+        rect_is "$(ipc shareBrowserRect)" $(ipc listAreaRect) 1 \
+            || fail "sharebrowser: $mode: the overlay's box is $(ipc shareBrowserRect), not the listing slot $(ipc listAreaRect)"
+        key -k Escape >/dev/null
+        settle
+        [[ "$(ipc shareBrowserOpen)" == "false" ]] || fail "sharebrowser: $mode: Escape did not close the overlay"
+        key -k Escape >/dev/null
+        settle
+    done
+    switch_view list
+
     # Tab to the rail and l the bare-root entry: it lists shares, it does not open anything.
     key -k Tab >/dev/null
     settle
@@ -4605,6 +4630,8 @@ EOS
         sleep 0.05
     done
     [[ "$(ipc shareBrowserOpen)" == "true" ]] || fail "sharebrowser: l on the bare root never opened the overlay"
+    rect_is "$(ipc shareBrowserRect)" $(ipc listAreaRect) 1 \
+        || fail "sharebrowser: list: the overlay's box is $(ipc shareBrowserRect), not the listing slot $(ipc listAreaRect)"
     [[ "$(ipc shareBrowserEntries)" == "$(printf 'share1\nshare2\nshare3')" ]] \
         || fail "sharebrowser: the overlay's own shares over IPC are wrong: $(ipc shareBrowserEntries)"
     [[ "$(ipc path)" == "$dir" ]] || fail "sharebrowser: listing the shares navigated away from $dir"
@@ -6321,6 +6348,16 @@ switch_view() {
     [[ "$(ipc viewMode)" == "$want" ]] || fail "switch_view: ctrl-$chord left the view on $(ipc viewMode), not $want"
 }
 
+# rect_is "x y w h" ex ey ew eh tol: every edge of the box within tol pixels of the expected one.
+rect_is() {
+    local x y w h d
+    read -r x y w h <<< "$1"
+    [[ -n "$h" ]] || return 1
+    for d in $((x - $2)) $((y - $3)) $((w - $4)) $((h - $5)); do
+        (( ${d#-} <= $6 )) || return 1
+    done
+}
+
 # A click at row i's height just right of the settings card: on the ground, and inside the row in every view (the middle column runs 200 px past the card).
 click_row_edge() {
     local rx ry rw rh cx cy cw ch wx wy
@@ -6546,11 +6583,12 @@ case_views() {
             sleep "$mark_poll_s"
         done
         (( lit > 0 )) || fail "$mode: the empty directory's hero painted nothing"
-        # And it sits inside the listing slot: a lazy view's item reports a local origin, so the hero once drew over the sidebar.
-        read -r fx fy fw fh <<< "$(ipc emptyMarkRect)"
+        # Its box is the listing slot exactly, the middle column in the columns view: a lazy view's item reports a local origin, and the hero placed on it once drew over the sidebar, still inside a wide slot.
         read -r sx sy sw sh <<< "$(ipc listAreaRect)"
-        (( fx >= sx && fy >= sy && fx + fw <= sx + sw && fy + fh <= sy + sh )) \
-            || fail "$mode: the hero at $fx $fy $fw $fh is outside the listing slot $sx $sy $sw $sh"
+        local ex=$sx ew=$sw
+        [[ "$mode" == "columns" ]] && { ex=$((sx + sw / 3)); ew=$((sw / 3)); }
+        rect_is "$(ipc emptyStateRect)" "$ex" "$sy" "$ew" "$sh" 1 \
+            || fail "$mode: the hero's box is $(ipc emptyStateRect), not the slot $ex $sy $ew $sh"
         key -k Backspace >/dev/null
         sleep 1
         key -k Backspace >/dev/null

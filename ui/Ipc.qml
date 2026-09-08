@@ -56,6 +56,7 @@ QtObject {
         function inputToRows(): string { return String(root.pane.inputAt) + " " + String(root.pane.rowsAt) }
         function mode(): string { return "browse" }
         function state(): string { return root.pane.listingState }
+        function listInFlight(): bool { return root.pane.listInFlight }
         function stateMessage(): string { return root.pane.stateMessage }
         function contextMenuVisible(): bool { return root.pane.menuVisible }
         function showHidden(): bool { return root.pane.showHidden }
@@ -246,6 +247,8 @@ QtObject {
         // "x y width height" of the empty mark in window pixels, for a painted-pixel count: the state
         // flag above cannot see a mark drawn under its own parent's paint.
         function emptyMarkRect(): string { return root.emptyState ? root.fleaWindow.rectOf(root.emptyState.markItem) : "" }
+        // The whole hero box, so a test can hold it to the listing slot exactly rather than merely inside it.
+        function emptyStateRect(): string { return root.emptyState ? root.fleaWindow.rectOf(root.emptyState) : "" }
         function rowAt(i: int): string {
             var item = root.pane.itemFor(i)
             return item ? item.describe() : "loading"
@@ -391,6 +394,7 @@ QtObject {
         // One share name per line, in cursor order; empty when the overlay is shut.
         function shareBrowserEntries(): string { return root.shareBrowser ? root.shareBrowser.shares.join("\n") : "" }
         function shareBrowserCursor(): int { return root.shareBrowser ? root.shareBrowser.cursorIndex : -1 }
+        function shareBrowserRect(): string { return root.shareBrowser ? root.fleaWindow.rectOf(root.shareBrowser) : "" }
         // One line per entry, "label|group|kind|mounted", so a test can assert count and shape without a screenshot.
         function networkEntries(): string {
             var out = []

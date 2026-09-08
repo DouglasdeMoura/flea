@@ -35,6 +35,8 @@ cleanup() {
   [ -n "${FLEA_PID:-}" ] && kill "$FLEA_PID" 2>/dev/null
   sleep 0.5
   sandbox_remove "$SB" 2>/dev/null
+  # R7's tmpfs root: its own mktemp, its own marker, and the pattern checked again before the delete.
+  case "${XDEV:-}" in /dev/shm/flea-drag-xdev-*) [ -f "$XDEV/$SANDBOX_MARKER" ] && rm -rf -- "$XDEV" ;; esac
 }
 trap cleanup EXIT
 
@@ -302,6 +304,47 @@ wait_for "$HOMEDIR/aaa/r1b.txt" present
 check "the lifted file landed in the folder under the drop" \
       "$([ -e "$HOMEDIR/aaa/r1b.txt" ] && echo aaa || echo missing)" "aaa"
 check "and no other file moved" "$(ls -A "$HOMEDIR/aaa" | grep -vxF r1b.txt | tr '\n' ' ')" "$aaa_before"
+check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+# ---------------------------------------------------------------- R7
+echo
+echo "== R7: a drop on a tab whose listing is still out is a copy, never a cross-device move =="
+# ui/TabBar.qml reads the destination device as unknown while pane.listInFlight, because dirDev is then
+# the directory the hover switch just left. With a tmpfs tab the stale device made the drop a move, and
+# a move across devices copies and then deletes the source. The window is made wide on purpose: the
+# tab lists 600000 tmpfs entries, hundreds of milliseconds, and the release follows the switch by tens.
+XDEV=$(mktemp -d /dev/shm/flea-drag-xdev-XXXXXX)
+: > "$XDEV/$SANDBOX_MARKER"
+check "the tmpfs root is another filesystem than the fixture" \
+      "$([ "$(stat -c %d "$XDEV")" != "$(stat -c %d "$HOMEDIR")" ] && echo other || echo same)" "other"
+mkdir "$XDEV/big"
+seq -f "$XDEV/big/f%06g" 1 600000 | xargs -n 10000 touch
+printf 'r7 payload\n' > "$HOMEDIR/r7.txt"
+# R6 left the third tab current; it is walked into the tmpfs directory through the path bar, as R5 walked into bbb.
+check "the third tab is current" "$(ipc tabIndex)" "2"
+omarchy-drive key --window flea : >/dev/null 2>&1; sleep 0.3
+omarchy-drive key --window flea "$XDEV/big" >/dev/null 2>&1; sleep 0.2
+omarchy-drive key --window flea -k Return >/dev/null 2>&1
+for i in $(seq 1 120); do [ "$(ipc total)" = 600000 ] && break; sleep 0.25; done
+check "the third tab lists the tmpfs directory in full" "$(ipc total)" "600000"
+omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
+check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
+for i in $(seq 1 40); do rowidx r7.txt >/dev/null 2>&1 && break; sleep 0.25; done
+set -- $(screen_centre r7.txt); sx=$1; sy=$2
+set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+warp "$sx" "$sy"; sleep 0.4
+press; sleep 0.3
+# Half a second on the tab: the switch fires at hoverSwitchMs and its listing is still out at the release.
+glide_to "$tx" "$ty"; sleep 0.5
+release
+inflight=$(ipc listInFlight)
+sleep 0.6
+check "the listing the switch started was still out after the release" "$inflight" "true"
+check "and the switch had selected the tmpfs tab" "$(ipc tabIndex)" "2"
+wait_for "$XDEV/big/r7.txt" present
+check "the file landed on the tmpfs tab" \
+      "$([ -e "$XDEV/big/r7.txt" ] && echo landed || echo missing)" "landed"
+check "as a copy, so the source survives" \
+      "$([ -e "$HOMEDIR/r7.txt" ] && echo kept || echo GONE)" "kept"
 check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
 echo
 echo "$((pass + fail)) checks, $fail failed"
