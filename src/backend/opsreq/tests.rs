@@ -1,4 +1,4 @@
-// The transfer, trash and duplicate cases for src/backend/opsreq.rs, a sibling file so the module stays inside the budget.
+// The opsreq test module, out of line so src/backend/opsreq.rs stays inside the file budget.
 use super::*;
 use crate::backend::testdir::TestDir;
 use crate::backend::undo::Journal;
@@ -62,7 +62,11 @@ fn a_destination_that_is_not_an_existing_directory_is_refused_before_any_item_is
         usable_dest(&file.to_string_lossy()).unwrap_err().msg,
         "the destination is not a directory"
     );
-    assert!(usable_dest("relative/path").is_err(), "a relative destination is never resolved here");
+    assert_eq!(
+        usable_dest("relative/path").unwrap_err().msg,
+        "a destination must be an absolute path",
+        "a relative destination is never resolved here"
+    );
     assert!(usable_dest(&d.join("missing").to_string_lossy()).is_err(), "Flea does not create the destination");
 }
 
