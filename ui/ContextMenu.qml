@@ -247,11 +247,12 @@ Item {
         entry: ({ separator: true })
     }
 
-    // The ground closes on a press and swallows the wheel: the listing beneath must not scroll under an open menu.
+    // The ground owns every pointer event outside the rows: hover stops here, the wheel is swallowed, and the click that closes is taken on release so the row beneath never sees a press the close would have handed it.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        onPressed: root.close()
+        hoverEnabled: true
+        onClicked: root.close()
         onWheel: function (wheel) { wheel.accepted = true }
     }
 

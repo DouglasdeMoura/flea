@@ -87,6 +87,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton
+            hoverEnabled: true
             onClicked: {}
             onWheel: function (wheel) { wheel.accepted = true }
         }

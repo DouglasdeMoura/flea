@@ -57,6 +57,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            hoverEnabled: true
             onClicked: root.close()
             onWheel: function (wheel) { wheel.accepted = true }
         }
