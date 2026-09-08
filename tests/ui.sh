@@ -6597,10 +6597,11 @@ column_expect() {
     fail "formats: $name shows $(ipc previewColumnState), not $want (failure '$(ipc columnFailure)')"
 }
 
+# Prints one number, so the shot's own narration goes to stderr rather than into the caller's count.
 column_frame_lit() {
     local fx fy fw fh
     read -r fx fy fw fh <<< "$(ipc columnFrameRect)"
-    shot "formats-$1"
+    shot "formats-$1" >&2
     lit_in_rect "$evidence_dir/formats-$1.png" "$((fx + 6))" "$((fy + 6))" "$((fw - 12))" "$((fh - 12))"
 }
 
