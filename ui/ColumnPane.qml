@@ -114,7 +114,8 @@ Item {
             cursor: root.selectedIndex >= 0 && root.offset + index === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(root.offset + index)
-            lifted: root.liftedName.length > 0 && root.rows[index] && root.rows[index].n === root.liftedName
+            // Read off the normalised row above: subscripting rows again hands a shrunk listing's undefined to a bool.
+            lifted: root.liftedName.length > 0 && row !== null && row.n === root.liftedName
             dim: root.dim && !lifted
 
             TapHandler {
