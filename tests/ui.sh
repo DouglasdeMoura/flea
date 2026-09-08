@@ -4878,6 +4878,9 @@ EOS
     export HOME="$fixture_home"
     launch "$dir"
     export HOME="$real_home"
+    # GM's ruling of 2026-09-08: the machine's rail row is the bare hostname, no device suffix, so it fits at the body size.
+    [[ "|$(ipc railLabels)|" == *"|$(cat /etc/hostname | tr -d '[:space:]')|"* && "$(ipc railLabels)" != *" · "* ]] \
+        || fail "unmount: the rail's machine row is not the bare hostname: $(ipc railLabels)"
     export PATH="$saved_path"
     # bin/ and unmount.log are the gio stub's own fixture entries, alongside the two files under test.
     wait_listing 4

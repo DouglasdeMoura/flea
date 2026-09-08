@@ -266,6 +266,8 @@ QtObject {
         }
         // The same lookup as rowCentre, but for a rail row: the rail has no ListView, so Sidebar.railItemFor(i) walks its own two Repeaters instead.
         function railRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.sidebar.railItemFor(i)) }
+        function railLabel(i: int): string { var item = root.pane.sidebar.railItemFor(i); return item ? item.modelData.label : "" }
+        function railLabels(): string { var out = []; for (var i = 0; i < root.pane.railCount; i++) { var item = root.pane.sidebar.railItemFor(i); out.push(item ? item.modelData.label : "") } return out.join("|") }
         // The sidebar pushes the row and the header right by its own width, so a pixel-crop test needs this rather than assuming x=0.
         function rowLeft(i: int): string {
             var item = root.pane.itemFor(i)

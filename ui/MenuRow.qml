@@ -25,7 +25,7 @@ Item {
     // For a parent that lights the pointer's row without moving its own cursor, as ui/ShareBrowser.qml does.
     readonly property bool hovered: pointer.hovered
     // For ui/Ipc.qml's contextMenuRowProbe: whether the pointer is over this row and where, before a test judges a move.
-    function probe() { return pointer.hovered + " " + Math.round(pointer.mouseX) + " " + Math.round(pointer.mouseY) + " " + Math.round(pointer.restX) + " " + Math.round(pointer.restY) }
+    function probe() { return pointer.hovered + " " + Math.round(pointer.point.position.x) + " " + Math.round(pointer.point.position.y) + " " + Math.round(pointer.restingAt.x) + " " + Math.round(pointer.restingAt.y) }
 
     readonly property bool isSeparator: root.entry.separator === true
     // Menu.hasSubmenu and not a local test, because a local one read submenu === true and the menu sets an array.
@@ -158,19 +158,22 @@ Item {
         }
     }
 
-    // A MouseArea, because a HoverHandler's point does not follow hover motion on this Qt (measured twice on the box); where the pointer sat at entry is the rest, any later, different position is motion.
-    MouseArea {
+    HoverHandler {
         id: pointer
-        anchors.fill: parent
         enabled: !root.isSeparator
-        acceptedButtons: Qt.NoButton
-        hoverEnabled: true
-        readonly property bool hovered: containsMouse
-        property real restX: -1
-        property real restY: -1
-        onEntered: { pointer.restX = mouseX; pointer.restY = mouseY }
-        onPositionChanged: function (mouse) {
-            if (mouse.x !== pointer.restX || mouse.y !== pointer.restY)
+        // The first point after entry is where the pointer rested; only a later, different one is motion.
+        property bool armed: false
+        property point restingAt
+        onHoveredChanged: pointer.armed = false
+        onPointChanged: {
+            if (!pointer.hovered)
+                return
+            if (!pointer.armed) {
+                pointer.armed = true
+                pointer.restingAt = pointer.point.position
+                return
+            }
+            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
                 root.pointerMoved()
         }
     }
