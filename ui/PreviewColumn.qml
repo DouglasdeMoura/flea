@@ -75,6 +75,8 @@ Item {
     readonly property bool thumbShown: root.wantsThumb && root.thumbDrawn
     // For ui/Ipc.qml's columnFrameRect: the box a playing video's pixels must change inside.
     readonly property Item frameItem: frame
+    readonly property Item linesItem: lines
+    readonly property Item archiveItem: archivePane
     // Ready is the decoded picture on screen; thumbShown is already true while it loads.
     readonly property alias frameStatus: frameThumb.status
     // The two states whose picture is the thumbnail; audio's mark is what that state draws when it works.
@@ -235,6 +237,7 @@ Item {
 
             // The canvas's Archive tile: the first entries by name, then the count it could not show.
             Flea.PreviewArchive {
+                id: archivePane
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.gap
                 visible: root.previewState === Facts.ARCHIVE && root.meta !== null

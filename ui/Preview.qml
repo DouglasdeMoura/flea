@@ -30,6 +30,18 @@ Item {
     property var archiveMeta: null
     property int archiveRow: -1
     readonly property bool archiveFailed: root.isArchive && root.archiveMeta !== null && root.archiveMeta.archiveFailed === true
+    // For ui/Ipc.qml: the item drawing this kind's content, whether a player exists, and what the text and archive panes hold.
+    function surfaceItem() {
+        if (root.isImage) return imageLoader.item
+        if (root.isMedia) return mediaLoader.item
+        if (root.isPdf) return pdfLoader.item
+        if (root.isArchive) return archivePane
+        if (root.kind === "text") return textPane.bodyItem
+        return null
+    }
+    function mediaLoaded() { return mediaLoader.item !== null }
+    function textShown() { return textPane.shownText() }
+    function archiveNames() { return root.archiveMeta && root.archiveMeta.names ? root.archiveMeta.names.join("|") : "" }
     readonly property bool pdfExpanded: root.isPdf && pdfLoader.item !== null && pdfLoader.item.expanded
     // The PDF surface itself, null when no document is loaded: ui/Ipc.qml's zoom and expand
     // readers answer "" for that, so an unmeasured state can never read as a real value.
@@ -282,6 +294,7 @@ Item {
 
         // The canvas's Archive tile at Quick Look size: the name, the count the index gave, then the entries.
         Column {
+            id: archivePane
             anchors.fill: parent
             anchors.margins: Theme.spacing.rowPaddingX
             spacing: Theme.spacing.gap

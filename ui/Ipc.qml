@@ -208,6 +208,12 @@ QtObject {
         function columnThumbShown(): bool { return root.columns ? root.columns.thumbShown() : false }
         function columnFrameReady(): bool { return root.columns ? root.columns.frameReady() : false }
         function columnTextLines(): string { return root.columns ? root.columns.textLines() : "" }
+        function columnLinesRect(): string { return root.columns ? root.fleaWindow.rectOf(root.columns.linesItem()) : "" }
+        function columnArchiveRect(): string { return root.columns ? root.fleaWindow.rectOf(root.columns.archiveItem()) : "" }
+        function previewSurfaceRect(): string { return root.fleaWindow.rectOf(root.pane.preview.surfaceItem()) }
+        function previewMediaLoaded(): bool { return root.pane.preview.mediaLoaded() }
+        function previewText(): string { return root.pane.preview.textShown() }
+        function previewArchiveNames(): string { return root.pane.preview.archiveNames() }
         function columnArchiveNames(): string { return root.columns ? root.columns.archiveNames() : "" }
         function columnFailure(): string { return root.columns ? root.columns.failureText() : "" }
         function rowThumbRect(i: int): string { var item = root.pane.visibleItemFor(i); return item && item.thumbItem ? root.fleaWindow.rectOf(item.thumbItem) : "" }
