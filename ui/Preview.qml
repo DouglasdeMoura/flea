@@ -41,7 +41,7 @@ Item {
     }
     function mediaLoaded() { return mediaLoader.item !== null }
     function textShown() { return textPane.shownText() }
-    function archiveNames() { return root.archiveMeta && root.archiveMeta.names ? root.archiveMeta.names.join("|") : "" }
+    function archiveNames() { return root.archiveMeta && root.archiveMeta.names ? root.archiveMeta.names.map(function (e) { return e.n }).join("|") : "" }
     readonly property bool pdfExpanded: root.isPdf && pdfLoader.item !== null && pdfLoader.item.expanded
     // The PDF surface itself, null when no document is loaded: ui/Ipc.qml's zoom and expand
     // readers answer "" for that, so an unmeasured state can never read as a real value.

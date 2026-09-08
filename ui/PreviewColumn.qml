@@ -347,7 +347,7 @@ Item {
     function playerLoaded() { return playerLoader.item !== null }
     // What the text, archive and failure surfaces actually draw, for ui/Ipc.qml: the lines, the member names, the sentence.
     function textLines() { return lines.tooLarge ? "too large" : lines.lines.join("|") }
-    function archiveNames() { return root.meta && root.meta.names ? root.meta.names.join("|") : "" }
+    function archiveNames() { return root.meta && root.meta.names ? root.meta.names.map(function (e) { return e.n }).join("|") : "" }
     function failureText() { return root.failure }
 
     // A multi-selection describes a count, not a file, so it names the count instead of a name.

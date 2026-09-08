@@ -181,15 +181,9 @@ Item {
         root.openSubmenuRow = -1
         root.submenuCursor = 0
         root.focusHolder = root.focusedSibling()
-        root.openedAt = Date.now()
         root.opened = true
         keyCatcher.forceActiveFocus()
     }
-
-    // A hover beginning inside this window of the open is the pointer the menu appeared under, not one that moved.
-    readonly property int restingMs: 150
-    property double openedAt: 0
-    function pointerArrived() { return Date.now() - root.openedAt > root.restingMs }
 
     // Whichever sibling holds active focus when the menu opens, which is the pane's list today.
     function focusedSibling() {
@@ -291,7 +285,7 @@ Item {
                     entry: row.modelData
                     compact: root.forRail
                     current: !root.submenuOpen && root.cursor === row.index
-                    onPointerMoved: if (root.pointerArrived()) root.cursor = row.index
+                    onPointerMoved: root.cursor = row.index
                     onActivated: {
                         if (Menu.hasSubmenu(row.modelData))
                             root.openSubmenu(row.index)
@@ -334,7 +328,7 @@ Item {
                     entry: ({ label: subRow.modelData.label, action: "",
                               glyph: Menu.submenuGlyph(root.entries[root.openSubmenuRow].action) })
                     current: root.submenuCursor === subRow.index
-                    onPointerMoved: if (root.pointerArrived()) root.submenuCursor = subRow.index
+                    onPointerMoved: root.submenuCursor = subRow.index
                     onActivated: root.chooseSub(subRow.modelData.id)
                 }
             }
