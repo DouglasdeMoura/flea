@@ -66,8 +66,11 @@ stale_fixture="$FIXTURE_ROOT/flea-ui-stale-$$"
 thumb_rows=200
 # A settle is 120 ms and a round trip through the pool is tens of ms, so a screen has a second.
 thumb_fill_s=20
-# 1500 detents carry any fixture past its last row, so the cursor witness in case_thumbs moves whatever the notch rate.
+# Long enough that the three fling cases (thumbs, nosweep, renamelife) scroll thousands of rows whatever the notch rate; none needs the end.
 fling_clicks=1500
+# 15 shots 0.2 s apart span one 2800 ms replay of ui/FleaMark.qml's draw, whose mark is lit from about 0.4 s to 2.8 s of it.
+mark_poll_shots=15
+mark_poll_s=0.2
 # The backend's own DRAIN_LIMIT is 25 s, so anything alive past this is wedged rather than draining.
 drain_wait_s=30
 # Hard rule 9 covers writes, not only deletes: an overridable path that is truncated or written into
@@ -1757,19 +1760,22 @@ case_background() {
     done
     [[ "$(ipc path)" == "$dir/dest" ]] || fail "background: the case is in $(ipc path), not $dir/dest"
     [[ "$(ipc total)" == "0" ]] || fail "background: $dir/dest listed $(ipc total) rows, not 0"
-    # The mark has to paint, not only be flagged (a z below the view's paint once hid it), and its draw is blank for its first 380 ms (ui/FleaMark.qml), so poll one draw cycle.
-    local mark lit=0 shots=0
+    # The mark has to paint, not only be flagged (a z below the view's paint once hid it), and its draw starts blank, so the shot is polled across one replay.
+    local mark lit=0 shots=0 captured=1 png="$evidence_dir/background-empty.png"
     mark=$(ipc emptyMarkRect)
     set -- $mark
-    for _attempt in $(seq 1 15); do
-        omarchy-drive shot "$evidence_dir/background-empty.png" flea >/dev/null
+    # A stale image at this path from an earlier run would score as a live one, so each shot is a fresh file or a failure.
+    rm -f "$png"
+    for _attempt in $(seq 1 "$mark_poll_shots"); do
         shots=$_attempt
-        lit=$(count_pixels "$evidence_dir/background-empty.png" "${3}x${4}+${1}+${2}" "((r+g+b)/3) > 0.25")
+        omarchy-drive shot "$png" flea >/dev/null || { captured=0; break; }
+        lit=$(count_pixels "$png" "${3}x${4}+${1}+${2}" "((r+g+b)/3) > 0.25")
         (( lit > 0 )) && break
-        sleep 0.2
+        sleep "$mark_poll_s"
     done
-    printf 'SHOT %s\nBACKGROUND mark rect=%s lit=%s shots=%s\n' "$evidence_dir/background-empty.png" "$mark" "$lit" "$shots"
-    (( lit > 0 )) || fail "background: the empty mark painted no pixel inside ${3}x${4}+${1}+${2} across $shots shots"
+    printf 'SHOT %s\nBACKGROUND mark rect=%s lit=%s shots=%s captured=%s\n' "$png" "$mark" "$lit" "$shots" "$captured"
+    (( captured )) || fail "background: omarchy-drive shot failed on shot $shots of $png"
+    (( ! captured || lit > 0 )) || fail "background: the empty mark painted no pixel inside ${3}x${4}+${1}+${2} across $shots shots"
     # The empty listing is also the strongest case for this menu, and it has no row to aim from.
     click_background
     settle
@@ -2617,7 +2623,7 @@ case_thumbs() {
     # The pitch comes off itemRect and not off a Theme token, so a thumbnail that grew its row reddens here.
     [[ "$pitch" == "$row_height" ]] || fail "a thumbnail made the rendered pitch $pitch, not the $row_height the theme asks for"
 
-    # Nothing is requested while the list is moving: the cursor tracks the viewport, so it is the witness.
+    # The fling has to move the viewport, or the request bounds below would pass on a list that never scrolled.
     local wx wy ww wh before_requests moved cursor_a cursor_b
     read -r wx wy ww wh < <(window_box)
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
