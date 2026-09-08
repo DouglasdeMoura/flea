@@ -20,7 +20,8 @@ Item {
     property bool compact: false
 
     signal activated()
-    // The parent owns the cursor, so hover asks for it to move rather than writing over the binding.
+    // The parent owns the cursor, so a pointer that moves onto the row asks for it; a menu opened under a resting pointer asks nothing, or Enter would fire the pointer's row (0d626ed).
+    signal pointerMoved()
     // For a parent that lights the pointer's row without moving its own cursor, as ui/ShareBrowser.qml does.
     readonly property bool hovered: pointer.hovered
 
@@ -158,7 +159,21 @@ Item {
     HoverHandler {
         id: pointer
         enabled: !root.isSeparator
-        // pointer.hovered spelt out: root now carries a hovered of its own and would shadow here.
+        // The first point after entry is where the pointer rested; only a later, different one is motion.
+        property bool armed: false
+        property point restingAt
+        onHoveredChanged: pointer.armed = false
+        onPointChanged: {
+            if (!pointer.hovered)
+                return
+            if (!pointer.armed) {
+                pointer.armed = true
+                pointer.restingAt = pointer.point.position
+                return
+            }
+            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
+                root.pointerMoved()
+        }
     }
 
     TapHandler {

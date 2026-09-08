@@ -118,9 +118,6 @@ Item {
         return from
     }
 
-    // Row i's item, for ui/Ipc.qml's contextMenuRowCentre.
-    function rowItemAt(i) { return menuRows.itemAt(i) }
-
     function firstRow() {
         return root.entries.length > 0 && root.entries[0].separator === true ? root.stepCursor(0, 1) : 0
     }
