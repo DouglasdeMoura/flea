@@ -6530,8 +6530,243 @@ case_views() {
     kill_flea
 }
 
+# One row per format family the preview classifies, all in the columns view's own frame, judged on
+# what the frame draws: decoded pixels, lines, member names, pages, an advancing position, the sentence.
+formats_fixture() {
+    local dir="$1" media="$FIXTURE_ROOT/flea-media-btrfs"
+    [[ -d "$media" ]] || fail "the media fixture is missing at $media"
+    sandbox_scratch "$dir"
+    cp "$(ls "$media"/*.jpg | head -1)" "$dir/p.jpg"
+    cp "$(ls "$media"/*.png | head -1)" "$dir/p.png"
+    cp "$(ls "$media"/*.webp | head -1)" "$dir/p.webp"
+    cp "$(ls "$media"/*.heic | head -1)" "$dir/p.heic"
+    cp "$media/clip_1006.mp4" "$dir/v.mp4"
+    cp "$(ls "$media"/*.mkv | head -1)" "$dir/v.mkv"
+    cp "$(ls "$media"/*.webm | head -1)" "$dir/v.webm"
+    python3 - "$dir/tone.wav" 15 <<'PYEOF'
+import sys, wave, struct, math
+sample_rate = 44100
+seconds = int(sys.argv[2])
+with wave.open(sys.argv[1], "w") as f:
+    f.setnchannels(1)
+    f.setsampwidth(2)
+    f.setframerate(sample_rate)
+    for i in range(sample_rate * seconds):
+        f.writeframesraw(struct.pack("<h", int(16000 * math.sin(2 * math.pi * 440 * i / sample_rate))))
+PYEOF
+    magick \( -size 400x560 xc:white -fill black -draw "rectangle 40,40 120,80" \) \
+           \( -size 400x560 xc:white -fill black -draw "rectangle 40,40 360,520" \) "$dir/manual.pdf"
+    head -c 200 "$dir/manual.pdf" > "$dir/broken.pdf"
+    printf 'hello from flea\nsecond line\n' > "$dir/sample.txt"
+    printf '# Notes\n\nSome *text*.\n' > "$dir/notes.md"
+    : > "$dir/empty.txt"
+    head -c 1100000 /dev/zero | tr '\0' 'x' > "$dir/big.txt"
+    printf 'fn main() {\n    println!("hi");\n}\n' > "$dir/main.rs"
+    printf '{"a": 1}\n' > "$dir/data.json"
+    ( cd "$dir" && bsdtar -a -cf a.zip sample.txt notes.md && bsdtar --zstd -cf b.tar.zst sample.txt main.rs )
+    : > "$dir/empty.zip"
+    head -c 4096 /dev/urandom > "$dir/corrupt.zip"
+    ln -s "$dir/sample.txt" "$dir/link-file"
+    mkdir -p "$dir/subdir"
+    ln -s "$dir/subdir" "$dir/link-dir"
+    ln -s "$dir/nowhere-at-all" "$dir/link-broken"
+    cp "$dir/p.jpg" "$dir/shut.jpg"
+    chmod 000 "$dir/shut.jpg"
+    head -c 4096 /dev/urandom > "$dir/core.dump"
+}
+
+# Moves the cursor onto a row by name and waits for the column's state to settle on the family expected.
+column_expect() {
+    local name="$1" want="$2" _attempt
+    seek_row_named "$name"
+    for _attempt in $(seq 1 40); do
+        [[ "$(ipc previewColumnState)" == "$want" ]] && return 0
+        sleep 0.1
+    done
+    fail "formats: $name shows $(ipc previewColumnState), not $want (failure '$(ipc columnFailure)')"
+}
+
+column_frame_lit() {
+    local fx fy fw fh
+    read -r fx fy fw fh <<< "$(ipc columnFrameRect)"
+    shot "formats-$1"
+    lit_in_rect "$evidence_dir/formats-$1.png" "$((fx + 6))" "$((fy + 6))" "$((fw - 12))" "$((fh - 12))"
+}
+
+case_formats() {
+    local dir="$fixture_root/formats" name lit p1 p2 wx wy cx cy _attempt
+    formats_fixture "$dir"
+    launch "$dir"
+    wait_listing 26
+    switch_view columns
+    read -r wx wy _ww _wh < <(window_box)
+    for name in p.jpg p.png p.webp p.heic; do
+        column_expect "$name" image
+        for _attempt in $(seq 1 40); do [[ "$(ipc columnFrameReady)" == "true" ]] && break; sleep 0.1; done
+        [[ "$(ipc columnFrameReady)" == "true" ]] || fail "formats: $name never decoded in the frame"
+        lit=$(column_frame_lit "$name")
+        (( lit > 200 )) || fail "formats: $name's frame interior painted $lit lit pixels"
+    done
+    for name in v.mp4 v.mkv v.webm; do
+        column_expect "$name" video
+        for _attempt in $(seq 1 40); do [[ "$(ipc columnFrameReady)" == "true" ]] && break; sleep 0.1; done
+        [[ "$(ipc columnFrameReady)" == "true" ]] || fail "formats: $name's first frame never decoded"
+        read -r cx cy <<< "$(ipc columnPlayCentre)"
+        omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+        sleep 1.2
+        p1=$(ipc columnMediaPosition)
+        sleep 1
+        p2=$(ipc columnMediaPosition)
+        [[ "$(ipc columnMediaPlaying)" == "true" ]] && (( p2 > p1 )) || fail "formats: $name did not play, playing $(ipc columnMediaPlaying), position $p1 then $p2"
+    done
+    column_expect tone.wav audio
+    read -r cx cy <<< "$(ipc columnPlayCentre)"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    sleep 1.2
+    p1=$(ipc columnMediaPosition)
+    sleep 1
+    p2=$(ipc columnMediaPosition)
+    (( p2 > p1 )) || fail "formats: tone.wav did not play, position $p1 then $p2"
+    column_expect manual.pdf pdf
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnPdfLoaded)" == "true" && "$(ipc columnPdfPages)" == "2" ]] && break; sleep 0.1; done
+    [[ "$(ipc columnPdfPages)" == "2" && "$(ipc columnPdfPage)" == "0" ]] || fail "formats: manual.pdf shows $(ipc columnPdfPages) pages, page $(ipc columnPdfPage)"
+    lit=$(column_frame_lit manual-p1)
+    (( lit > 200 )) || fail "formats: manual.pdf's first page painted $lit lit pixels"
+    read -r cx cy <<< "$(ipc columnChevronCentre right)"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    settle
+    [[ "$(ipc columnPdfPage)" == "1" ]] || fail "formats: the right chevron left manual.pdf on page $(ipc columnPdfPage)"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    settle
+    [[ "$(ipc columnPdfPage)" == "1" ]] || fail "formats: the right chevron went past the last page to $(ipc columnPdfPage)"
+    column_expect broken.pdf error
+    [[ "$(ipc columnFailure)" == "This file could not be read." ]] || fail "formats: broken.pdf's sentence is '$(ipc columnFailure)'"
+    column_expect sample.txt text
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnTextLines)" == "hello from flea|"* ]] && break; sleep 0.1; done
+    [[ "$(ipc columnTextLines)" == "hello from flea|second line"* ]] || fail "formats: sample.txt's lines read '$(ipc columnTextLines)'"
+    column_expect notes.md text
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnTextLines)" == "# Notes"* ]] && break; sleep 0.1; done
+    [[ "$(ipc columnTextLines)" == "# Notes"* ]] || fail "formats: notes.md's lines read '$(ipc columnTextLines)'"
+    column_expect empty.txt text
+    column_expect big.txt text
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnTextLines)" == "too large" ]] && break; sleep 0.1; done
+    [[ "$(ipc columnTextLines)" == "too large" ]] || fail "formats: big.txt read '$(ipc columnTextLines | cut -c1-40)', not the too-large answer"
+    column_expect main.rs code
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnTextLines)" == "fn main() {"* ]] && break; sleep 0.1; done
+    [[ "$(ipc columnTextLines)" == "fn main() {"* ]] || fail "formats: main.rs's lines read '$(ipc columnTextLines)'"
+    column_expect data.json code
+    column_expect a.zip archive
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnArchiveNames)" == *"sample.txt"* ]] && break; sleep 0.1; done
+    [[ "$(ipc columnArchiveNames)" == *"sample.txt"* && "$(ipc columnArchiveNames)" == *"notes.md"* ]] || fail "formats: a.zip's members read '$(ipc columnArchiveNames)'"
+    column_expect b.tar.zst archive
+    for _attempt in $(seq 1 40); do [[ "$(ipc columnArchiveNames)" == *"main.rs"* ]] && break; sleep 0.1; done
+    [[ "$(ipc columnArchiveNames)" == *"main.rs"* ]] || fail "formats: b.tar.zst's members read '$(ipc columnArchiveNames)'"
+    column_expect empty.zip error
+    [[ "$(ipc columnFailure)" == "This archive could not be read." ]] || fail "formats: empty.zip's sentence is '$(ipc columnFailure)'"
+    column_expect corrupt.zip error
+    column_expect link-file symlink
+    column_expect link-dir symlink
+    column_expect link-broken symlink
+    column_expect core.dump unsupported
+    column_expect shut.jpg image
+    sleep 1
+    [[ "$(ipc columnFrameReady)" == "false" && "$(ipc columnThumbShown)" == "false" ]] || fail "formats: an unreadable image reports frame ready $(ipc columnFrameReady), thumb shown $(ipc columnThumbShown)"
+    key -M ctrl -k a -m ctrl >/dev/null
+    settle
+    [[ "$(ipc previewColumnState)" == "multi" ]] || fail "formats: select all shows $(ipc previewColumnState), not multi"
+    key -k Escape >/dev/null
+    settle
+    printf 'FORMATS images=4 videos=3 audio=1 pdf=2 text=4 code=2 archives=4 links=3 error=1 unsupported=1 multi=1\n'
+    kill_flea
+}
+
+# The shared Space preview entered from each view on the same rows, judged on content, with the
+# lifetimes GM's review named: a column player dies on a view switch and yields to Space.
+case_previewviews() {
+    local dir="$fixture_root/previewviews" mode wx wy cx cy p1 p2 _attempt
+    formats_fixture "$dir"
+    launch "$dir"
+    wait_listing 26
+    read -r wx wy _ww _wh < <(window_box)
+    for mode in list grid columns; do
+        switch_view list
+        goto_row "$(row_index_of p.jpg)"
+        switch_view "$mode"
+        key -k space >/dev/null
+        for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "image" ]] && break; sleep 0.1; done
+        [[ "$(ipc previewOpen)" == "true" && "$(ipc previewKind)" == "image" && "$(ipc previewState)" == "image" ]] \
+            || fail "$mode: Space on p.jpg: open $(ipc previewOpen), kind $(ipc previewKind), state $(ipc previewState)"
+        key -k Escape >/dev/null
+        settle
+        [[ "$(ipc previewOpen)" == "false" ]] || fail "$mode: Escape did not close the preview"
+        switch_view list
+        goto_row "$(row_index_of manual.pdf)"
+        switch_view "$mode"
+        key -k space >/dev/null
+        for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "pdf" ]] && break; sleep 0.1; done
+        [[ "$(ipc previewKind)" == "pdf" && "$(ipc previewState)" == "pdf" && "$(ipc previewPdfPage)" == "0" ]] \
+            || fail "$mode: Space on manual.pdf: kind $(ipc previewKind), state $(ipc previewState), page $(ipc previewPdfPage)"
+        key -k Right >/dev/null
+        settle
+        key -k Right >/dev/null
+        settle
+        [[ "$(ipc previewPdfPage)" == "1" ]] || fail "$mode: two Rights left manual.pdf on page $(ipc previewPdfPage), not the last page 1"
+        key -k Escape >/dev/null
+        settle
+        switch_view list
+        goto_row "$(row_index_of broken.pdf)"
+        switch_view "$mode"
+        key -k space >/dev/null
+        for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "This file could not be read." ]] && break; sleep 0.1; done
+        [[ "$(ipc previewState)" == "This file could not be read." ]] || fail "$mode: Space on broken.pdf reads '$(ipc previewState)'"
+        key -k Escape >/dev/null
+        settle
+        switch_view list
+        goto_row "$(row_index_of a.zip)"
+        switch_view "$mode"
+        key -k space >/dev/null
+        for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "archive" ]] && break; sleep 0.1; done
+        [[ "$(ipc previewKind)" == "archive" && "$(ipc previewState)" == "archive" ]] || fail "$mode: Space on a.zip: kind $(ipc previewKind), state $(ipc previewState)"
+        key -k Escape >/dev/null
+        settle
+        printf 'PREVIEWVIEWS %s image=ok pdf=ok error=ok archive=ok\n' "$mode"
+    done
+    # The column player and the two things that must end it: another view, and Space on the same file.
+    switch_view list
+    goto_row "$(row_index_of v.mp4)"
+    switch_view columns
+    sleep 1
+    [[ "$(ipc previewColumnState)" == "video" ]] || fail "previewviews: the cursor on v.mp4 shows $(ipc previewColumnState)"
+    read -r cx cy <<< "$(ipc columnPlayCentre)"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    sleep 1.2
+    [[ "$(ipc columnMediaPlaying)" == "true" ]] || fail "previewviews: play did not start in the column"
+    switch_view list
+    settle
+    [[ "$(ipc columnPlayerLoaded)" == "false" ]] || fail "previewviews: the column player survived a switch to the list"
+    switch_view columns
+    sleep 1
+    [[ "$(ipc columnPlayerLoaded)" == "false" ]] || fail "previewviews: a player came back with the view without a press"
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+    sleep 1.2
+    [[ "$(ipc columnMediaPlaying)" == "true" ]] || fail "previewviews: play did not restart in the column"
+    key -k space >/dev/null
+    for _attempt in $(seq 1 40); do [[ "$(ipc previewKind)" == "video" ]] && break; sleep 0.1; done
+    sleep 1
+    p1=$(ipc previewPosition)
+    sleep 1
+    p2=$(ipc previewPosition)
+    [[ "$(ipc previewOpen)" == "true" && "$(ipc previewKind)" == "video" ]] && (( p2 > p1 )) || fail "previewviews: Space over the playing column: open $(ipc previewOpen), kind $(ipc previewKind), position $p1 then $p2"
+    [[ "$(ipc columnPlayerLoaded)" == "false" ]] || fail "previewviews: the column kept its player under the Space preview"
+    key -k Escape >/dev/null
+    settle
+    [[ "$(ipc previewOpen)" == "false" && "$(ipc columnPlayerLoaded)" == "false" ]] || fail "previewviews: after Escape, preview $(ipc previewOpen), column player $(ipc columnPlayerLoaded)"
+    printf 'PREVIEWVIEWS lifetimes=ok\n'
+    kill_flea
+}
+
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)
 
 : > "$run_log"
 : > "$flea_log"
