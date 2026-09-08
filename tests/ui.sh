@@ -181,6 +181,17 @@ flea_pid() {
     printf '%s\n' "${pids[0]}"
 }
 
+owned_trash_monitors() {
+    local pid
+    for pid in $(pgrep -x gio || true); do
+        [[ -r "/proc/$pid/environ" ]] || continue
+        if tr '\0' '\n' < "/proc/$pid/environ" | grep -Fx "FLEA_BIN=$flea_bin" >/dev/null \
+            && tr '\0' '\n' < "/proc/$pid/environ" | grep -F "FLEA_PATH=$fixture_root/" >/dev/null; then
+            printf '%s\n' "$pid"
+        fi
+    done
+}
+
 kill_flea() {
     local pid found waited
     for pid in $(flea_pids); do
@@ -202,10 +213,13 @@ kill_flea() {
         for pid in $(backend_pids); do
             found=1
         done
+        for pid in $(owned_trash_monitors); do
+            found=1
+        done
         [[ "$found" -eq 0 ]] && return
         sleep 0.05
     done
-    fail "a backend was still draining after $drain_wait_s s, so no cache count can be trusted"
+    fail "an owned backend or Trash monitor survived for $drain_wait_s s after its window closed"
 }
 
 # The four roots carry the markers; every per-case directory inside them is a scratch, so a listing

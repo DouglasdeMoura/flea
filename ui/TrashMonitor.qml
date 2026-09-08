@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 // GIO provides the shared Trash count, including Trash on other mounted volumes.
@@ -17,6 +18,12 @@ Item {
     signal changed()
     signal failed(string message)
 
+    function ownedCommand(args) {
+        // setpriv ties the exec'd helper to this UI; the PPID check covers death before signal registration.
+        return ["setpriv", "--pdeathsig", "TERM", "--", "sh", "-c",
+            '[ "$PPID" = "$1" ] || exit 1; shift; exec "$@"',
+            "flea-trash", String(Quickshell.processId)].concat(args)
+    }
     function refresh() {
         if (!enabled) return
         if (collecting) { refreshPending = true; return }
@@ -41,8 +48,12 @@ Item {
         } else failed("Could not read the Trash count.")
         if (refreshPending) Qt.callLater(refresh)
     }
-    onEnabledChanged: if (enabled) refresh()
+    onEnabledChanged: {
+        if (enabled) refresh()
+        else { timeout.stop(); query.running = false; refreshPending = false }
+    }
     Component.onCompleted: refresh()
+    Component.onDestruction: { monitor.running = false; query.running = false }
 
     Timer {
         id: settle
@@ -57,7 +68,7 @@ Item {
     Process {
         id: monitor
         running: root.enabled
-        command: ["gio", "monitor", "--dir=trash:///"]
+        command: root.ownedCommand(["gio", "monitor", "--dir=trash:///"])
         stdout: SplitParser { onRead: settle.restart() }
         stderr: StdioCollector {}
         onExited: function(code, status) {
@@ -66,7 +77,7 @@ Item {
     }
     Process {
         id: query
-        command: ["gio", "info", "--attributes=trash::item-count", "trash:///"]
+        command: root.ownedCommand(["gio", "info", "--attributes=trash::item-count", "trash:///"])
         environment: ({LC_ALL: "C"})
         stdout: StdioCollector {
             onStreamFinished: { root.result = text; root.streamFinished = true; root.finish() }
