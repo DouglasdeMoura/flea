@@ -249,6 +249,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             hoverEnabled: true
             onClicked: root.close()
             onWheel: function (wheel) { wheel.accepted = true }
@@ -287,6 +288,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: {}
             onWheel: function (wheel) { wheel.accepted = true }
         }

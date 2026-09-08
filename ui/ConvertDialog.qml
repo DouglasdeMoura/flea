@@ -77,6 +77,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             hoverEnabled: true
             onClicked: root.close()
             onWheel: function (wheel) { wheel.accepted = true }
@@ -98,6 +99,7 @@ Item {
         // through the card to the ground below, which closed the dialog on release.
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: {}
             onWheel: function (wheel) { wheel.accepted = true }
         }
