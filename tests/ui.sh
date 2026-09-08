@@ -6289,7 +6289,8 @@ views_fixture() {
     cp "$media/clip_1007.mp4" "$dir/b-clip.mp4"
     cp "$(ls "$media"/*.png | head -1)" "$dir/c-pic.png"
     cp "$(ls "$media"/*.jpg | head -1)" "$dir/d-pic.jpg"
-    for i in $(seq -w 1 60); do : > "$dir/t$i.txt"; done
+    # 400, because the grid holds about 200 tiles a screen and the wheel control needs a second one.
+    for i in $(seq -w 1 400); do : > "$dir/t$i.txt"; done
 }
 
 # GM's manual test of 0.1.6 found every one of these in a view the suite never drove: rows lifting
@@ -6299,7 +6300,7 @@ case_overlays() {
     local dir="$fixture_root/overlays" mode n cx cy wx wy
     views_fixture "$dir"
     launch "$dir"
-    wait_listing 66
+    wait_listing 406
     for mode in grid list columns; do
         switch_view "$mode"
         key -k Home >/dev/null
@@ -6363,17 +6364,20 @@ case_overlays() {
 # view. Each view enters its own uncached copy of the fixture through the UI, so it acquires its own
 # thumbnails rather than reading ones another view warmed.
 case_views() {
-    local root="$fixture_root/views" mode dir r lit fx fy fw fh cx cy wx wy p1 p2 p3 p4 changed before
-    sandbox_scratch "$root"
-    for mode in grid list columns; do views_fixture "$root/$mode"; done
+    # Four fixtures directly inside the sandbox root, which is what its guard allows; the fourth is the
+    # grid again after the columns view, so a column kept alive under the grid is proven to plan nothing.
+    local root="$fixture_root" pass mode dir r lit fx fy fw fh cx cy wx wy p1 p2 p3 p4 changed before
+    for pass in grid list columns again; do views_fixture "$root/views-$pass"; done
     launch "$root"
-    wait_listing 3
-    for mode in grid list columns; do
-        dir="$root/$mode"
+    wait_listing 4
+    for pass in grid list columns again; do
+        dir="$root/views-$pass"
+        mode=$pass
+        [[ "$pass" == "again" ]] && mode=grid
         switch_view "$mode"
-        seek_row_named "$mode"
+        seek_row_named "views-$pass"
         key -k Return >/dev/null
-        wait_listing 66
+        wait_listing 406
         [[ "$(ipc path)" == "$dir" ]] || fail "$mode: Return on the $mode row opened $(ipc path)"
         key -k Home >/dev/null
         settle
@@ -6481,7 +6485,7 @@ case_views() {
         key -k Backspace >/dev/null
         sleep 1
         [[ "$(ipc path)" == "$root" ]] || fail "$mode: two Backspaces did not return to the root, path $(ipc path)"
-        printf 'VIEWS %s thumbs=ok hero=%s\n' "$mode" "$lit"
+        printf 'VIEWS %s thumbs=ok hero=%s\n' "$pass" "$lit"
     done
     kill_flea
 }
