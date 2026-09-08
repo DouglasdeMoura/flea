@@ -156,14 +156,19 @@ Item {
         }
     }
 
-    HoverHandler {
+    // A MouseArea, because a HoverHandler's point does not follow hover motion on this Qt (measured twice on the box); where the pointer sat at entry is the rest, any later, different position is motion.
+    MouseArea {
         id: pointer
+        anchors.fill: parent
         enabled: !root.isSeparator
-        // Where the pointer sat when the hover began is the rest; any later, different point is motion. Read at entry, so the first real move already counts.
-        property point restingAt
-        onHoveredChanged: if (pointer.hovered) pointer.restingAt = pointer.point.position
-        onPointChanged: {
-            if (pointer.hovered && (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y))
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: true
+        readonly property bool hovered: containsMouse
+        property real restX: -1
+        property real restY: -1
+        onEntered: { pointer.restX = mouseX; pointer.restY = mouseY }
+        onPositionChanged: function (mouse) {
+            if (mouse.x !== pointer.restX || mouse.y !== pointer.restY)
                 root.pointerMoved()
         }
     }
