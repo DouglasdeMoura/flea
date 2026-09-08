@@ -169,8 +169,10 @@ function runRows(check) {
     check("a hidden action's row is drawn unchecked, not dropped",
           find(menus, "paste").on, false)
     check("and an enabled one is checked", find(menus, "copy").on, true)
-    check("every toggleable action the listing menu can build has a row, plus the hints row",
-          menus.filter(function (r) { return r.kind === "check" }).length, 15)
+    check("the current menu controls include Permissions and the retained hints preference",
+          menus.filter(function (r) { return r.kind === "check" })
+               .map(function (r) { return r.id }).join(","),
+          "cut,copy,paste,duplicate,rename,trash,openTerminal,copypath,permissions,compress,extract,convert,taildrop,dropbox,sharelink,keyHints")
     // The one check that is not a menu action: it says how every row is drawn, not whether it is.
     check("the hints row is a check of its own, off until it is switched on",
           find(menus, "keyHints").label + "|" + find(menus, "keyHints").on,
