@@ -209,6 +209,7 @@ ShellRoot {
                             : ""
                 searchKeys: Search.statusKeys(pane.searchRunning)
                 onTransferCancelRequested: function (id) { backend.transfercancel(id) }
+                onUndoRequested: backend.undo()
             }
 
             Flea.Preview { id: preview; pane: pane }
