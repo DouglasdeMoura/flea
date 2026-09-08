@@ -35,6 +35,8 @@ Item {
     // A right click that landed on no row, which only the pane's own column can answer for the same
     // reason: the background menu acts on the directory being shown and a peek is not that directory.
     signal backgroundMenuRequested(var eventPoint)
+    // A right click on a peek's row: the peek's directory becomes the listing with this row as the cursor, and the menu opens there.
+    signal neighbourMenuRequested(string name)
 
     // The listArea contract ui/ColumnsArea.qml drives the middle column through; the view is private.
     function positionViewAtIndex(index, mode) { view.positionViewAtIndex(index, mode) }
@@ -91,6 +93,10 @@ Item {
                             root.picked(root.offset + index, tap.tapCount, tap.point.modifiers)
                         return
                     }
+                    if (button === Qt.RightButton && root.rows[index]) {
+                        root.neighbourMenuRequested(root.rows[index].n)
+                        return
+                    }
                     var verb = Tap.tappedColumn(root.rows[index], button, tap.tapCount)
                     if (verb.length > 0)
                         root.activated(root.rows[index].n, verb === "reveal")
@@ -107,6 +113,8 @@ Item {
         total: root.rows.length
     }
 
+    // For ui/Ipc.qml's columnChildEmpty readers: the tile's state and its mark's box.
+    readonly property Item emptyItem: emptyTile
     // The same hero the list draws, per the operator: a peeked empty directory animates like the pane's own.
     Flea.EmptyState {
         id: emptyTile

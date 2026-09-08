@@ -21,6 +21,8 @@ FocusScope {
     property string path: ""
     // Set once by shell.qml from FLEA_SELECT; applied to the first `rows` this pane receives, then forgotten.
     property string pendingSelect: ""
+    // Set with pendingSelect by a right click on a peeked column row: the menu opens on the row once it is the cursor.
+    property bool pendingMenu: false
     property int total: 0
     property int cursorIndex: 0
     property string listingState: "loading"

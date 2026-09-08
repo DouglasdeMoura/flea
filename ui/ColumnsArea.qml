@@ -99,6 +99,19 @@ Item {
 
     // A neighbour column's row, which the pane has no cursor on: a directory becomes the pane's own
     // listing, which is this view's reveal, and a file goes to the opener.
+    // The peek's directory becomes the listing; Nav.applyPendingSelect puts the cursor on the row and opens the menu once the rows land.
+    function menuOnNeighbour(base, name) {
+        root.pane.pendingSelect = root.pane.join(base, name)
+        root.pane.pendingMenu = true
+        root.pane.open(base)
+    }
+
+    // For ui/Ipc.qml: the peek columns' rows and the child column's empty tile, which pane.visibleItemFor cannot reach.
+    function parentItemAt(index) { return parentColumn.itemAtIndex(index) }
+    function childItemAt(index) { return childColumn.itemAtIndex(index) }
+    function childEmptyItem() { return childColumn.emptyItem }
+    function frameItem() { return preview.frameItem }
+
     function activateNeighbour(base, name, isDir) {
         var target = root.pane.join(base, name)
         if (isDir)
@@ -213,6 +226,7 @@ Item {
         // The parent, showing where the current directory sits among its own siblings. Its own row
         // for the current directory is the cursor trail: lifted like a hover, never accented.
         Flea.ColumnPane {
+            id: parentColumn
             width: root.columnWidth
             height: parent.height
             rows: root.rowsFor(root.parentPath)
@@ -221,6 +235,7 @@ Item {
             liftedName: Nav.leafOf(root.pane.path)
             dim: true
             onActivated: function (name, isDir) { root.activateNeighbour(root.parentPath, name, isDir) }
+            onNeighbourMenuRequested: function (name) { root.menuOnNeighbour(root.parentPath, name) }
         }
 
         // The pane's own listing, which is why this column and only this one takes the accent.
@@ -245,12 +260,14 @@ Item {
             height: parent.height
 
             Flea.ColumnPane {
+                id: childColumn
                 anchors.fill: parent
                 visible: root.cursorIsDir
                 rows: root.rowsFor(root.childPath)
                 lockedMode: root.deniedMode(root.childPath)
                 drawsEmpty: root.answered(root.childPath)
                 onActivated: function (name, isDir) { root.activateNeighbour(root.childPath, name, isDir) }
+                onNeighbourMenuRequested: function (name) { root.menuOnNeighbour(root.childPath, name) }
             }
 
             Flea.PreviewColumn {

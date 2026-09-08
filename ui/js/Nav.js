@@ -177,6 +177,10 @@ function applyPendingSelect(pane) {
             pane.selection.only(index)
             pane.selectionAnchor = index
             pane.selectionVersion++
+            if (pane.pendingMenu) {
+                pane.pendingMenu = false
+                pane.openCursorMenu()
+            }
             return
         }
     }
