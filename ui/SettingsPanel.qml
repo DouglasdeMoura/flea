@@ -20,6 +20,7 @@ Item {
     property int selectedFavourite: -1
     property int favouriteActionIndex: 0
     property int favouriteMoveTarget: -1
+    property bool favouriteActionPending: false
     // "rail" or "pane", which side Tab last gave the cursor to.
     property string side: "pane"
 
@@ -171,9 +172,9 @@ Item {
         if (action === 0 && root.focusHolder) {
             var path = root.focusHolder.path
             var label = path.substring(path.lastIndexOf("/") + 1) || path
-            Favourites.add(path, label)
+            root.favouriteActionPending = Favourites.add(path, label)
         } else if (action === 1 && root.selectedFavourite >= 0) {
-            Favourites.remove(root.selectedFavourite)
+            root.favouriteActionPending = Favourites.remove(root.selectedFavourite)
         }
     }
 
@@ -399,13 +400,24 @@ Item {
     Connections {
         target: Favourites
         function onWrote() {
+            if (root.favouriteActionPending) {
+                root.favouriteActionPending = false
+                root.selectedFavourite = Math.min(root.selectedFavourite, Favourites.records.length - 1)
+                if (root.opened && root.section === "places") {
+                    // Adding or removing a row moves the buttons; keep their keyboard focus by identity.
+                    for (var i = 0; i < root.rows.length; i++) {
+                        if (root.rows[i].id === "favouriteActions") root.cursor = i
+                    }
+                    root.showCursor()
+                }
+            }
             if (root.favouriteMoveTarget < 0) return
             root.selectedFavourite = root.favouriteMoveTarget
             root.cursor = root.favouriteMoveTarget + 1
             root.favouriteMoveTarget = -1
             root.showCursor()
         }
-        function onFailed(message) { root.favouriteMoveTarget = -1 }
+        function onFailed(message) { root.favouriteMoveTarget = -1; root.favouriteActionPending = false }
     }
 
     Flea.AboutFacts { id: aboutFacts; active: root.opened && root.section === "about" }

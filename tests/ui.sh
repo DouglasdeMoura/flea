@@ -5663,6 +5663,22 @@ case_renamelife() {
 # has to do that a menu does not, which is outlive the process that wrote it. XDG_STATE_HOME and
 # XDG_CONFIG_HOME both point inside the fixture root for the whole case, so nothing here can write
 # the operator's own ~/.local/state/flea/ui.json; hard rule 9 covers writes and not only deletes.
+case_places() {
+    local dir="$fixture_root/places"
+    local config="$fixture_root/places-config"
+    local state="$fixture_root/places-state"
+    sandbox_scratch "$dir"
+    sandbox_scratch "$config"
+    sandbox_scratch "$state"
+    : > "$dir/a.txt"
+    export XDG_CONFIG_HOME="$config" XDG_STATE_HOME="$state"
+    settings_seed "$state" "$config" "$state/flea/ui.json"
+    launch "$dir"
+    wait_listing 1
+    settings_places "$dir"
+    kill_flea
+}
+
 case_settings() {
     local dir="$fixture_root/settings"
     local config="$fixture_root/settings-config"
