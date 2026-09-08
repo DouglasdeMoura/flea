@@ -273,10 +273,7 @@ Item {
         Loader {
             id: imageLoader
             anchors.fill: parent
-            onLoaded: {
-                item.path = Qt.binding(function () { return root.path })
-                item.fallback = Qt.binding(function () { return root.pane ? root.pane.thumbFor(root.pane.cursorIndex) : "" })
-            }
+            onLoaded: item.path = Qt.binding(function () { return root.path })
         }
 
         // The canvas's PdfViewer, which draws its own chrome. source, not sourceComponent, so

@@ -9,16 +9,13 @@ Item {
     id: root
 
     property string path: ""
-    // The row's cache thumbnail, drawn only when Qt cannot decode the original (HEIC has no Qt plugin on Omarchy): a small picture over a sentence.
-    property string fallback: ""
-    readonly property bool standing: picture.status === Image.Error && stand.status === Image.Ready
 
     // The same name the media and PDF panes give their unreadable state, so Preview.qml tests one property.
-    readonly property bool failed: picture.status === Image.Error && (root.fallback.length === 0 || stand.status === Image.Error)
+    readonly property bool failed: picture.status === Image.Error
     // Every state is terminal: a decode ends Ready or Error, and a vanished file ends Error too.
     readonly property string status: {
         if (root.failed) return "This image could not be read."
-        return picture.status === Image.Ready || root.standing ? "image" : "loading"
+        return picture.status === Image.Ready ? "image" : "loading"
     }
     readonly property string name: root.path.substring(root.path.lastIndexOf("/") + 1)
 
@@ -42,29 +39,6 @@ Item {
         // corner: a zero here means unbounded to Qt, so the floor is 1 and never 0.
         sourceSize.width: Math.max(1, Math.round(root.width))
         sourceSize.height: Math.max(1, Math.round(root.height))
-    }
-
-    Image {
-        id: stand
-        anchors.fill: parent
-        visible: root.standing
-        source: picture.status === Image.Error && root.fallback.length > 0 ? Format.fileUri(root.fallback) : ""
-        fillMode: Image.PreserveAspectFit
-        asynchronous: true
-        cache: false
-    }
-
-    // Said, not hidden: the picture on screen is the cache thumbnail, not the file.
-    Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: Theme.spacing.rowPaddingY
-        visible: root.standing
-        text: "Shown from its thumbnail"
-        color: Theme.color.muted
-        font.family: Theme.font.family
-        font.pixelSize: Theme.font.caption
-        textFormat: Text.PlainText
     }
 
     // A failed decode is a mark and a sentence, never a bare ground: the blank-frame class again otherwise.

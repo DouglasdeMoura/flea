@@ -1631,7 +1631,8 @@ case_menu() {
     omarchy-drive move "$((wx + rest_x))" "$((wy + rest_y))" >/dev/null
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1
     settle
-    key m >/dev/null
+    # m through uinput (evdev 50): the key helper refocuses the window first, and Hyprland warps the cursor on focus without telling Qt.
+    YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool key 50:1 50:0 >/dev/null 2>&1
     settle
     [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "menu: the m key did not reopen the menu under the resting pointer"
     # The target is proven before the move is judged: the reopened menu's Rename row is where it was, and the pointer is over it.
@@ -6929,9 +6930,7 @@ vaapi_warning="VAAPITextureConverter: No rhi or non openGL based RHI"
 # case_formats and case_previewviews open a file with no permission bits on purpose; Qt names it, and this run's fixture path is the whole match.
 unreadable_warning="$fixture_root/formats/shut.jpg"
 unreadable_warning2="$fixture_root/previewviews/shut.jpg"
-# Qt has no HEIC plugin on Omarchy and says so for the original; the preview then stands the thumbnail in, which case_previewviews proves.
-heic_warning="$fixture_root/previewviews/p.heic"
-if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" -e "$heic_warning" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
+if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
     printf 'FAIL log\n'
     failures=$((failures + 1))
 fi
