@@ -112,6 +112,7 @@ Item {
     function childEmptyItem() { return childColumn.emptyItem }
     function frameItem() { return preview.frameItem }
     function playerLoaded() { return preview.playerLoaded() }
+    function thumbShown() { return preview.thumbShown }
 
     function activateNeighbour(base, name, isDir) {
         var target = root.pane.join(base, name)
