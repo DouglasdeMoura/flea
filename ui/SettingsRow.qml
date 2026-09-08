@@ -13,6 +13,7 @@ Item {
     property bool current: false
 
     signal activated()
+    signal pointerMoved()
     // Every steppable row steps the same way, so h/l and the two chevrons fire one signal, never two.
     signal stepped(int direction)
     // The ruler's own way in: the same writer a step reaches, addressed by stop instead of direction.
@@ -21,6 +22,7 @@ Item {
     readonly property string kind: root.row.kind || "fact"
     readonly property bool isGroup: root.kind === "group"
     readonly property bool isHint: root.kind === "hint"
+    readonly property bool isHero: root.kind === "hero"
     readonly property bool isLock: root.kind === "lock"
     readonly property bool isRuler: root.kind === "ruler"
     readonly property bool hasBox: root.kind === "check" || root.kind === "master"
@@ -36,7 +38,38 @@ Item {
         ? (root.row.state === "all" ? "check" : (root.row.state === "some" ? "minus" : ""))
         : (root.row.on === true ? "check" : "")
 
-    height: root.isHint ? hint.implicitHeight + 2 * Theme.spacing.rowPaddingY : Theme.rowHeight
+    height: root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
+            : root.isHint ? hint.implicitHeight + 2 * Theme.spacing.rowPaddingY : Theme.rowHeight
+
+    Column {
+        id: hero
+        visible: root.isHero
+        anchors.centerIn: parent
+        spacing: Theme.spacing.gap
+        Flea.FleaMark {
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Theme.markSize * 2
+            height: width
+            color: Theme.color.accent
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.row.label || ""
+            font.family: Theme.font.family
+            font.pixelSize: Theme.font.body
+            font.bold: true
+            color: Theme.color.foreground
+            textFormat: Text.PlainText
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.row.value || ""
+            font.family: Theme.font.family
+            font.pixelSize: Theme.font.caption
+            color: Theme.color.foreground
+            textFormat: Text.PlainText
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -70,7 +103,8 @@ Item {
         y: Theme.spacing.rowPaddingY
         width: parent.width - Theme.settings.indent - Theme.spacing.rowPaddingX
         text: root.row.label || ""
-        color: Theme.color.muted
+        color: root.row.role === "error" ? Theme.color.error
+             : root.row.role === "accent" ? Theme.color.accent : Theme.color.muted
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         textFormat: Text.PlainText
@@ -82,7 +116,7 @@ Item {
     // is the pattern, brand marks included, and the slot sets the label's indent the same way.
     Item {
         id: markSlot
-        visible: !root.isGroup && !root.isHint
+        visible: !root.isGroup && !root.isHint && !root.isHero
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
@@ -128,7 +162,7 @@ Item {
     }
 
     Text {
-        visible: !root.isGroup && !root.isHint && !root.isRuler
+        visible: !root.isGroup && !root.isHint && !root.isHero && !root.isRuler
         anchors.left: markSlot.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: trailing.left
@@ -151,25 +185,11 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Theme.spacing.gap
 
-        Flea.Glyph {
-            visible: root.hasSteps
-            width: root.hasSteps ? Theme.markSize : 0
-            height: Theme.markSize
-            name: "chevron-left"
-            color: Theme.color.muted
-
-            TapHandler {
-                enabled: root.hasSteps
-                gesturePolicy: TapHandler.ReleaseWithinBounds
-                onTapped: root.stepped(-1)
-            }
-        }
-
         // The master's count, a choice's name and a fact's value are all one thing: the value the
         // row currently holds, drawn on the right the way the boards draw it. A ruler has no label
         // of its own on the left, so it carries the board's "Effective 14px" reading here instead.
         Text {
-            visible: root.kind === "fact" || root.hasSteps || root.kind === "master" || root.isRuler
+            visible: root.kind === "fact" || root.kind === "action" || root.hasSteps || root.kind === "master" || root.isRuler
             height: Theme.markSize
             verticalAlignment: Text.AlignVCenter
             text: root.isRuler ? (root.row.label || "") + " " + (root.row.value || "")
@@ -178,6 +198,8 @@ Item {
             font.family: Theme.font.family
             font.pixelSize: root.isRuler ? Theme.font.caption : Theme.font.body
             textFormat: Text.PlainText
+            width: Math.min(implicitWidth, root.width * 0.56)
+            elide: Text.ElideRight
         }
 
         Flea.SettingsSegment {
@@ -188,8 +210,8 @@ Item {
         }
 
         Flea.Glyph {
-            visible: root.hasSteps
-            width: root.hasSteps ? Theme.markSize : 0
+            visible: root.hasSteps || root.kind === "action"
+            width: visible ? Theme.markSize : 0
             height: Theme.markSize
             name: "chevron-right"
             color: Theme.color.muted
@@ -229,14 +251,28 @@ Item {
     }
 
     HoverHandler {
-        enabled: !root.isGroup && !root.isHint
+        id: pointer
+        enabled: root.hasBox || root.kind === "choice" || root.kind === "action"
+        property bool armed: false
+        property point restingAt
+        onHoveredChanged: pointer.armed = false
+        onPointChanged: {
+            if (!pointer.hovered) return
+            if (!pointer.armed) {
+                pointer.armed = true
+                pointer.restingAt = pointer.point.position
+                return
+            }
+            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
+                root.pointerMoved()
+        }
         cursorShape: Qt.PointingHandCursor
     }
 
     // A segment and a ruler each own their own targets, so the row behind them must not also fire:
     // a tap on the option already showing would otherwise toggle the very setting it names.
     TapHandler {
-        enabled: !root.isGroup && !root.isHint && !root.isLock && !root.hasSteps
+        enabled: (root.hasBox || root.kind === "action") && !root.isLock && !root.hasSteps
                  && !root.hasSegment && !root.isRuler
         acceptedButtons: Qt.LeftButton
         gesturePolicy: TapHandler.ReleaseWithinBounds

@@ -55,10 +55,10 @@ Item {
         var span = Thumbs.viewport(view.contentY, Theme.rowHeight, Math.max(1, Math.ceil(view.height / Theme.rowHeight)), root.rows.length)
         var first = root.offset + span.first
         var last = root.offset + span.last
-        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, first, last)
+        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, first, last, ViewState.thumbnailMode)
         // The preview column draws the cursor row whatever this viewport shows, so its thumbnail is asked for and never dropped.
         var cursor = root.pane.cursorIndex
-        if (cursor >= 0 && (cursor < first || cursor > last)) {
+        if (ViewState.previewColumn && cursor >= 0 && (cursor < first || cursor > last)) {
             work.drop = work.drop.filter(function (i) { return i !== cursor })
             var cursorRow = root.rows[cursor - root.offset]
             if (cursorRow && cursorRow.t && root.pane.thumbState.file[cursor] === undefined)
@@ -67,6 +67,11 @@ Item {
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
         root.thumbsApplied(work)
+    }
+
+    Connections {
+        target: ViewState
+        function onThumbnailModeChanged() { if (root.visible) settle.restart() }
     }
 
     Timer {
@@ -110,7 +115,7 @@ Item {
             // A shrunk listing subscripts out of range under a delegate not yet released, and QML
             // hands that back as undefined; every row reader in the tree tests against a real null.
             row: root.rows[index] !== undefined ? root.rows[index] : null
-            thumb: root.pane !== null ? root.pane.thumbFor(root.offset + index) : ""
+            thumb: root.pane !== null && Thumbs.allowed(row, ViewState.thumbnailMode) ? root.pane.thumbFor(root.offset + index) : ""
             cursor: root.selectedIndex >= 0 && root.offset + index === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(root.offset + index)

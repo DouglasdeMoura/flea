@@ -43,8 +43,8 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Theme.spacing.rowPaddingX
-        width: Theme.grid.iconSize
-        height: Theme.grid.iconSize
+        width: ViewState.thumbnailPixels
+        height: ViewState.thumbnailPixels
 
         // A thumbnail is a decoded image and stays one; the glyph beside it is a native mark, and
         // exactly one is visible, chosen the same way ui/Row.qml chooses.
@@ -56,8 +56,8 @@ Item {
             // silently truncates a plain file:// URL, which is what the hashcache fixture proves.
             source: root.thumb.length > 0 ? Format.fileUri(root.thumb) : ""
             fillMode: Image.PreserveAspectFit
-            sourceSize.width: Theme.grid.iconSize
-            sourceSize.height: Theme.grid.iconSize
+            sourceSize.width: ViewState.thumbnailPixels
+            sourceSize.height: ViewState.thumbnailPixels
             asynchronous: true
             cache: false
         }
@@ -66,7 +66,7 @@ Item {
             anchors.fill: parent
             visible: !root.thumbDrawn
             // The tile is the mark's own slot: without its own ceiling Glyph caps a 46 px tile at the 19 px row mark.
-            maxSize: Theme.grid.iconSize
+            maxSize: ViewState.thumbnailPixels
             name: root.row ? Icons.glyphForRow(root.row.i, root.row.p) : "file"
             // ThemeRoles.dc.html gives accent the selection fill and edge and foreground the label
             // and the mark inside it, so the border carries the emphasis and the ink stays readable.

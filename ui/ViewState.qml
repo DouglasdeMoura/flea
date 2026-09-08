@@ -99,7 +99,32 @@ QtObject {
         if (JSON.stringify(next[key]) === before)
             return
         root.unsaved = owed
+        root.saveStatus = "Saving…"
         root.save()
+    }
+
+    readonly property var preview: root.state.preview || ({})
+    readonly property bool previewColumn: root.preview.column !== false
+    readonly property bool previewAutomatic: root.preview.loadOn !== "manual"
+    readonly property string thumbnailMode: root.preview.thumbnails || "media"
+    readonly property string thumbnailSize: root.preview.thumbSize || "medium"
+    readonly property int thumbnailPixels: ({ small: 48, medium: 64, large: 96, xlarge: 128 })[root.thumbnailSize] || 64
+    readonly property bool ctrlZoom: root.preview.ctrlZoom !== false
+    readonly property string density: root.state.density || "normal"
+    readonly property string addressBar: root.state.addressBar || "breadcrumb"
+    readonly property bool hyprlandIcons: root.display.hyprlandIcons === true
+    property string saveStatus: "Saved · applied in this process"
+
+    // Setting ids name either one top-level key or one leaf of an existing group.
+    function changeSetting(id, value) {
+        var parts = id.split(".")
+        if (parts.length === 1) {
+            root.changeKey(id, value)
+        } else {
+            var leaf = {}
+            leaf[parts[1]] = value
+            root.changeLeaf(parts[0], leaf)
+        }
     }
 
     // The Display section's writers. ui/shell.qml routes keys.toml's textSizeUp, textSizeDown and
@@ -226,6 +251,8 @@ QtObject {
     function wrote(exitCode) {
         // Taken out before the patch below is built, so a writer queued behind this one launches with
         // what is still owed and not with the settings this one has just stored.
+        root.saveStatus = exitCode === 0 ? "Saved · applied in this process"
+            : "Could not save settings · changes apply to this session only"
         if (exitCode === 0)
             root.unsaved = UiState.acknowledged(root.unsaved, root.writeBook.inflight)
         var next = UiState.exited(root.writeBook, exitCode, root.patch())

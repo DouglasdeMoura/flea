@@ -28,7 +28,7 @@ pub enum Request {
     // selection wider than the window it renders; see docs/protocol.md "paths".
     Paths { rows: Vec<usize> },
     // The preview column's own extras for one row: pixels, line count, symlink target.
-    Meta { row: usize, text: bool, media: bool, archive: bool },
+    Meta { row: usize, text: bool, media: bool, archive: bool, token: usize },
     // The status bar's filesystem line for the directory the pane is on.
     FsInfo,
     // A read-only look at a directory that is not the current listing; the columns view's ancestors.
@@ -38,6 +38,7 @@ pub enum Request {
     Convert { path: String, dest: String, strip: bool },
     // Which archive formats this box actually offers, and whether a converter is installed at all.
     Formats,
+    Permissions { line: String },
     Quit,
     Unknown,
 }
@@ -45,6 +46,7 @@ pub enum Request {
 // Sample input: {"c":"list","path":"/home/gm","first":350,"hidden":false}
 pub fn parse_request(line: &str) -> Request {
     match field_str(line, "c").as_deref() {
+        Some("permissions") => Request::Permissions { line: line.to_string() },
         Some("list") => Request::List {
             path: field_str(line, "path").unwrap_or_default(),
             first: field_usize(line, "first").unwrap_or(0),
@@ -115,6 +117,7 @@ pub fn parse_request(line: &str) -> Request {
             hidden: field_bool(line, "hidden"),
         },
         Some("meta") => Request::Meta {
+            token: field_usize(line, "token").unwrap_or(0),
             row: field_usize(line, "row").unwrap_or(0),
             text: field_bool(line, "text"),
             media: field_bool(line, "media"),

@@ -6,6 +6,10 @@ function heldRows() {
 }
 
 function run(check) {
+    check("off skips every thumbnail source", Thumbs.allowed({ t: true, i: "image-x-generic" }, "off"), false)
+    check("images excludes video sources", Thumbs.allowed({ t: true, i: "video-x-generic" }, "images"), false)
+    check("images retains image sources", Thumbs.allowed({ t: true, i: "image-x-generic" }, "images"), true)
+    check("media retains eligible video sources", Thumbs.allowed({ t: true, i: "video-x-generic" }, "media"), true)
     var rows = heldRows()
     var s = Thumbs.empty()
 

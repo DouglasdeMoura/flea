@@ -70,19 +70,7 @@ Item {
 
     // One row, only when the preview column is actually the surface showing: the same no-sweep rule
     // thumb and dirsize already follow.
-    function askMeta() {
-        root.cursorMeta = null
-        var row = root.cursorRow
-        if (!row || row.d)
-            return
-        // The same question the column asks, not the icon alone: a .md carries the office icon and
-        // is still text, so an icon-only read would leave its Lines row empty.
-        var kind = Facts.state(row, 1, false, "", root.kindName(root.pane.cursorIndex))
-        root.pane.backend.askMeta(root.pane.cursorIndex,
-                                  kind === Facts.TEXT || kind === Facts.CODE,
-                                  kind === Facts.VIDEO || kind === Facts.AUDIO,
-                                  kind === Facts.ARCHIVE)
-    }
+    function askMeta() { preview.followSelection() }
 
     // The listArea contract every caller of the pane's own navigation uses: the listing's column plans its own viewport's thumbnails, the way the list and the grid do.
     function primeSettle() {}
@@ -129,6 +117,7 @@ Item {
     }
 
     function askThumb() { active.restartSettle() }
+    function loadSelection() { preview.loadSelection() }
 
     // "Kind=MPEG-4 video|Duration=1:12|...", so a test reads the preview column's own table.
     function factsLine() {
@@ -186,16 +175,6 @@ Item {
 
     Connections {
         target: root.pane.backend
-
-        function onMeta(row, w, h, durationMs, sampleRate, entries, unpacked, archiveFailed, names, lines, partial, linesFailed, target, targetDir, owner) {
-            if (row === root.pane.cursorIndex) {
-                root.cursorMeta = { w: w, h: h, durationMs: durationMs, sampleRate: sampleRate,
-                                    entries: entries, unpacked: unpacked,
-                                    archiveFailed: archiveFailed, names: names,
-                                    lines: lines, partial: partial, linesFailed: linesFailed,
-                                    target: target, targetDir: targetDir, owner: owner }
-            }
-        }
 
         // hidden is the request's own flag, echoed; this view asks with the listing's and has only
         // ever one answer per path, so it reads the rows and lets the path bar do the correlating.
@@ -274,20 +253,12 @@ Item {
                 onNeighbourMenuRequested: function (name) { root.menuOnNeighbour(root.childPath, name) }
             }
 
-            Flea.PreviewColumn {
+            Flea.SelectionPreview {
                 id: preview
                 anchors.fill: parent
-                visible: !root.cursorIsDir
-                row: root.cursorRow
-                meta: root.cursorMeta
-                kindName: root.kindName(root.pane.cursorIndex)
-                thumb: root.pane.thumbFor(root.pane.cursorIndex)
-                overlayOpen: root.pane.preview.active
-                noThumbComing: Thumbs.refused(root.pane.thumbState, root.pane.cursorIndex)
-                               || (root.cursorRow !== null && root.cursorRow.t !== true)
-                selectionCount: root.pane.selectionCount()
-                selectedRows: root.selectedRowObjects()
-                path: root.cursorRow ? root.pane.join(root.pane.path, root.cursorRow.n) : ""
+                visible: !root.cursorIsDir && ViewState.previewColumn
+                pane: root.pane
+                onThumbsApplied: function (work) { root.thumbsApplied(work) }
             }
         }
     }

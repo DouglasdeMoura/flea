@@ -27,6 +27,9 @@ Item {
     signal duplicated(bool ok, string path)
     signal undone(string op, bool ok)
     signal paths(var list)
+    signal permissionsResult(var message)
+    signal metaResult(var message)
+    property int metaToken: 0
     signal meta(int row, int w, int h, real durationMs, int sampleRate, int entries, real unpacked, bool archiveFailed, var names, real lines, bool partial, bool linesFailed, string target, bool targetDir, string owner)
     signal fsInfo(string fs, real free)
     // The one line no request asked for: the directory the current listing came from changed under
@@ -88,9 +91,13 @@ Item {
         root.listRequests += 1
         // A fresh scan is always name ascending, so every refresh after a write operation puts the
         // header's mark back rather than leaving it describing the order before the refresh.
-        root.sortBy = "name"
-        root.sortDesc = false
-        root.send({ c: "list", path: path, first: first, hidden: hidden })
+        root.sortBy = (ViewState.state.sort || {}).key || "name"
+        if (root.sortBy === "date") root.sortBy = "mtime"
+        root.sortDesc = (ViewState.state.sort || {}).reverse === true
+        root.send({ c: "list", path: path, first: first, hidden: hidden,
+                    by: root.sortBy, desc: root.sortDesc,
+                    foldersFirst: ViewState.state.foldersFirst !== false,
+                    groupByKind: ViewState.state.groupByKind === true })
     }
 
     // A listing built from the paths named here, in that order and never sorted; see
@@ -105,7 +112,9 @@ Item {
     }
 
     function sort(by, desc) {
-        root.send({ c: "sort", by: by, desc: desc })
+        root.send({ c: "sort", by: by, desc: desc,
+                    foldersFirst: ViewState.state.foldersFirst !== false,
+                    groupByKind: ViewState.state.groupByKind === true })
     }
 
     // The walk replaces the current listing with its matches, each named relative to path; see docs/protocol.md "search".
@@ -165,7 +174,9 @@ Item {
     // media and archive each cost a subprocess in the backend, so each is only ever true for a row
     // whose kind actually names the facts it would answer.
     function askMeta(row, text, media, archive) {
-        root.send({ c: "meta", row: row, text: text, media: media, archive: archive })
+        root.metaToken += 1
+        root.send({ c: "meta", row: row, text: text, media: media, archive: archive, token: root.metaToken })
+        return root.metaToken
     }
 
     function askFsInfo() {
@@ -301,7 +312,10 @@ Item {
             root.undone(message.op, message.ok)
         } else if (message.t === "paths") {
             root.paths(message.paths || [])
+        } else if (message.t === "permissions") {
+            root.permissionsResult(message)
         } else if (message.t === "meta") {
+            root.metaResult(message)
             root.meta(message.row, message.w, message.h, message.ms, message.rate, message.entries, message.unpacked, message.afailed, message.names, message.lines, message.partial, message.lfailed === true, message.target, message.targetdir, message.owner || "")
         } else if (message.t === "fsinfo") {
             root.fsInfo(message.fs, message.free)

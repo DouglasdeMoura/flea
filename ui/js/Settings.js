@@ -1,18 +1,14 @@
 .pragma library
 .import "TextSize.js" as TextSize
 
-// The settings panel's whole model, so every row it draws is a value a test can read without a
-// window: ui/SettingsPanel.qml only paints what rows() returns. The Settings, SettingsScale,
-// SettingsMenus and SettingsKeys boards are what the tables below are copied from.
-
-// Three sections, in the boards' own rail order less the four they draw beside them. View, Places,
-// Preview and About have no working consumer in this release, and a rail row opening an empty pane
-// is the dead entry point the release ruling keeps out of the shipped UI.
-// Each glyph is the mark those boards draw on that rail row; "sliders" is the View row's, not Display's.
+// Sections follow the current Desktop boards; their state uses the shared ui.json updater.
 var SECTIONS = [
+    { id: "view", label: "View", glyph: "sliders" },
+    { id: "preview", label: "Preview", glyph: "columns" },
     { id: "keys", label: "Keys", glyph: "keyboard" },
     { id: "display", label: "Display", glyph: "maximize" },
-    { id: "menus", label: "Menus", glyph: "list" }
+    { id: "menus", label: "Menus", glyph: "list" },
+    { id: "about", label: "About", glyph: "info" }
 ]
 
 // Where a section id sits in SECTIONS, or 0 for an id no section carries.
@@ -145,11 +141,19 @@ function toggleId(hidden, id) {
 function focusable(row) {
     if (row.kind === "ruler")
         return row.on === true
-    return row.kind === "check" || row.kind === "master" || row.kind === "choice"
+    return row.kind === "check" || row.kind === "master" || row.kind === "choice" || row.kind === "action"
 }
 
 // state: { textSize, hidden, keyHints, preset, baseSize, monitorScale, cornerRadius, presetKeys }
 function rows(section, state) {
+    if (section === "columns")
+        return columnRows(state)
+    if (section === "view")
+        return viewRows(state)
+    if (section === "preview")
+        return previewRows(state)
+    if (section === "about")
+        return aboutRows(state.about || {})
     if (section === "display")
         return displayRows(state)
     if (section === "menus")
@@ -184,8 +188,8 @@ function displayRows(state) {
     out.push({ kind: "hint",
                label: "Flea follows the compositor value and does not step or cycle it." })
     out.push({ kind: "group", label: "Appearance" })
-    out.push({ kind: "fact", label: "Hyprland-aware corners",
-               value: "rounding " + Math.round(state.cornerRadius) })
+    out.push({ kind: "check", id: "display.hyprlandIcons", label: "Hyprland-aware icons",
+               on: ((state.data || {}).display || {}).hyprlandIcons === true })
     return out
 }
 
@@ -263,4 +267,86 @@ function stepRow(list, from, delta) {
 
 function firstRow(list) {
     return list.length > 0 && focusable(list[0]) ? 0 : stepRow(list, 0, 1)
+}
+
+// Choice values are stored separately from labels so presentation never becomes a persistence format.
+function choice(id, label, glyph, values, labels, value, segmented) {
+    return { kind: "choice", id: id, label: label, glyph: glyph, values: values,
+             options: segmented ? labels : undefined, labels: labels,
+             value: labels[Math.max(0, values.indexOf(value))], selected: value }
+}
+
+function viewRows(state) {
+    var data = state.data || {}
+    var sort = data.sort || {}
+    var columns = data.columns || ["name", "size", "date"]
+    return [
+        { kind: "group", label: "View" },
+        choice("view", "Last-used view", undefined, ["list", "columns", "grid"],
+               ["List", "Columns", "Grid"], data.view || "list", true),
+        choice("density", "Row density", "list", ["compact", "normal", "comfortable"],
+               ["Compact", "Normal", "Comfortable"], data.density || "normal"),
+        { kind: "action", id: "columns", label: "Columns", glyph: "columns",
+          value: columns.map(function (key) { return key.charAt(0).toUpperCase() + key.slice(1) }).join(", ") },
+        choice("addressBar", "Address bar", undefined, ["path", "breadcrumb"],
+               ["Path", "Breadcrumb"], data.addressBar || "breadcrumb", true),
+        { kind: "group", label: "Sorting" },
+        choice("sort.key", "Sort by", "list", ["name", "size", "date", "kind"],
+               ["Name", "Size", "Date", "Kind"], sort.key || "name"),
+        { kind: "check", id: "foldersFirst", label: "Folders first", glyph: "folder", on: data.foldersFirst !== false },
+        { kind: "check", id: "groupByKind", label: "Group by kind", glyph: "grid", on: data.groupByKind === true },
+        { kind: "check", id: "hidden", label: "Show hidden files", glyph: "eye", on: data.hidden === true },
+        { kind: "group", label: "Cursor" },
+        { kind: "check", id: "wrapAtEnds", label: "Wrap at list ends", glyph: "arrow-up", on: data.wrapAtEnds === true },
+        { kind: "hint", label: state.saveStatus || "Saved · applied in this process",
+          role: (state.saveStatus || "").indexOf("Could not") === 0 ? "error" : "accent" }
+    ]
+}
+
+function previewRows(state) {
+    var data = (state.data || {}).preview || {}
+    return [
+        { kind: "group", label: "Preview column" },
+        { kind: "check", id: "preview.column", label: "Preview column", glyph: "columns", on: data.column !== false },
+        choice("preview.loadOn", "Load", "eye", ["automatic", "manual"],
+               ["Automatic", "Manual"], data.loadOn || "automatic", true),
+        { kind: "group", label: "Thumbnails" },
+        choice("preview.thumbnails", "Thumbnails", "image", ["off", "images", "media"],
+               ["Off", "Images", "Images and video"], data.thumbnails || "media"),
+        choice("preview.thumbSize", "Thumbnail size", "maximize", ["small", "medium", "large", "xlarge"],
+               ["48 px  Small", "64 px  Medium", "96 px  Large", "128 px  Extra large"], data.thumbSize || "medium"),
+        { kind: "check", id: "preview.ctrlZoom", label: "Zoom with ctrl and scroll", on: data.ctrlZoom !== false },
+        { kind: "hint", label: data.loadOn === "manual" ? "Ctrl+Space loads the current selection." : "Automatic follows keyboard or pointer selection." }
+    ]
+}
+
+function aboutRows(facts) {
+    return [
+        { kind: "hero", label: "Flea", value: "A file manager for Omarchy" },
+        { kind: "fact", label: "Version", value: facts.version || "Not reported" },
+        { kind: "fact", label: "Built", value: facts.built || "Not recorded in this build" },
+        { kind: "fact", label: "Installed from", value: facts.source || "Not reported" },
+        { kind: "fact", label: "Package", value: facts.package || "Not reported" },
+        { kind: "fact", label: "Licence", value: "MIT, © 2026 GM" },
+        { kind: "group", label: "Language" },
+        { kind: "fact", label: "Language", glyph: "globe", value: "English · read-only" },
+        { kind: "group", label: "Updates" },
+        { kind: "fact", label: "Update owner", glyph: "download", value: "Omarchy · read-only" },
+        { kind: "group", label: "This box" },
+        { kind: "fact", label: "File manager", glyph: "folder", value: (facts.handler || "Not reported") + " · status only" },
+        { kind: "action", id: "keyboardSheet", label: "Keyboard sheet", glyph: "keyboard", value: "?" },
+        { kind: "action", id: "reportIssue", label: "Report an issue", glyph: "network", value: "Open" },
+        { kind: "action", id: "support", label: "Support Flea", glyph: "star", value: "buymeacoffee" }
+    ]
+}
+
+function columnRows(state) {
+    var columns = (state.data || {}).columns || ["name", "size", "date"]
+    var rows = [{ kind: "group", label: "Columns" }, { kind: "lock", label: "Name", glyph: "file" }]
+    for (var i = 0; i < 4; i++) {
+        var id = ["mode", "size", "date", "kind"][i]
+        rows.push({ kind: "check", id: "column:" + id, label: ["Mode", "Size", "Date", "Kind"][i], on: columns.indexOf(id) >= 0 })
+    }
+    rows.push({ kind: "action", id: "backView", label: "Back to View", value: "Back" })
+    return rows
 }

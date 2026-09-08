@@ -12,6 +12,7 @@ function run(check) {
     runCursor(check)
     runPresets(check)
     runInventory(check)
+    runCompletionRows(check)
 }
 
 // No mock controls: every id the Menus section can switch is an action ui/js/Menu.js really builds,
@@ -123,7 +124,7 @@ function runRows(check) {
     // The board's Display card: the text-size mode over its effective size, then the compositor's
     // two read-only facts. No monitor-scale control, because Flea does not step or cycle that one.
     check("the Display section is text size, then Scale, then Appearance",
-          kinds(display), "group|choice|ruler|hint|group|fact|hint|group|fact")
+          kinds(display), "group|choice|ruler|hint|group|fact|hint|group|check")
     check("its one control opens on Follow Omarchy", find(display, "textMode").value,
           "Follow Omarchy")
     // The board draws the mode as both names side by side, so the row names them rather than
@@ -144,7 +145,7 @@ function runRows(check) {
           Settings.rows("display", displayState(TextSize.follow(), 14, 0))[5].value, "not reported")
     check("its hint is the board's own sentence, so no reader expects a control",
           display[6].label, "Flea follows the compositor value and does not step or cycle it.")
-    check("the rounding Flea mirrors is drawn beside it", display[8].value, "rounding 8")
+    check("the board icon override defaults off", display[8].id + "|" + display[8].on, "display.hyprlandIcons|false")
 
     // Switching to Override adds the stop row, and nothing else about the section moves.
     var pinned = Settings.rows("display", displayState({ mode: 16 }, 16))
@@ -217,12 +218,12 @@ function runCursor(check) {
     check("the Display section's only control is where its cursor opens",
           Settings.firstRow(display), 1)
     check("and no read-only fact below it takes the cursor",
-          Settings.stepRow(display, 1, 1), 1)
+          Settings.stepRow(display, 1, 1), 8)
     var pinned = Settings.rows("display", displayState({ mode: 16 }, 16))
     check("an override gives the cursor a second stop to walk to",
           Settings.stepRow(pinned, 1, 1), 2)
     check("and the compositor's rows still take none",
-          Settings.stepRow(pinned, 2, 1), 2)
+          Settings.stepRow(pinned, 2, 1), 8)
 }
 
 // SettingsKeys.html's four-value chooser over the one key table. Each row the Keys section lists is
@@ -291,4 +292,27 @@ function runPresets(check) {
     check("each preset lists every chord it claims, and none of them lists an empty group",
           [chords(section("default")), chords(section("vim")), chords(section("mac")),
            chords(section("windows"))].join(","), "3,3,7,4")
+}
+
+function runCompletionRows(check) {
+    var state = { data: { view: "grid", density: "compact", columns: ["name", "kind"],
+        preview: { column: false, loadOn: "manual", thumbnails: "off", thumbSize: "xlarge", ctrlZoom: false } } }
+    var view = Settings.rows("view", state)
+    check("View displays the persisted view", find(view, "view").selected, "grid")
+    check("View preserves optional column choices", find(view, "columns").value, "Name, Kind")
+    check("View density uses schema values", find(view, "density").selected, "compact")
+    var preview = Settings.rows("preview", state)
+    check("preview visibility is independent of loading", find(preview, "preview.column").on, false)
+    check("manual preview reports the stored load mode", find(preview, "preview.loadOn").value, "Manual")
+    check("all four thumbnail display stops remain available", find(preview, "preview.thumbSize").values.join(","), "small,medium,large,xlarge")
+    check("thumbnail source policy remains separate", find(preview, "preview.thumbnails").selected, "off")
+    check("ctrl zoom can be disabled", find(preview, "preview.ctrlZoom").on, false)
+    var about = Settings.rows("about", { about: { version: "0.1.6", handler: "flea.desktop" } })
+    check("About version comes from supplied binary facts", about[1].value, "0.1.6")
+    check("unreported builds never repeat a specimen commit", about[2].value, "Not recorded in this build")
+    check("passive About metadata takes no focus", Settings.focusable(about[1]), false)
+    check("About support routes are keyboard actions", Settings.focusable(find(about, "support")), true)
+    var columns = Settings.columnRows(state)
+    check("Name cannot be removed", columns[1].kind, "lock")
+    check("optional kind reflects persisted columns", find(columns, "column:kind").on, true)
 }

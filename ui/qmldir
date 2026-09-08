@@ -74,3 +74,6 @@ TransferCard 1.0 TransferCard.qml
 Taildrop 1.0 Taildrop.qml
 FactsTable 1.0 FactsTable.qml
 KindStack 1.0 KindStack.qml
+AboutFacts 1.0 AboutFacts.qml
+SelectionPreview 1.0 SelectionPreview.qml
+PermissionsDialog 1.0 PermissionsDialog.qml

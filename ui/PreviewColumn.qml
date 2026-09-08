@@ -181,7 +181,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.hairline
                 visible: root.previewState === Facts.TEXT || root.previewState === Facts.CODE
-                active: root.rowState === Facts.TEXT || root.rowState === Facts.CODE
+                active: root.visible && (root.rowState === Facts.TEXT || root.rowState === Facts.CODE)
                 path: root.path
                 size: root.row ? root.row.s : 0
                 numbered: root.previewState === Facts.CODE
@@ -197,7 +197,7 @@ Item {
                 // source, not sourceComponent: naming the type in this document is a compile-time
                 // reference, so the plugin loads whether or not the Loader is ever active. This is
                 // the form ui/Preview.qml:103 already proved for QtMultimedia.
-                active: root.rowState === Facts.PDF
+                active: root.visible && root.rowState === Facts.PDF
                 source: "PreviewPdf.qml"
                 onLoaded: { item.path = Qt.binding(function () { return root.path }); item.active = true }
             }
@@ -282,7 +282,7 @@ Item {
             id: mediaLoader
             width: parent.width
             height: active ? Theme.chromeHeight : 0
-            active: root.previewState === Facts.VIDEO || root.previewState === Facts.AUDIO
+            active: root.visible && (root.previewState === Facts.VIDEO || root.previewState === Facts.AUDIO)
             sourceComponent: mediaTransport
         }
 
@@ -381,6 +381,7 @@ Item {
 
     // The cache file while there is one, then the image itself once the backend says none is coming.
     function frameSource() {
+        if (!root.visible) return ""
         if (root.thumb.length > 0)
             return Format.fileUri(root.thumb)
         if (root.noThumbComing && root.previewState === Facts.IMAGE && root.path.length > 0)

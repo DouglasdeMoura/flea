@@ -67,6 +67,10 @@ function sidebarGlyphFor(label) {
 // per mark on its native 24 unit grid, recut to the Omarchy edge: baked rounded corners became
 // hard corners, real curves stayed; see AGENTS.md "Lucide path data", "The Omarchy cut".
 var PATHS = {
+    "info": "M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",
+    "star": "M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3l-6.2 3.6 1.6-7L2 9.2l7.1-.6z",
+    "globe": "M2 12h20 M12 2a15 15 0 0 1 0 20 M12 2a15 15 0 0 0 0 20 M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",
+
     "file": "M4 22V2h10l6 6v14H4z M14 2v6h6",
     "folder": "M2 20V3h6l2 3h12v14H2z",
     "file-text": "M4 22V2h10l6 6v14H4z M14 2v6h6 M8 9h2 M8 13h8 M8 17h8",

@@ -16,14 +16,14 @@ function viewport(contentY, rowHeight, visibleRows, total) {
 }
 
 // Only visible rows, only rows the backend called thumbnailable, only rows never asked.
-function plan(state, rows, held, first, last) {
+function plan(state, rows, held, first, last, mode) {
     var ask = []
     for (var i = first; i <= last; i++) {
         if (state.file[i] !== undefined) {
             continue
         }
         var row = rows[i - held]
-        if (row && row.t) {
+        if (allowed(row, mode)) {
             ask.push(i)
         }
     }
@@ -82,4 +82,10 @@ function fileFor(state, row) {
 // read the file reports an empty name, and only once that has arrived is it honest to say so.
 function refused(state, row) {
     return state.file[row] === ""
+}
+
+// Backend icon identity distinguishes image thumbnails from video without opening any extra file.
+function allowed(row, mode) {
+    if (!row || !row.t || mode === "off") return false
+    return mode !== "images" || row.i === "image-x-generic"
 }

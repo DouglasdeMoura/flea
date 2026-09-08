@@ -35,6 +35,7 @@ import "selection.js" as SelectionSuite
 import "settings.js" as SettingsSuite
 import "sort.js" as SortSuite
 import "status.js" as StatusSuite
+import "permissions.js" as PermissionsSuite
 import "taildrop.js" as TaildropSuite
 import "textsize.js" as TextSizeSuite
 import "trash.js" as TrashSuite
@@ -75,7 +76,7 @@ Item {
             ["renderer", RendererSuite],
             ["scroll", ScrollSuite], ["search", SearchSuite],
             ["selection", SelectionSuite], ["settings", SettingsSuite],
-            ["sort", SortSuite], ["status", StatusSuite], ["taildrop", TaildropSuite], ["textsize", TextSizeSuite],
+            ["sort", SortSuite], ["permissions", PermissionsSuite], ["status", StatusSuite], ["taildrop", TaildropSuite], ["textsize", TextSizeSuite],
             ["trash", TrashSuite], ["tap", TapSuite], ["tabs", TabsSuite],
             ["thumbs", ThumbsSuite], ["uistate", UiStateSuite],
             ["watch", WatchSuite]

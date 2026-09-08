@@ -18,6 +18,7 @@ Flickable {
     property real tallest: 0
 
     signal activated(int index)
+    signal pointerMoved(int index)
     signal stepped(int index, int direction)
     signal stopPicked(int index, int stop)
 
@@ -63,12 +64,12 @@ Flickable {
             required property var modelData
             readonly property alias rows: rowItems
             width: root.width
-            visible: modelData.id === root.section
+            visible: modelData.id === root.section || (modelData.id === "view" && root.section === "columns")
             onImplicitHeightChanged: root.remeasure()
 
             Repeater {
                 id: rowItems
-                model: Settings.rows(column.modelData.id, root.values)
+                model: Settings.rows(column.modelData.id === "view" && root.section === "columns" ? "columns" : column.modelData.id, root.values)
 
                 delegate: Flea.SettingsRow {
                     required property var modelData
@@ -77,6 +78,7 @@ Flickable {
                     row: modelData
                     current: column.visible && root.side === "pane" && root.cursor === index
                     onActivated: root.activated(index)
+                    onPointerMoved: root.pointerMoved(index)
                     onStepped: function (direction) { root.stepped(index, direction) }
                     onStopPicked: function (stop) { root.stopPicked(index, stop) }
                 }

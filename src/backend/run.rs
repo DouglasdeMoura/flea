@@ -23,7 +23,7 @@ use crate::backend::listing::Listing;
 use crate::backend::search::Search;
 use crate::backend::state::{State, Tables};
 use crate::backend::searchreq::{finish_search, step_search};
-use crate::backend::sort::{parse_sort_by, sort_by_name, sort_listing};
+use crate::backend::ordering;
 use crate::backend::thumbcache::{default_root, Cache};
 use crate::backend::thumbreq::{cancel_row, forget_one, report_done, thumb_rows};
 use crate::backend::thumbs::{Done, Pool};
@@ -82,6 +82,7 @@ pub fn run() -> i32 {
     let (results, done) = channel::<Done>();
     let (op_tx, op_rx) = channel::<OpMsg>();
     let mut ops = Ops::new(op_tx);
+    let mut permissions = super::permissions::Permissions::default();
     // The pool shares this process's one parse of both tables rather than reading the same two files again.
     let pool = Pool::new(THUMB_WORKERS, results, default_root(), Arc::clone(&tb.aliases), Arc::clone(&tb.thumbs));
     let cache = Cache::new();
@@ -115,7 +116,7 @@ pub fn run() -> i32 {
         };
         match event {
             Event::Request(line) => {
-                if handle_line(&line, &mut out, &mut st, &tb, &pool, &cache, &mut ops, &mut watch) == Control::Quit {
+                if handle_line(&line, &mut out, &mut st, &tb, &pool, &cache, &mut ops, &mut watch, &mut permissions) == Control::Quit {
                     break;
                 }
             }
@@ -155,8 +156,10 @@ fn handle_line(
     cache: &Cache,
     ops: &mut Ops,
     watch: &mut Watch,
+    permissions: &mut super::permissions::Permissions,
 ) -> Control {
     match parse_request(line) {
+        Request::Permissions { line } => say(out, &permissions.handle(&line)),
         Request::List { path, first, hidden } => {
             // A new listing replaces whatever the walk was filling, so the walk ends before the scan starts.
             if finish_search(out, st, true) {
@@ -166,7 +169,14 @@ fn handle_line(
             watch.begin(Path::new(&path));
             match scan(&path, hidden) {
                 Ok((mut l, read_ms)) => {
-                    let sort_ms = sort_by_name(&mut l, false);
+                    let (pass_ms, sort_ms) = match ordering::request(&mut l, Path::new(&path), &tb.mime, line) {
+                        Ok(timing) => timing,
+                        Err(msg) => {
+                            watch.abandon();
+                            say(out, &error_line(&FleaError { where_: "sort".into(), path: path.clone(), msg: msg.into() }));
+                            return Control::Continue;
+                        }
+                    };
                     // base and listing only move together, so a failed list cannot mix them.
                     st.base = PathBuf::from(&path);
                     st.listing = l;
@@ -176,7 +186,7 @@ fn handle_line(
                     if watch.refused() {
                         eprintln!("flea: {} will not follow outside changes, inotify refused a watch on it", path);
                     }
-                    writeln!(out, "{}", listed_line(st.listing.len(), read_ms, sort_ms, dev_of(&st.base))).ok();
+                    writeln!(out, "{}", listed_line(st.listing.len(), read_ms + pass_ms, sort_ms, dev_of(&st.base))).ok();
                     // Rides along unasked: asking costs a 60 ms round trip at first paint.
                     write_window(out, st, 0, first, tb);
                 }
@@ -219,20 +229,18 @@ fn handle_line(
                 forget_rows(st, pool);
             }
         }
-        Request::Sort { by, desc } => {
+        Request::Sort { by, desc: _ } => {
             // The walk owns the listing sort would reorder, so it ends first rather than racing it.
             if finish_search(out, st, true) {
                 forget_rows(st, pool);
             }
             // A key that names no order is refused by name, so a client's sort mark can only describe the order it got.
-            match parse_sort_by(&by) {
+            match ordering::request(&mut st.listing, &st.base, &tb.mime, line) {
                 Err(msg) => {
                     let e = FleaError { where_: "sort".to_string(), path: by.clone(), msg: msg.to_string() };
                     writeln!(out, "{}", error_line(&e)).ok();
                 }
-                Ok(order) => {
-                    // read carries the metadata pass here, 0.0 for name; see docs/protocol.md "listed".
-                    let (pass_ms, sort_ms) = sort_listing(&mut st.listing, &st.base, order, desc);
+                Ok((pass_ms, sort_ms)) => {
                     forget_rows(st, pool);
                     writeln!(out, "{}", listed_line(st.listing.len(), pass_ms, sort_ms, dev_of(&st.base))).ok();
                 }
@@ -287,10 +295,10 @@ fn handle_line(
         Request::Formats => say(out, &formats_line(&tb.formats, convert::available())),
         Request::FsInfo => say(out, &fsinfo_line(&read_fsinfo(&st.base))),
         // One row, only when a client asked: the same no-sweep rule thumb and dirsize already follow.
-        Request::Meta { row, text, media, archive } => {
+        Request::Meta { row, text, media, archive, token } => {
             if row < st.listing.len() {
                 let want = if archive { Some(Arc::clone(&tb.formats)) } else { None };
-                spawn_meta(row, st.base.join(st.listing.name(row)), text, media, want, ops.tx.clone())
+                spawn_meta(row, st.base.join(st.listing.name(row)), text, media, want, token, ops.tx.clone())
             }
         }
         Request::Paths { rows } =>

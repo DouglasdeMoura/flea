@@ -13,15 +13,33 @@ GridView {
     property var pane: null
     property var menu: null
 
+    property real zoomTravel: 0
+    readonly property int wheelNotch: 120
+    readonly property int touchpadStep: 48
+
+    function zoomWheel(wheel) {
+        if (!ViewState.ctrlZoom) return false
+        root.zoomTravel += wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y / root.touchpadStep
+                                                   : wheel.angleDelta.y / root.wheelNotch
+        var steps = root.zoomTravel > 0 ? Math.floor(root.zoomTravel) : Math.ceil(root.zoomTravel)
+        if (steps !== 0) {
+            root.zoomTravel -= steps
+            var sizes = ["small", "medium", "large", "xlarge"]
+            var next = Math.max(0, Math.min(sizes.length - 1, sizes.indexOf(ViewState.thumbnailSize) + steps))
+            ViewState.changeSetting("preview.thumbSize", sizes[next])
+        }
+        return true
+    }
+
     signal thumbsApplied(var work)
     signal dirSizesApplied(var ask)
     signal dirSizesCancelled()
 
     // How many tiles fit across, which is what a cursor step down has to move by.
-    readonly property int columns: Math.max(1, Math.floor(root.width / Theme.grid.minCellWidth))
+    readonly property int columns: Math.max(1, Math.floor(root.width / Math.max(Theme.grid.minCellWidth, ViewState.thumbnailPixels + 2 * Theme.spacing.rowPaddingX)))
     readonly property int tileRows: Math.max(1, Math.ceil(root.pane.total / root.columns))
     // Mark, one gap, one line of caption, and the padding above and below.
-    readonly property int cellHeightPx: Theme.grid.iconSize + Theme.spacing.gap
+    readonly property int cellHeightPx: ViewState.thumbnailPixels + Theme.spacing.gap
                                         + Math.round(Theme.font.caption * 1.6)
                                         + 2 * Theme.spacing.rowPaddingX
     readonly property int visibleTileRows: Math.max(1, Math.ceil(root.height / root.cellHeightPx))
@@ -40,6 +58,7 @@ GridView {
     Flea.FastScrollHandler {
         parent: root
         flickable: root
+        ctrlWheelAction: function (wheel) { return root.zoomWheel(wheel) }
     }
 
     delegate: Flea.GridTile {
@@ -50,7 +69,7 @@ GridView {
         cursor: index === root.pane.cursorIndex
         hovered: hover.hovered
         selected: root.pane.isSelected(index)
-        thumb: Thumbs.fileFor(root.pane.thumbState, index)
+        thumb: Thumbs.allowed(row, ViewState.thumbnailMode) ? Thumbs.fileFor(root.pane.thumbState, index) : ""
 
         HoverHandler {
             id: hover
@@ -139,18 +158,24 @@ GridView {
         }
     }
 
+    Connections {
+        target: ViewState
+        function onThumbnailModeChanged() { if (root.visible) settle.restart() }
+        function onThumbnailPixelsChanged() { if (root.visible) settle.restart() }
+    }
+
     function requestThumbs() {
-        if (root.pane.total === 0 || root.pane.listInFlight)
+        if (!root.visible || root.pane.total === 0 || root.pane.listInFlight)
             return
         var range = root.visibleRange()
-        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, range.first, range.last)
+        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, range.first, range.last, ViewState.thumbnailMode)
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
         root.thumbsApplied(work)
     }
 
     function requestDirSizes() {
-        if (root.pane.total === 0 || root.pane.listInFlight)
+        if (!root.visible || root.pane.total === 0 || root.pane.listInFlight)
             return
         var range = root.visibleRange()
         var ask = DirSizes.plan(root.pane.dirSizeState, root.pane.rows, root.pane.held, range.first, range.last)

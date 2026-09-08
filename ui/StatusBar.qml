@@ -31,7 +31,7 @@ Item {
     readonly property bool hasUndo: !root.transientIsError && !root.stickyHere && !root.searching
                                     && root.notice.indexOf(Ops.UNDO_HINT) >= 0
     readonly property string secondaryText: root.transientIsError || root.stickyHere
-        ? [root.transientIsError && root.stickyHere ? root.sticky : "", root.searchLine].filter(function (s) { return s.length > 0 }).join(" · ")
+        ? [root.transientIsError && root.stickyHere ? root.sticky : "", root.searching ? "search " + root.searchLine : ""].filter(function (s) { return s.length > 0 }).join(" · ")
         : ""
     signal transferCancelRequested(int id)
     signal undoRequested()
@@ -73,7 +73,7 @@ Item {
 
     function slot() {
         return { transient: root.transient_, transientIsError: root.transientIsError,
-                 searching: root.searching, searchKeys: root.searchLine + " · " + root.searchKeys,
+                 searching: root.searching, searchKeys: "Search: " + root.searchLine + " · " + root.searchKeys,
                  stickyHere: root.stickyHere, sticky: root.sticky, fsText: root.fsText() }
     }
 

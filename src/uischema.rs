@@ -26,7 +26,7 @@ pub const DEFAULTS: &str = r#"{
     "ctrlZoom": true
   },
   "keys": "default",
-  "display": { "textSize": { "mode": "system" } },
+  "display": { "textSize": { "mode": "system" }, "hyprlandIcons": false },
   "menu": { "hidden": ["delete", "openwith", "openTerminal",
             "moveto", "copyto", "properties", "permissions", "copypath"] }
 }"#;
@@ -85,7 +85,7 @@ pub const TEXT_SIZE: &[(&str, Rule)] = &[("mode", Rule::TextSize)];
 
 // textSize alone. Window opacity, icon theme and shadows are the compositor's, and Flea mirrors it
 // rather than carrying a second writable copy of a setting Hyprland already owns.
-pub const DISPLAY: &[(&str, Rule)] = &[("textSize", Rule::Group(TEXT_SIZE))];
+pub const DISPLAY: &[(&str, Rule)] = &[("textSize", Rule::Group(TEXT_SIZE)), ("hyprlandIcons", Rule::Bool)];
 
 // hidden is the whole of the Menus section's state: the master row SettingsMenus draws over the six
 // basic actions derives from it by masterState in ui/js/Settings.js, and cannot disagree with it.
@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(d.get("preview").and_then(|p| p.get("thumbSize")).and_then(Json::as_str), Some("medium"));
         assert_eq!(d.get("display").and_then(|p| p.get("textSize")).and_then(|t| t.get("mode")).and_then(Json::as_str), Some("system"));
         let display: Vec<&str> = d.get("display").and_then(Json::as_object).expect("display").iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(display, ["textSize"], "the compositor owns opacity, icons and shadows");
+        assert_eq!(display, ["textSize", "hyprlandIcons"], "the compositor owns opacity, icons and shadows");
         let menu: Vec<&str> = d.get("menu").and_then(Json::as_object).expect("menu").iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(menu, ["hidden"], "the master row is derived from menu.hidden, not stored beside it");
     }

@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import qs.Commons
 import "." as Flea
 import "js/Keymap.js" as Keymap
@@ -14,7 +15,7 @@ Item {
     property Item focusHolder: null
     // "keys", "display" or "menus"; the panel opens on Display because that is the promise it
     // carries, and the rail keeps the boards' own relative order around it.
-    property string section: "display"
+    property string section: "view"
     property int cursor: 0
     // "rail" or "pane", which side Tab last gave the cursor to.
     property string side: "pane"
@@ -38,6 +39,9 @@ Item {
 
     // Everything ui/js/Settings.js rows() reads, built once here for the keyboard's rows and the pane's.
     readonly property var settingsState: ({
+        data: ViewState.state,
+        about: aboutFacts.facts,
+        saveStatus: ViewState.saveStatus,
         textSize: ViewState.textSize,
         hidden: ViewState.menuHidden,
         keyHints: ViewState.keyHints,
@@ -88,7 +92,25 @@ Item {
         var row = root.rows[index]
         if (!row || !Settings.focusable(row))
             return
-        // The hints row is the one check that is not a menu action, so it has a writer of its own.
+        if (row.id === "columns") { root.showSection("columns"); return }
+        if (row.id === "backView") { root.showSection("view"); return }
+        if (row.id === "keyboardSheet") {
+            var holder = root.focusHolder
+            root.close()
+            if (holder && holder.keymapSheet) holder.keymapSheet.open(holder)
+            return
+        }
+        if (row.id === "reportIssue" || row.id === "support") {
+            Qt.openUrlExternally(row.id === "support" ? "https://buymeacoffee.com/thisisgm"
+                                                     : "https://github.com/thisisgm/flea/issues")
+            return
+        }
+        if (row.id.indexOf("column:") === 0) { ViewState.toggleColumn(row.id.substring(7)); return }
+        if (row.kind === "check" && root.section !== "menus") {
+            ViewState.changeSetting(row.id, !row.on)
+            return
+        }
+        // Menu checks share their visibility writer; other sections write their own leaves.
         if (row.id === "keyHints")
             ViewState.toggleKeyHints()
         else if (row.kind === "check")
@@ -116,6 +138,12 @@ Item {
         // A check or a master is toggled by activate(), never walked, so h and l stop here.
         if (row.kind !== "choice")
             return
+        if (row.values !== undefined) {
+            var index = row.values.indexOf(row.selected)
+            var target = (index + direction + row.values.length) % row.values.length
+            ViewState.changeSetting(row.id, row.values[target])
+            return
+        }
         var at = Settings.PRESETS.indexOf(ViewState.keysPreset)
         var next = (at + direction + Settings.PRESETS.length) % Settings.PRESETS.length
         ViewState.setKeysPreset(Settings.PRESETS[next])
@@ -131,6 +159,10 @@ Item {
         // here addressed by index and the row decides which writer that index belongs to.
         if (row.id === "textMode") {
             ViewState.toggleTextFollow()
+            return
+        }
+        if (row.values !== undefined) {
+            ViewState.changeSetting(row.id, row.values[stop])
             return
         }
         if (row.kind === "choice") {
@@ -177,7 +209,7 @@ Item {
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: root.panelWidth
+        width: Math.min(root.panelWidth, Math.max(0, root.width - 2 * root.clampMargin))
         // Each side carries its own inset, above the first row and below the last, the way
         // Settings.dc.html gives the rail column a 10 of its own and the pane the row padding.
         height: Math.min(root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
@@ -284,7 +316,7 @@ Item {
                 anchors.top: chrome.bottom
                 anchors.topMargin: Theme.settings.railPaddingY
                 width: root.railWidth
-                section: root.section
+                section: root.section === "columns" ? "view" : root.section
                 focused: root.side === "rail"
                 onChosen: function (id) {
                     root.side = "rail"
@@ -314,12 +346,15 @@ Item {
                 values: root.settingsState
                 cursor: root.cursor
                 side: root.side
+                onPointerMoved: function (index) { root.side = "pane"; root.cursor = index }
                 onActivated: function (index) { root.side = "pane"; root.cursor = index; root.activate(index) }
                 onStepped: function (index, direction) { root.side = "pane"; root.cursor = index; root.stepRowValue(index, direction) }
                 onStopPicked: function (index, stop) { root.side = "pane"; root.cursor = index; root.pickRowStop(index, stop) }
             }
         }
     }
+
+    Flea.AboutFacts { id: aboutFacts; active: root.opened && root.section === "about" }
 
     Item {
         id: keys
@@ -359,7 +394,8 @@ Item {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
                 if (root.side === "rail")
                     root.side = "pane"
-                else
+                else if (event.key !== Qt.Key_Space || (root.rows[root.cursor] &&
+                         (root.rows[root.cursor].kind === "check" || root.rows[root.cursor].kind === "master")))
                     root.activate(root.cursor)
             }
             // Every other key stops here: an open panel that let one through would move the cursor
