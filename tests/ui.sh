@@ -66,7 +66,7 @@ stale_fixture="$FIXTURE_ROOT/flea-ui-stale-$$"
 thumb_rows=200
 # A settle is 120 ms and a round trip through the pool is tens of ms, so a screen has a second.
 thumb_fill_s=20
-# Long enough that the three fling cases (thumbs, nosweep, renamelife) scroll thousands of rows whatever the notch rate; none needs the end.
+# 1500 detents are 432,000 px at this box's 288 px notch: past the end of the two 200-row cases (thumbs, renamelife) many times over, and about 11,700 of nosweep's 100,000 rows.
 fling_clicks=1500
 # 15 shots 0.2 s apart span one 2800 ms replay of ui/FleaMark.qml's draw, whose mark is lit from about 0.4 s to 2.8 s of it.
 mark_poll_shots=15
