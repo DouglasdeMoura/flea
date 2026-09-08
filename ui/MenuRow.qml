@@ -20,7 +20,7 @@ Item {
     property bool compact: false
 
     signal activated()
-    // The parent owns the cursor, so a pointer that moves onto the row asks for it; a menu opened under a resting pointer asks nothing, or Enter would fire the pointer's row (0d626ed).
+    // The parent owns the cursor: a hover that begins asks for it, and the parent ignores one that begins with the open itself (0d626ed's resting pointer).
     signal pointerMoved()
     // For a parent that lights the pointer's row without moving its own cursor, as ui/ShareBrowser.qml does.
     readonly property bool hovered: pointer.hovered
@@ -159,21 +159,8 @@ Item {
     HoverHandler {
         id: pointer
         enabled: !root.isSeparator
-        // The first point after entry is where the pointer rested; only a later, different one is motion.
-        property bool armed: false
-        property point restingAt
-        onHoveredChanged: pointer.armed = false
-        onPointChanged: {
-            if (!pointer.hovered)
-                return
-            if (!pointer.armed) {
-                pointer.armed = true
-                pointer.restingAt = pointer.point.position
-                return
-            }
-            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
-                root.pointerMoved()
-        }
+        // Hover motion raises no point change here, so the parent tells a pointer that arrived from one the menu opened under by when the hover began.
+        onHoveredChanged: if (pointer.hovered) root.pointerMoved()
     }
 
     TapHandler {

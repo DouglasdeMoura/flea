@@ -6308,13 +6308,15 @@ switch_view() {
     [[ "$(ipc viewMode)" == "$want" ]] || fail "switch_view: ctrl-$chord left the view on $(ipc viewMode), not $want"
 }
 
-# A click on row i's left edge: outside a centred card in every view, on the ground beneath it.
+# A click at row i's height just right of the settings card: on the ground, and inside the row in every view (the middle column runs 200 px past the card).
 click_row_edge() {
-    local rx ry rw rh wx wy
+    local rx ry rw rh cx cy cw ch wx wy
     read -r rx ry rw rh <<< "$(ipc rowRect "$1")"
     [[ -n "$rh" ]] || fail "click_row_edge: row $1 has no box"
+    read -r cx cy cw ch <<< "$(ipc settingsCardRect)"
+    [[ -n "$ch" ]] || fail "click_row_edge: no settings card to click beside"
     read -r wx wy _ww _wh < <(window_box)
-    omarchy-drive click "$((wx + rx + 8))" "$((wy + ry + rh / 2))" "$2" >/dev/null
+    omarchy-drive click "$((wx + cx + cw + 20))" "$((wy + ry + rh / 2))" "$2" >/dev/null
 }
 
 # Lit pixels inside a window-relative "x y w h", the count every painted-mark check reads.
@@ -6915,7 +6917,10 @@ printf '\nLOG_CHECK_BEGIN %s\n' "$run_log"
 expected_warning="inotify_add_watch($fixture_root/network-home/.config/gtk-3.0/bookmarks) failed: (Permission denied)"
 # Qt Multimedia's ffmpeg backend saying VAAPI zero-copy needs an OpenGL RHI; Flea runs Vulkan, the backend falls back, and case_views proves the frames still change.
 vaapi_warning="VAAPITextureConverter: No rhi or non openGL based RHI"
-if grep -F -v -e "$expected_warning" -e "$vaapi_warning" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
+# case_formats and case_previewviews open a file with no permission bits on purpose; Qt names it, and this run's fixture path is the whole match.
+unreadable_warning="$fixture_root/formats/shut.jpg"
+unreadable_warning2="$fixture_root/previewviews/shut.jpg"
+if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
     printf 'FAIL log\n'
     failures=$((failures + 1))
 fi
