@@ -8,6 +8,8 @@ pub struct Theme {
     pub background: String,
     pub symlink: String,
     pub executable: String,
+    pub selected: String,
+    pub border: String,
 }
 impl Theme {
     pub fn load() -> Self {
@@ -23,10 +25,20 @@ impl Theme {
             accent: role("accent", "#ffffff", false),
             error: role("color1", "#ff0000", false),
             background: role("background", "#101315", true),
-            symlink: role("cyan", "#94e2d5", false),
-            executable: role("green", "#a6e3a1", false),
+            symlink: role(if values.contains_key("cyan") { "cyan" } else { "color6" }, "#94e2d5", false),
+            executable: role(if values.contains_key("green") { "green" } else { "color2" }, "#a6e3a1", false),
+            selected: ansi(&blend(values.get("accent").map(String::as_str).unwrap_or("#ffffff"), values.get("background").map(String::as_str).unwrap_or("#101315"), 0.22), true),
+            border: role("dark_background", "#262b40", false),
         }
     }
+}
+fn blend(foreground: &str, background: &str, opacity: f64) -> String {
+    let channel = |i| {
+        let fg = u8::from_str_radix(&foreground[i..i + 2], 16).unwrap_or(0) as f64;
+        let bg = u8::from_str_radix(&background[i..i + 2], 16).unwrap_or(0) as f64;
+        (fg * opacity + bg * (1.0 - opacity)).round() as u8
+    };
+    format!("#{:02x}{:02x}{:02x}", channel(1), channel(3), channel(5))
 }
 // Sample input: accent = "#a9b665"; values outside six-digit RGB are ignored.
 fn parse(text: &str) -> HashMap<String, String> {

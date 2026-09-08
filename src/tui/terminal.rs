@@ -53,7 +53,7 @@ impl Terminal {
                 .handlers
                 .push((sig, unsafe { signal(sig, stop as *const () as usize) }));
         }
-        print!("\x1b[?1049h\x1b[?25l\x1b[>1u\x1b[c");
+        print!("\x1b[?1049h\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[>1u\x1b[c");
         io::stdout().flush()?;
         Ok(terminal)
     }
@@ -68,7 +68,7 @@ impl Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
-        print!("\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l");
+        print!("\x1b[<u\x1b[?1002l\x1b[?1006l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l");
         let _ = io::stdout().flush();
         let _ = Command::new("stty").arg(&self.saved).status();
         for &(sig, handler) in &self.handlers {

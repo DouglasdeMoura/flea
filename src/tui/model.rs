@@ -13,6 +13,8 @@ pub struct Row {
     pub link: String,
     pub kind: String,
     pub thumbnail: bool,
+    pub modified: i64,
+    pub icon: String,
 }
 impl Row {
     pub fn parse(row: &Json, kinds: &[Json]) -> Self {
@@ -23,6 +25,8 @@ impl Row {
             mode: count(row, "p"),
             link: text(row, "l").into(),
             thumbnail: flag(row, "t"),
+            modified: row.get("m").and_then(Json::as_f64).unwrap_or(0.0) as i64,
+            icon: text(row, "i").into(),
             kind: kinds
                 .get(count(row, "k"))
                 .and_then(Json::as_str)
@@ -53,12 +57,15 @@ pub struct Model {
     pub folders_first: bool,
     pub group_by_kind: bool,
     pub selected: BTreeSet<usize>,
+    pub selected_rows: BTreeMap<usize, Row>,
     pub tabs: Vec<Tab>,
     pub tab: usize,
     pub error: String,
     pub message: String,
     pub search: String,
     pub searching: bool,
+    pub search_from: Option<PathBuf>,
+    pub search_here: bool,
     pub transfer: String,
     pub pending_clipboard: bool,
     pub clipboard: Vec<String>,
@@ -81,6 +88,7 @@ pub struct Model {
     pub thumb_index: Option<usize>,
     pub filter: String,
     pub restore_cursor: Option<usize>,
+    pub restore_path: Option<PathBuf>,
     pub sheet_top: usize,
     pub transfer_id: usize,
     pub transfer_total: usize,
@@ -89,6 +97,16 @@ pub struct Model {
     pub back: Vec<PathBuf>,
     pub forward: Vec<PathBuf>,
     pub wrap: bool,
+    pub columns: usize,
+    pub completion: String,
+    pub preview_failed: Option<PathBuf>,
+    pub playback: Option<(PathBuf, f64, bool)>,
+    pub taildrop: super::taildrop::Taildrop,
+    pub taildrop_target: Option<super::taildrop::Peer>,
+    pub last_click: Option<(PathBuf, std::time::Instant)>,
+    pub drag_anchor: Option<usize>,
+    pub key_arm: String,
+    pub preview_generation: usize,
 }
 impl Model {
     pub fn new(path: PathBuf, settings: &Json) -> Self {
@@ -116,6 +134,7 @@ impl Model {
                 .unwrap_or(true),
             group_by_kind: flag(settings, "groupByKind"),
             selected: BTreeSet::new(),
+            selected_rows: BTreeMap::new(),
             tabs: vec![Tab {
                 path,
                 cursor: 0,
@@ -127,6 +146,8 @@ impl Model {
             message: String::new(),
             search: String::new(),
             searching: false,
+            search_from: None,
+            search_here: false,
             transfer: String::new(),
             pending_clipboard: false,
             clipboard: Vec::new(),
@@ -158,6 +179,7 @@ impl Model {
             thumb_index: None,
             filter: String::new(),
             restore_cursor: None,
+            restore_path: None,
             sheet_top: 0,
             transfer_id: 0,
             transfer_total: 0,
@@ -166,6 +188,16 @@ impl Model {
             back: Vec::new(),
             forward: Vec::new(),
             wrap: flag(settings, "wrapAtEnds"),
+            columns: 80,
+            completion: String::new(),
+            preview_failed: None,
+            playback: None,
+            taildrop: super::taildrop::Taildrop::new(),
+            taildrop_target: None,
+            last_click: None,
+            drag_anchor: None,
+            key_arm: String::new(),
+            preview_generation: 0,
         }
     }
     pub fn open(&mut self, path: PathBuf, wire: &mut Wire) -> io::Result<()> {
@@ -198,11 +230,7 @@ impl Model {
         ])
     }
     pub fn row_path(&self, row: &Row) -> PathBuf {
-        if self.search.is_empty() {
-            self.path.join(&row.name)
-        } else {
-            Path::new("/").join(&row.name)
-        }
+        self.path.join(&row.name)
     }
     pub fn current_path(&self) -> Option<PathBuf> {
         self.rows.get(&self.cursor).map(|row| self.row_path(row))
@@ -234,6 +262,26 @@ impl Model {
         } else {
             self.selected.iter().copied().map(number).collect()
         })
+    }
+    pub fn remember_selection(&mut self) {
+        self.selected_rows.retain(|i, _| self.selected.contains(i));
+        for (&i, row) in &self.rows {
+            if self.selected.contains(&i) {
+                self.selected_rows.insert(i, row.clone());
+            }
+        }
+    }
+    pub fn invalidate_rows(&mut self) {
+        self.rows.clear();
+        self.selected.clear();
+        self.selected_rows.clear();
+        self.preview_path.clear();
+        self.preview_failed = None;
+        self.preview_scroll = 0;
+        self.image_file = None;
+        self.thumb_index = None;
+        self.player = None;
+        self.pdf = None;
     }
     pub fn move_by(&mut self, delta: isize, extend: bool, wire: &mut Wire) -> io::Result<()> {
         if self.total == 0 || self.pending.is_some() {
@@ -279,14 +327,12 @@ impl Model {
                     self.cursor = self.restore_cursor.take().unwrap_or(0);
                     self.top = self.cursor;
                     self.search.clear();
+                    self.searching = false;
+                    self.search_from = None;
                     self.filter.clear();
                 }
                 self.total = count(&value, "n");
-                self.preview_path = PathBuf::new();
-                self.image_file = None;
-                self.thumb_index = None;
-                self.rows.clear();
-                self.selected.clear();
+                self.invalidate_rows();
                 self.cursor = self.cursor.min(self.total.saturating_sub(1));
                 let parent = self
                     .path
@@ -301,6 +347,23 @@ impl Model {
                     ("hidden", Json::Bool(self.hidden)),
                 ])?;
                 self.window(wire)?;
+                if let Some(path) = &self.restore_path {
+                    wire.send(vec![("c", word("locate")), ("path", word(&path.to_string_lossy()))])?;
+                }
+            }
+            "located" => {
+                if self.pending.is_none()
+                    && text(&value, "directory") == self.path.to_string_lossy()
+                    && self.restore_path.as_ref().is_some_and(|p| p.to_string_lossy() == text(&value, "path"))
+                {
+                    let index = value.get("index").and_then(Json::as_f64).unwrap_or(-1.0);
+                    if index >= 0.0 && index < self.total as f64 {
+                        self.cursor = index as usize;
+                        self.window(wire)?;
+                    } else {
+                        self.restore_path = None;
+                    }
+                }
             }
             "rows" => {
                 let empty = Vec::new();
@@ -313,6 +376,13 @@ impl Model {
                 self.rows.clear();
                 for (i, row) in rows.iter().enumerate() {
                     self.rows.insert(start + i, Row::parse(row, kinds));
+                }
+                self.remember_selection();
+                if let Some(path) = &self.restore_path {
+                    if let Some((&i, _)) = self.rows.iter().find(|(_, r)| self.row_path(r) == *path) {
+                        self.cursor = i;
+                        self.restore_path = None;
+                    }
                 }
             }
             "thumbed" => {
@@ -347,16 +417,16 @@ impl Model {
                 }
             }
             "paths" => {
+                let paths: Vec<String> = value.get("paths").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(str::to_owned).collect();
+                if let Some(peer) = self.taildrop_target.take() {
+                    match super::taildrop::send(&peer, &paths) {
+                        Ok(()) => self.message = format!("Sending to {}", peer.label),
+                        Err(e) => self.error = format!("Taildrop: {}", e),
+                    }
+                }
                 if self.pending_clipboard {
                     self.pending_clipboard = false;
-                    self.clipboard = value
-                        .get("paths")
-                        .and_then(Json::as_array)
-                        .unwrap_or(&[])
-                        .iter()
-                        .filter_map(Json::as_str)
-                        .map(str::to_owned)
-                        .collect();
+                    self.clipboard = paths;
                     self.message = format!(
                         "{} items {}",
                         self.clipboard.len(),
@@ -365,6 +435,9 @@ impl Model {
                 }
             }
             "searching" | "searched" => {
+                if self.search.is_empty() || self.pending.is_some() {
+                    return Ok(());
+                }
                 self.total = count(&value, "n");
                 self.searching = text(&value, "t") == "searching";
                 self.search = format!(
@@ -372,7 +445,12 @@ impl Model {
                     self.total,
                     count(&value, "scanned")
                 );
-                self.selected.clear();
+                if !self.searching {
+                    // Ranking changes every index; no action may use the discovery-order window.
+                    self.invalidate_rows();
+                    self.cursor = 0;
+                    self.top = 0;
+                }
                 self.cursor = self.cursor.min(self.total.saturating_sub(1));
                 self.window(wire)?;
             }
@@ -430,7 +508,9 @@ impl Model {
             "error" => {
                 self.error = format!("{}: {}", text(&value, "where"), text(&value, "msg"));
                 self.pending = None;
+                self.restore_path = None;
                 self.pending_clipboard = false;
+                self.taildrop_target = None;
             }
             _ => {}
         }

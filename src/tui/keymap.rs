@@ -23,9 +23,9 @@ impl Map {
             }
             if let Some((key, value)) = line.split_once('=') {
                 let value = value.trim();
-                if value.starts_with('"') && value.ends_with('"') {
+                if let Ok(crate::jsondoc::Json::Str(value)) = crate::jsondoc::parse(value) {
                     if let Some((_, block)) = map.blocks.last_mut() {
-                        block.insert(key.trim().into(), value[1..value.len() - 1].into());
+                        block.insert(key.trim().into(), value);
                     }
                 }
             }
@@ -33,6 +33,9 @@ impl Map {
         map
     }
     pub fn action(&self, key: &Key, preset: &str) -> String {
+        self.in_context(key, preset, "listing")
+    }
+    pub fn in_context(&self, key: &Key, preset: &str, context: &str) -> String {
         if key.name == "Insert" && key.mods == "ctrl" {
             return "copy".into();
         }
@@ -42,15 +45,25 @@ impl Map {
         if preset == "mac" && key.mods == "ctrl" && key.name == "X" {
             return String::new();
         }
-        for (kind, block) in &self.blocks {
-            if kind == "preset"
-                && get(block, "name") == preset
-                && get(block, "mods") == key.mods
-                && get(block, "key") == key.name
-            {
-                return get(block, "action").into();
+        for name in [preset, "all"] {
+            for (kind, block) in &self.blocks {
+                let here = get(block, "context");
+                let mods = get(block, "mods");
+                let key_matches = if mods == "text" {
+                    matches!(key.mods.as_str(), "" | "shift") && get(block, "key") == key.text
+                } else {
+                    (if mods == "none" { "" } else { mods }) == key.mods && get(block, "key") == key.name
+                };
+                if kind == "preset" && get(block, "name") == name
+                    && get(block, "frontend") != "gui"
+                    && (here == context || here == "all" || (here.is_empty() && context == "listing"))
+                    && key_matches
+                {
+                    return get(block, "action").into();
+                }
             }
         }
+        if context != "listing" { return String::new(); }
         for (kind, block) in &self.blocks {
             let matches = if key.mods.is_empty() {
                 (kind == "text" && get(block, "char") == key.text && !key.text.is_empty())
@@ -86,7 +99,8 @@ mod tests {
                 &Key {
                     name: "J".into(),
                     text: "j".into(),
-                    mods: "".into()
+                    mods: "".into(),
+                    pointer: None,
                 },
                 "default"
             ),
@@ -97,7 +111,8 @@ mod tests {
                 &Key {
                     name: "X".into(),
                     text: "X".into(),
-                    mods: "ctrl".into()
+                    mods: "ctrl".into(),
+                    pointer: None,
                 },
                 "mac"
             ),
@@ -108,7 +123,8 @@ mod tests {
                 &Key {
                     name: "Insert".into(),
                     text: "".into(),
-                    mods: "shift".into()
+                    mods: "shift".into(),
+                    pointer: None,
                 },
                 "vim"
             ),

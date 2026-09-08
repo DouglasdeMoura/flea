@@ -95,10 +95,18 @@ impl Graphics {
         true
     }
     pub fn clear(&mut self) {
+        if self.protocol == Protocol::Kitty && (!self.bytes.is_empty() || !self.identity.as_os_str().is_empty()) {
+            print!("\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
+        }
         self.job = None;
         self.bytes.clear();
         self.error.clear();
         self.identity = PathBuf::new();
+    }
+}
+impl Drop for Graphics {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

@@ -7,7 +7,7 @@ use std::os::unix::fs::MetadataExt;
 const TEXT_BYTES: u64 = 256 * 1024;
 const TEXT_LINES: usize = 2000;
 pub fn load(m: &mut Model, force: bool) {
-    if !force && (!m.preview_visible || !m.preview_auto) {
+    if m.selected.len() > 1 || (!force && (!m.preview_visible || !m.preview_auto)) {
         return;
     }
     let Some(path) = m.current_path() else {
@@ -17,6 +17,9 @@ pub fn load(m: &mut Model, force: bool) {
         return;
     }
     m.preview_path = path.clone();
+    m.preview_generation = m.preview_generation.wrapping_add(1);
+    m.preview_failed = None;
+    m.preview_scroll = 0;
     m.preview.clear();
     let Some(row) = m.rows.get(&m.cursor) else {
         return;
@@ -97,6 +100,8 @@ mod tests {
                 link: String::new(),
                 kind: "Plain text document".into(),
                 thumbnail: false,
+                modified: 0,
+                icon: "text-x-generic".into(),
             },
         );
         load(&mut m, true);

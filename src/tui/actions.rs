@@ -8,6 +8,10 @@ use crate::jsondoc::Json;
 use std::{io, path::PathBuf};
 
 pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Result<()> {
+    if let Some(pointer) = &key.pointer {
+        model.key_arm.clear();
+        return pointer_key(model, key, pointer, map, wire);
+    }
     if model.editor.is_some() {
         return edit(model, key, wire);
     }
@@ -22,11 +26,36 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
         return Ok(());
     }
     if model.menu {
+        let count = if model.taildrop.submenu { model.taildrop.peers.len().max(1) } else { 3 };
         match key.name.as_str() {
-            "Escape" => model.menu = false,
-            "Down" => model.menu_cursor = (model.menu_cursor + 1) % 2,
-            "Up" => model.menu_cursor = (model.menu_cursor + 1) % 2,
-            "Return" => {
+            "Escape" | "Left" => {
+                if model.taildrop.submenu {
+                    model.taildrop.submenu = false;
+                    model.menu_cursor = 2;
+                } else { model.menu = false; }
+            }
+            "Down" => model.menu_cursor = (model.menu_cursor + 1) % count,
+            "Up" => model.menu_cursor = (model.menu_cursor + count - 1) % count,
+            "Return" | "Space" | "Right" => {
+                if model.taildrop.submenu {
+                    if model.pending_clipboard || model.taildrop_target.is_some() { return Ok(()); }
+                    if let Some(peer) = model.taildrop.peers.get(model.menu_cursor) {
+                        model.taildrop_target = Some(peer.clone());
+                        wire.send(vec![("c", word("paths")), ("rows", model.indices())])?;
+                        model.menu = false;
+                    }
+                    return Ok(());
+                }
+                if model.menu_cursor == 2 {
+                    if model.taildrop.peers.is_empty() {
+                        model.error = if model.taildrop.loading() { "Taildrop is still loading".into() } else if !model.taildrop.error.is_empty() { model.taildrop.error.clone() } else { "No reachable Taildrop devices".into() };
+                    } else if model.rows.contains_key(&model.cursor) {
+                        model.taildrop.submenu = true;
+                        model.menu_cursor = 0;
+                    }
+                    return Ok(());
+                }
+                if key.name == "Right" { return Ok(()); }
                 model.menu = false;
                 return act(
                     model,
@@ -40,10 +69,20 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
             }
             _ => {
                 if key.text == "j" || key.text == "k" {
-                    model.menu_cursor = (model.menu_cursor + 1) % 2;
+                    model.menu_cursor = if key.text == "j" { (model.menu_cursor + 1) % count } else { (model.menu_cursor + count - 1) % count };
                 }
             }
         }
+        return Ok(());
+    }
+    if key.name == "P" && key.mods == "alt" {
+        model.preview_visible = !model.preview_visible;
+        model.preview_focus = false;
+        save_preview_column(model);
+        return Ok(());
+    }
+    if key.name == "Space" && key.mods == "ctrl" {
+        super::preview::load(model, true);
         return Ok(());
     }
     if model.preview_focus || model.quicklook {
@@ -125,6 +164,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
         }
         return Ok(());
     }
+    if key.name == "Paste" { return Ok(()); }
     if key.mods.is_empty() && key.text.len() == 1 {
         if let Ok(n) = key.text.parse::<usize>() {
             if (1..=9).contains(&n) {
@@ -146,21 +186,22 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
         model.preview_focus = model.preview_visible;
         return Ok(());
     }
-    if key.name == "P" && key.mods == "alt" {
-        model.preview_visible = !model.preview_visible;
-        return Ok(());
+    let mut action = map.action(key, &model.preset);
+    if matches!(action.as_str(), "copyArm" | "cutArm" | "pasteArm" | "cursorFirstArm" | "trashArm") {
+        if model.key_arm != action {
+            model.key_arm = action;
+            return Ok(());
+        }
+        action = match action.as_str() {
+            "copyArm" => "copy", "cutArm" => "cut", "pasteArm" => "paste", "cursorFirstArm" => "cursorFirst", _ => "trash",
+        }.into();
     }
-    if key.name == "Space" && key.mods == "ctrl" {
-        model.preview_path = PathBuf::new();
-        super::preview::load(model, true);
-        return Ok(());
-    }
-    let action = map.action(key, &model.preset);
+    model.key_arm.clear();
     if action.is_empty() {
         match key.text.as_str() {
             "q" => model.quit = true,
-            "H" => history(model, false, wire)?,
-            "L" => history(model, true, wire)?,
+            "H" if matches!(model.preset.as_str(), "default" | "vim") => history(model, false, wire)?,
+            "L" if matches!(model.preset.as_str(), "default" | "vim") => history(model, true, wire)?,
             _ => {}
         }
         return Ok(());
@@ -178,6 +219,11 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         )
     {
         m.error = "Wait for search to settle before a file operation".into();
+        return Ok(());
+    }
+    if !m.rows.contains_key(&m.cursor)
+        && matches!(action, "open" | "copy" | "cut" | "trash" | "trashArm" | "rename" | "preview" | "reveal" | "toggleSelect")
+    {
         return Ok(());
     }
     match action {
@@ -228,7 +274,10 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             save("hidden", Json::Bool(m.hidden), m);
             m.open(m.path.clone(), w)?;
         }
-        "pathBar" => m.editor = Some(("path".into(), m.path.to_string_lossy().into_owned())),
+        "pathBar" => {
+            m.editor = Some(("path".into(), String::new()));
+            m.completion.clear();
+        }
         "filter" => m.editor = Some(("filter".into(), m.filter.clone())),
         "search" => m.editor = Some(("search".into(), String::new())),
         "rename" => {
@@ -240,6 +289,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         }
         "newFolder" => m.editor = Some(("mkdir".into(), "New Folder".into())),
         "copy" | "cut" => {
+            if m.pending_clipboard || m.taildrop_target.is_some() { return Ok(()); }
             m.cut = action == "cut";
             m.pending_clipboard = true;
             w.send(vec![("c", word("paths")), ("rows", m.indices())])?;
@@ -283,6 +333,8 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
                 ("foldersFirst", Json::Bool(m.folders_first)),
                 ("groupByKind", Json::Bool(m.group_by_kind)),
             ])?;
+            m.invalidate_rows();
+            save("sort", Json::Obj(vec![("key".into(), word(&m.sort)), ("reverse".into(), Json::Bool(m.reverse))]), m);
         }
         "tabNew" => {
             m.tabs.push(Tab {
@@ -300,6 +352,9 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             } else {
                 m.tabs.remove(m.tab);
                 m.tab = m.tab.min(m.tabs.len() - 1);
+                m.restore_cursor = Some(m.tabs[m.tab].cursor);
+                m.back = m.tabs[m.tab].back.clone();
+                m.forward = m.tabs[m.tab].forward.clone();
                 let p = m.tabs[m.tab].path.clone();
                 m.open(p, w)?;
             }
@@ -308,9 +363,20 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             m.quicklook = true;
             super::preview::load(m, true);
         }
+        "togglePreview" => {
+            m.preview_visible = !m.preview_visible;
+            m.preview_focus = false;
+            save_preview_column(m);
+        }
+        "loadPreview" => super::preview::load(m, true),
+        "focusPreview" | "focusNext" => m.preview_focus = m.preview_visible,
+        "tabNext" => return tab(m, (m.tab + 1) % m.tabs.len(), w),
+        "tabPrevious" => return tab(m, (m.tab + m.tabs.len() - 1) % m.tabs.len(), w),
         "menu" => {
             m.menu = true;
             m.menu_cursor = 0;
+            m.taildrop.submenu = false;
+            m.taildrop.refresh();
         }
         "keymapSheet" => {
             m.sheet = true;
@@ -318,6 +384,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         }
         "reveal" => {
             if !m.search.is_empty() {
+                m.restore_path = m.current_path();
                 if let Some(p) = m
                     .current_path()
                     .and_then(|p| p.parent().map(|v| v.to_path_buf()))
@@ -334,7 +401,10 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             } else if m.searching {
                 w.send(vec![("c", word("searchcancel"))])?;
             } else if !m.search.is_empty() {
-                m.open(m.path.clone(), w)?;
+                let path = m.search_from.clone().unwrap_or_else(|| m.path.clone());
+                m.open(path, w)?;
+            } else if m.transfer_id > 0 {
+                w.send(vec![("c", word("transfercancel")), ("id", super::wire::number(m.transfer_id))])?;
             } else {
                 m.selected.clear();
             }
@@ -342,6 +412,114 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         "quit" => m.quit = true,
         _ => {}
     }
+    m.remember_selection();
+    Ok(())
+}
+fn pointer_key(m: &mut Model, key: &Key, pointer: &super::input::Pointer, map: &Map, w: &mut Wire) -> io::Result<()> {
+    if pointer.released {
+        m.drag_anchor = None;
+        return Ok(());
+    }
+    let scroll = match pointer.button { 64 => -1, 65 => 1, _ => 0 };
+    if m.editor.is_some() { return Ok(()); }
+    if m.sheet || m.menu {
+        let rows = if m.sheet { map.sheet() } else { super::render::menu_rows(m) };
+        let (x, y, width, count) = super::render::overlay_rect(&rows, m.columns, m.height + 2);
+        if scroll != 0 {
+            return self::key(m, &Key::named(if scroll < 0 { "Up" } else { "Down" }, ""), map, w);
+        }
+        if pointer.button == 0 && !pointer.motion && pointer.x > x && pointer.x <= x + width && pointer.y > y + 1 && pointer.y <= y + count + 1 {
+            if m.menu {
+                m.menu_cursor = pointer.y - y - 2;
+                return self::key(m, &Key::named("Return", ""), map, w);
+            }
+        }
+        return Ok(());
+    }
+    let (left, middle, _) = super::render::panes(m.columns, m.preview_visible);
+    if m.quicklook || (m.preview_visible && pointer.x > left + middle + 2) {
+        m.preview_focus = true;
+        if scroll != 0 {
+            return self::key(m, &Key::named(if scroll < 0 { "Up" } else { "Down" }, ""), map, w);
+        }
+        if pointer.button == 0 && !pointer.motion && pointer.y == m.height {
+            let cell = pointer.x.saturating_sub(if m.quicklook { 1 } else { left + middle + 3 });
+            if let Some(pdf) = &mut m.pdf {
+                if let Some(control) = pdf.control_at(cell, m.quicklook) {
+                    pdf.control = control;
+                    return self::key(m, &Key::named("Return", ""), map, w);
+                }
+            } else if let Some(player) = &mut m.player {
+                if cell < 7 {
+                    player.control = 0;
+                    return player.toggle();
+                }
+                player.control = 1;
+            }
+        }
+        return Ok(());
+    }
+    if pointer.y == 1 && pointer.button == 0 && !pointer.motion {
+        let mut x = 1;
+        for (i, entry) in m.tabs.iter().enumerate() {
+            let label = format!("{} {}", i + 1, entry.path.file_name().unwrap_or_default().to_string_lossy());
+            let width = super::render::text_width(&label) + 2;
+            if pointer.x >= x && pointer.x < x + width { return tab(m, i, w); }
+            x += width;
+        }
+        return Ok(());
+    }
+    if pointer.y < 2 || pointer.y > m.height + 1 || m.pending.is_some() { return Ok(()); }
+    if scroll != 0 {
+        m.preview_focus = false;
+        return m.move_by(scroll, false, w);
+    }
+    if pointer.x <= left {
+        if pointer.button == 0 && !pointer.motion {
+            if let Some(row) = m.parents.get(pointer.y - 2) {
+                let path = m.path.parent().unwrap_or(&m.path).join(&row.name);
+                if row.directory { navigate(m, path, w)?; }
+            }
+        }
+        return Ok(());
+    }
+    if pointer.x == left + 1 || pointer.x > left + middle + 1 { return Ok(()); }
+    let index = if m.filter.is_empty() { m.top + pointer.y - 2 } else { m.shown().get(pointer.y - 2).copied().unwrap_or(usize::MAX) };
+    if !m.rows.contains_key(&index) { return Ok(()); }
+    m.preview_focus = false;
+    if pointer.motion {
+        if let Some(anchor) = m.drag_anchor {
+            m.selected = if m.filter.is_empty() { (anchor.min(index)..=anchor.max(index)).collect() } else { m.shown().into_iter().filter(|i| *i >= anchor.min(index) && *i <= anchor.max(index)).collect() };
+            m.cursor = index;
+            m.remember_selection();
+        }
+        return Ok(());
+    }
+    if pointer.button == 2 {
+        m.cursor = index;
+        if !m.selected.contains(&index) { m.selected.clear(); }
+        return act(m, "menu", w);
+    }
+    if pointer.button != 0 { return Ok(()); }
+    let old = m.cursor;
+    m.cursor = index;
+    if key.mods == "ctrl" || key.mods == "super" {
+        if !m.selected.remove(&index) { m.selected.insert(index); }
+    } else if key.mods == "shift" {
+        m.selected = if m.filter.is_empty() { (old.min(index)..=old.max(index)).collect() } else { m.shown().into_iter().filter(|i| *i >= old.min(index) && *i <= old.max(index)).collect() };
+    } else if key.mods.is_empty() {
+        m.selected.clear();
+        m.drag_anchor = Some(index);
+        if let Some(path) = m.current_path() {
+            const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+            if m.last_click.as_ref().is_some_and(|(previous, at)| previous == &path && at.elapsed() <= DOUBLE_CLICK) {
+                m.last_click = None;
+                return act(m, if m.search.is_empty() { "open" } else { "reveal" }, w);
+            }
+            m.last_click = Some((path, std::time::Instant::now()));
+        }
+    }
+    m.remember_selection();
     Ok(())
 }
 fn navigate(m: &mut Model, path: PathBuf, w: &mut Wire) -> io::Result<()> {
@@ -389,6 +567,9 @@ fn save(key: &str, value: Json, m: &mut Model) {
         m.error = format!("Could not save settings: {}", e);
     }
 }
+fn save_preview_column(m: &mut Model) {
+    save("preview", Json::Obj(vec![("column".into(), Json::Bool(m.preview_visible))]), m);
+}
 fn edit(m: &mut Model, key: &Key, w: &mut Wire) -> io::Result<()> {
     let (kind, mut value) = m.editor.take().unwrap();
     if key.name == "Escape" {
@@ -402,16 +583,26 @@ fn edit(m: &mut Model, key: &Key, w: &mut Wire) -> io::Result<()> {
     } else if key.name == "Return" {
         match kind.as_str() {
             "path" => {
-                let expanded = if value == "~" || value.starts_with("~/") {
-                    std::env::var("HOME").unwrap_or_default() + &value[1..]
-                } else {
-                    value
-                };
-                let p = PathBuf::from(expanded);
-                navigate(m, if p.is_absolute() { p } else { m.path.join(p) }, w)?;
+                let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+                let p = super::completion::expand(&value, &home, &m.path);
+                navigate(m, p, w)?;
             }
             "filter" => m.apply_filter(value),
             "search" => {
+                if value.is_empty() {
+                    return Ok(());
+                }
+                if m.search_from.is_none() {
+                    m.search_from = Some(m.path.clone());
+                }
+                let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+                if !m.search_here && home.is_absolute() && m.path.starts_with(&home) {
+                    m.path = home;
+                }
+                m.invalidate_rows();
+                m.cursor = 0;
+                m.top = 0;
+                m.total = 0;
                 m.searching = true;
                 m.search = "Search: starting".into();
                 w.send(vec![
@@ -438,11 +629,20 @@ fn edit(m: &mut Model, key: &Key, w: &mut Wire) -> io::Result<()> {
             _ => {}
         }
         return Ok(());
+    } else if key.name == "Tab" && kind == "path" {
+        if !m.completion.is_empty() {
+            value = m.completion.clone();
+        }
+    } else if key.name == "Tab" && kind == "search" {
+        m.search_here = !m.search_here;
     } else if key.mods.is_empty() {
         value.push_str(&key.text);
     }
     if kind == "filter" {
         m.apply_filter(value.clone());
+    }
+    if kind == "path" {
+        m.completion = super::completion::suggest(&value, &m.path);
     }
     m.editor = Some((kind, value));
     Ok(())

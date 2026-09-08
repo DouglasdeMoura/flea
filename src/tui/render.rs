@@ -19,6 +19,12 @@ fn width(c: char) -> usize {
         n as usize
     }
 }
+pub fn text_width(text: &str) -> usize { clean(text).chars().map(width).sum() }
+pub fn panes(columns: usize, preview: bool) -> (usize, usize, usize) {
+    let left = columns * 22 / 100;
+    let middle = if preview { columns * 40 / 100 } else { columns.saturating_sub(left + 1) };
+    (left, middle, if preview { columns.saturating_sub(left + middle + 2) } else { 0 })
+}
 pub fn fit(text: &str, limit: usize) -> String {
     let mut result = String::new();
     let mut used = 0;
@@ -89,33 +95,31 @@ pub fn draw(
         io::stdout().flush()?;
         return Ok(true);
     }
-    let left = columns * 22 / 100;
-    let middle = columns * 40 / 100;
-    let right = columns - left - middle - 2;
+    let (left, middle, right) = panes(columns, m.preview_visible);
     let body = lines - 2;
     let base = format!("\x1b[0m{}{}", theme.background, theme.foreground);
     let mut out = format!("\x1b[H{}", base);
-    let tabs = m
-        .tabs
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            format!(
-                "{} {}",
-                i + 1,
-                t.path.file_name().unwrap_or_default().to_string_lossy()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("  ");
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = if !home.is_empty() && m.path.starts_with(&home) { format!("~{}", &m.path.to_string_lossy()[home.len()..]) } else { m.path.to_string_lossy().into_owned() };
     let title = format!(
-        "{}  · {} · {} {}",
-        tabs,
-        m.path.display(),
+        "{} · {} {}",
+        path,
         m.sort,
         if m.reverse { "▾" } else { "▴" }
     );
-    out.push_str(&fit(&title, columns));
+    let title_width = text_width(&title).min(columns / 2);
+    let mut used = 0;
+    for (i, tab) in m.tabs.iter().enumerate() {
+        let label = format!("{} {}  ", i + 1, tab.path.file_name().unwrap_or_default().to_string_lossy());
+        let width = text_width(&label);
+        if used + width > columns.saturating_sub(title_width) { break; }
+        out.push_str(if i == m.tab { &theme.accent } else { &theme.foreground });
+        out.push_str(&clean(&label));
+        used += width;
+    }
+    out.push_str(&base);
+    out.push_str(&" ".repeat(columns.saturating_sub(used + title_width)));
+    out.push_str(&fit(&title, title_width));
     for y in 0..body {
         out.push_str(&format!("\x1b[{};1H{}", y + 2, base));
         if m.quicklook {
@@ -123,7 +127,7 @@ pub fn draw(
                 m.player
                     .as_ref()
                     .map(|p| p.line())
-                    .or_else(|| m.pdf.as_ref().map(|p| p.line()))
+                    .or_else(|| m.pdf.as_ref().map(|p| p.line(true)))
                     .unwrap_or_default()
             } else {
                 m.preview
@@ -134,13 +138,15 @@ pub fn draw(
             out.push_str(&fit(&content, columns));
             continue;
         }
-        let parent = m
-            .parents
-            .get(y)
-            .map(|r| row(r, left))
-            .unwrap_or_else(|| " ".repeat(left));
-        out.push_str(&parent);
+        if let Some(parent) = m.parents.get(y) {
+            if m.path.file_name().is_some_and(|name| name == parent.name.as_str()) { out.push_str(&theme.selected); }
+            let label = format!("{} {}", if parent.directory { "›" } else { "□" }, parent.name);
+            out.push_str(&fit(&label, left));
+        } else { out.push_str(&" ".repeat(left)); }
+        out.push_str(&base);
+        out.push_str(&theme.border);
         out.push('│');
+        out.push_str(&base);
         let index = if m.filter.is_empty() {
             m.top + y
         } else {
@@ -151,7 +157,7 @@ pub fn draw(
                 out.push_str(&theme.accent);
                 out.push_str("\x1b[7m");
             } else if m.selected.contains(&index) {
-                out.push_str(&theme.accent);
+                out.push_str(&theme.selected);
             } else if !entry.link.is_empty() {
                 out.push_str(&theme.symlink);
             } else if entry.mode & 0o111 != 0 && !entry.directory {
@@ -168,24 +174,18 @@ pub fn draw(
         } else {
             out.push_str(&" ".repeat(middle));
         }
+        if !m.preview_visible { continue; }
+        out.push_str(&theme.border);
         out.push('│');
+        out.push_str(&base);
         let preview = if y == body.saturating_sub(2) && (m.player.is_some() || m.pdf.is_some()) {
             m.player
                 .as_ref()
                 .map(|p| p.line())
-                .or_else(|| m.pdf.as_ref().map(|p| p.line()))
+                .or_else(|| m.pdf.as_ref().map(|p| p.line(false)))
                 .unwrap_or_default()
         } else if m.selected.len() > 1 {
-            if y == 0 {
-                format!("{} items selected", m.selected.len())
-            } else {
-                m.selected
-                    .iter()
-                    .nth(y - 1)
-                    .and_then(|i| m.rows.get(i))
-                    .map(|r| format!("{}  {}", r.name, bytes(r.size)))
-                    .unwrap_or_default()
-            }
+            selection_line(m, y, right)
         } else if m.preview_visible || m.quicklook {
             m.preview
                 .get(y + m.preview_scroll)
@@ -194,13 +194,17 @@ pub fn draw(
         } else {
             String::new()
         };
-        out.push_str(&theme.muted);
+        out.push_str(if m.selected.len() > 1 && y == 0 { &theme.accent } else { &theme.foreground });
         out.push_str(&fit(&preview, right));
         out.push_str(&base);
     }
     out.push_str(&format!("\x1b[{};1H{}", lines, base));
     let status = if let Some((kind, value)) = &m.editor {
-        format!("{}: {}", kind, value)
+        if kind == "path" {
+            format!(": {}▏{}", value, m.completion.strip_prefix(value).unwrap_or(""))
+        } else if kind == "search" {
+            format!("Search: {} · in {} · Tab changes scope", value, if m.search_here { path.clone() } else { "Home".into() })
+        } else { format!("{}: {}", kind, value) }
     } else {
         let primary = if !m.error.is_empty() {
             &m.error
@@ -216,8 +220,12 @@ pub fn draw(
         } else {
             String::new()
         };
+        let progress = if !m.transfer.is_empty() && primary == &m.transfer {
+            const FRAMES: [&str; 3] = ["░▒▓", "▒▓░", "▓░▒"];
+            format!(" {}", FRAMES[(elapsed.as_millis() / 200) as usize % FRAMES.len()])
+        } else { String::new() };
         format!(
-            "{}{} items  {}{}  ? keys",
+            "{}{} items  {}{}{}  ? keys",
             if m.selected.is_empty() {
                 String::new()
             } else {
@@ -225,6 +233,7 @@ pub fn draw(
             },
             m.total,
             primary,
+            progress,
             secondary
         )
     };
@@ -246,7 +255,7 @@ pub fn draw(
     if m.menu {
         overlay(
             &mut out,
-            &["open".into(), "show hidden".into()],
+            &menu_rows(m),
             columns,
             lines,
             &base,
@@ -254,12 +263,42 @@ pub fn draw(
         );
     }
     if *last != out {
+        print!("\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
         print!("{}\x1b[0m", out);
         io::stdout().flush()?;
         *last = out;
         return Ok(true);
     }
     Ok(false)
+}
+fn selection_line(m: &Model, y: usize, columns: usize) -> String {
+    if y == 0 { return format!("{} items selected", m.selected.len()); }
+    if y == 1 { return "─".repeat(columns); }
+    if let Some(row) = m.selected_rows.values().nth(y - 2) {
+        let size = bytes(row.size);
+        return format!("{} {}", fit(&row.name, columns.saturating_sub(size.len() + 1)), size);
+    }
+    let footer = y.saturating_sub(m.selected_rows.len() + 2);
+    if footer == 1 {
+        if m.selected_rows.len() == m.selected.len() {
+            let total = m.selected_rows.values().fold(0usize, |sum, row| sum.saturating_add(row.size));
+            return format!("Selection total · {}", bytes(total));
+        }
+        return format!("{} marked items outside loaded rows", m.selected.len() - m.selected_rows.len());
+    }
+    if footer == 2 { return "Preview follows the marked set while visual mode is active.".into(); }
+    String::new()
+}
+pub fn menu_rows(m: &Model) -> Vec<String> {
+    if m.taildrop.submenu {
+        return m.taildrop.peers.iter().map(|p| p.label.clone()).collect();
+    }
+    vec!["open".into(), "show hidden".into(), "taildrop  ▶".into()]
+}
+pub fn overlay_rect(rows: &[String], columns: usize, lines: usize) -> (usize, usize, usize, usize) {
+    let width = rows.iter().map(|row| text_width(row)).max().unwrap_or(0).saturating_add(2).max(13).min(columns.saturating_sub(6));
+    let count = rows.len().min(lines.saturating_sub(4));
+    ((columns.saturating_sub(width + 2)) / 2, (lines.saturating_sub(count + 2)) / 2, width, count)
 }
 fn overlay(
     out: &mut String,
@@ -269,10 +308,7 @@ fn overlay(
     base: &str,
     selected: Option<usize>,
 ) {
-    let width = columns.saturating_sub(6).min(58);
-    let count = rows.len().min(lines.saturating_sub(4));
-    let x = (columns - width) / 2;
-    let y = (lines - count - 2) / 2;
+    let (x, y, width, count) = overlay_rect(rows, columns, lines);
     out.push_str(&format!(
         "\x1b[{};{}H{}┌{}┐",
         y + 1,

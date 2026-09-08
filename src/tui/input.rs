@@ -3,13 +3,23 @@ pub struct Key {
     pub name: String,
     pub text: String,
     pub mods: String,
+    pub pointer: Option<Pointer>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pointer {
+    pub button: u32,
+    pub x: usize,
+    pub y: usize,
+    pub released: bool,
+    pub motion: bool,
 }
 impl Key {
-    fn named(name: &str, mods: &str) -> Self {
+    pub fn named(name: &str, mods: &str) -> Self {
         Self {
             name: name.into(),
             text: String::new(),
             mods: mods.into(),
+            pointer: None,
         }
     }
     fn character(c: char, mods: &str) -> Self {
@@ -17,12 +27,20 @@ impl Key {
             ' ' => "Space".into(),
             ',' => "Comma".into(),
             '.' => "Period".into(),
+            '[' => "BracketLeft".into(),
+            ']' => "BracketRight".into(),
+            '-' => "Minus".into(),
+            '+' => "Plus".into(),
+            '=' => "Equal".into(),
+            '_' => "Underscore".into(),
+            '>' => "Greater".into(),
             _ => c.to_uppercase().to_string(),
         };
         Self {
             name,
             text: c.to_string(),
             mods: mods.into(),
+            pointer: None,
         }
     }
 }
@@ -31,12 +49,31 @@ pub struct Decoder {
     pending: Vec<u8>,
     string_control: bool,
     pub sixel: bool,
+    paste: Option<Vec<u8>>,
 }
 impl Decoder {
     pub fn feed(&mut self, bytes: &[u8], idle: bool) -> Vec<Key> {
         self.pending.extend_from_slice(bytes);
         let mut out = Vec::new();
         while !self.pending.is_empty() {
+            if let Some(paste) = &mut self.paste {
+                const PASTE_END: &[u8] = b"\x1b[201~";
+                const PASTE_LIMIT: usize = 64 * 1024;
+                if let Some(end) = self.pending.windows(PASTE_END.len()).position(|w| w == PASTE_END) {
+                    paste.extend(self.pending[..end].iter().take(PASTE_LIMIT.saturating_sub(paste.len())));
+                    let mut key = Key::named("Paste", "");
+                    key.text = String::from_utf8_lossy(paste).chars().filter(|c| !c.is_control()).collect();
+                    out.push(key);
+                    self.pending.drain(..end + PASTE_END.len());
+                    self.paste = None;
+                    continue;
+                }
+                let keep = PASTE_END.len() - 1;
+                let consume = self.pending.len().saturating_sub(keep);
+                paste.extend(self.pending[..consume].iter().take(PASTE_LIMIT.saturating_sub(paste.len())));
+                self.pending.drain(..consume);
+                break;
+            }
             if self.string_control {
                 let end = self.pending.iter().enumerate().find_map(|(i, byte)| {
                     if *byte == 7 || *byte == 0x9c {
@@ -91,6 +128,10 @@ impl Decoder {
                     };
                     let sequence = String::from_utf8_lossy(&self.pending[2..=end]).into_owned();
                     self.pending.drain(..=end);
+                    if sequence == "200~" {
+                        self.paste = Some(Vec::new());
+                        continue;
+                    }
                     if sequence.starts_with('?')
                         && sequence.ends_with('c')
                         && sequence[1..sequence.len() - 1].split(';').any(|p| p == "4")
@@ -174,26 +215,30 @@ impl Decoder {
 // Sample input: 1;5D, 2;2~, 32;5u; kitty flag 1 leaves ordinary text in legacy form.
 fn csi(text: &str) -> Option<Key> {
     let last = text.chars().last()?;
+    if let Some(body) = text.strip_prefix('<') {
+        if !matches!(last, 'M' | 'm') { return None; }
+        let numbers: Vec<u32> = body[..body.len() - 1].split(';').map(str::parse).collect::<Result<_, _>>().ok()?;
+        if numbers.len() != 3 || numbers[1] == 0 || numbers[2] == 0 { return None; }
+        let button = numbers[0];
+        let mut key = Key::named("Pointer", match button & 28 { 4 => "shift", 8 => "alt", 16 => "ctrl", 0 => "", _ => "unsupported" });
+        key.pointer = Some(Pointer { button: button & 67, x: numbers[1] as usize, y: numbers[2] as usize, released: last == 'm', motion: button & 32 != 0 });
+        return Some(key);
+    }
     let values: Vec<u32> = text[..text.len() - 1]
         .split(';')
         .map(|v| v.split(':').next().unwrap_or("").parse().unwrap_or(0))
         .collect();
     let code = *values.first().unwrap_or(&0);
     let modifier = values.get(1).copied().unwrap_or(1).saturating_sub(1);
-    let mods = match (
-        modifier & 4 != 0,
-        modifier & 2 != 0,
-        modifier & 1 != 0,
-        modifier & 8 != 0,
-    ) {
-        (true, _, true, _) => "ctrlshift",
-        (true, _, false, _) => "ctrl",
-        (_, true, _, _) => "alt",
-        (_, _, _, true) => "super",
-        (_, _, true, _) => "shift",
-        _ => "",
+    let mods = match modifier & 15 {
+        0 => "", 1 => "shift", 2 => "alt", 4 => "ctrl", 5 => "ctrlshift",
+        8 => "super", 9 => "supershift", 10 => "superalt", _ => "unsupported",
     };
     if last == 'u' {
+        // Sample input: 113;1:3u is a kitty key release, which must never repeat an action.
+        if text[..text.len() - 1].split(';').nth(1).and_then(|v| v.split(':').nth(1)) == Some("3") {
+            return None;
+        }
         return char::from_u32(code).map(|c| match c {
             '\r' => Key::named("Return", mods),
             '\t' => Key::named("Tab", mods),
@@ -216,6 +261,7 @@ fn csi(text: &str) -> Option<Key> {
             4 | 8 => "End",
             5 => "PageUp",
             6 => "PageDown",
+            12 => "F2",
             _ => return None,
         },
         _ => return None,

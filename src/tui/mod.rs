@@ -1,4 +1,5 @@
 mod actions;
+mod completion;
 mod empty;
 mod graphics;
 mod input;
@@ -10,6 +11,7 @@ mod pdf;
 mod preview;
 mod render;
 mod terminal;
+mod taildrop;
 mod theme;
 mod wire;
 
@@ -42,12 +44,14 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
         let mut decoder = input::Decoder::default();
         let mut size = terminal::size();
         model.height = size.1.saturating_sub(2).max(1);
+        model.columns = size.0;
+        model.restore_path = select.map(PathBuf::from);
         model.open(path, &mut wire)?;
-        let mut wanted = select.map(str::to_owned);
         let started = std::time::Instant::now();
         let mut frame = String::new();
         let mut graphics = graphics::Graphics::new();
         let mut thumbnail = PathBuf::new();
+        let mut preview_generation = 0;
         while !model.quit && !terminal.stopped() {
             while let Ok(event) = wire.events.try_recv() {
                 match event {
@@ -58,18 +62,10 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     }
                 }
             }
-            if let Some(path) = &wanted {
-                if let Some((&index, _)) = model
-                    .rows
-                    .iter()
-                    .find(|(_, row)| model.row_path(row).to_string_lossy() == path.as_str())
-                {
-                    model.cursor = index;
-                    wanted = None;
-                }
-            }
             preview::load(&mut model, false);
+            model.taildrop.poll();
             let visible = (model.preview_visible || model.quicklook) && model.selected.len() < 2;
+            let overlay = model.menu || model.sheet || model.editor.is_some();
             let current = model.current_path();
             let preview_allowed = model.preview_auto
                 || model.quicklook
@@ -93,20 +89,23 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             let kind = model
                 .rows
                 .get(&model.cursor)
-                .map(|r| r.kind.to_lowercase())
+                .map(|r| r.icon.to_lowercase())
                 .unwrap_or_default();
             let is_media = kind.contains("audio") || kind.contains("video");
             let is_pdf = kind.contains("pdf");
             if !visible
                 || !preview_allowed
                 || !is_media
+                || overlay
                 || model.player.as_ref().is_some_and(|p| {
                     Some(&p.path) != current.as_ref()
                         || p.geometry != geometry
                         || p.pixels != pixel_extent
                 })
             {
-                model.player = None;
+                if let Some(player) = model.player.take() {
+                    model.playback = Some((player.path.clone(), player.position, player.paused));
+                }
             }
             if !visible
                 || !preview_allowed
@@ -121,7 +120,9 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             }
             if visible && preview_allowed {
                 if let Some(path) = current.clone() {
-                    if is_media && model.player.is_none() && graphics_ready {
+                    if is_media && !overlay && model.player.is_none() && graphics_ready
+                        && model.preview_failed.as_ref() != Some(&path)
+                    {
                         match media::Player::start(
                             &path,
                             graphics.protocol,
@@ -129,8 +130,18 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                             size,
                             pixel_extent,
                         ) {
-                            Ok(player) => model.player = Some(player),
-                            Err(e) => model.error = e.to_string(),
+                            Ok(mut player) => {
+                                if let Some((previous, position, paused)) = &model.playback {
+                                    if previous == &path {
+                                        player.resume = Some((*position, *paused));
+                                    }
+                                }
+                                model.player = Some(player);
+                            }
+                            Err(e) => {
+                                model.error = format!("Media preview: {}", e);
+                                model.preview_failed = Some(path.clone());
+                            }
                         }
                     }
                     if is_pdf && model.pdf.is_none() && graphics_ready {
@@ -142,7 +153,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                             pixel_extent,
                         ));
                     }
-                    if path != thumbnail {
+                    if path != thumbnail || preview_generation != model.preview_generation {
                         if let Some(index) = model.thumb_index {
                             wire.send(vec![
                                 ("c", wire::word("thumbcancel")),
@@ -153,18 +164,23 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                         model.image_file = None;
                         model.thumb_index = None;
                         thumbnail = path;
+                        preview_generation = model.preview_generation;
                         if !is_media
                             && !is_pdf
                             && model.rows.get(&model.cursor).is_some_and(|r| r.thumbnail)
                         {
-                            model.thumb_index = Some(model.cursor);
-                            wire.send(vec![
+                            if kind.starts_with("image") {
+                                model.image_file = Some(thumbnail.clone());
+                            } else {
+                                model.thumb_index = Some(model.cursor);
+                                wire.send(vec![
                                 ("c", wire::word("thumb")),
                                 (
                                     "rows",
                                     crate::jsondoc::Json::Arr(vec![wire::number(model.cursor)]),
                                 ),
-                            ])?;
+                                ])?;
+                            }
                         }
                     }
                 }
@@ -183,11 +199,18 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             if graphics.accept() {
                 frame.clear();
             }
+            if !graphics.error.is_empty() {
+                model.error = format!("Image preview: {}", graphics.error);
+            }
             if let Some(player) = &mut model.player {
                 player.poll();
                 if !player.error.is_empty() {
                     model.error = player.error.clone();
+                    model.preview_failed = Some(player.path.clone());
                 }
+            }
+            if model.player.as_ref().is_some_and(|p| !p.error.is_empty()) {
+                model.player = None;
             }
             if let Some(pdf) = &mut model.pdf {
                 if (pdf.columns, pdf.rows) != (geometry.0, geometry.1) || pdf.pixels != pixel_extent
@@ -218,7 +241,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 .as_ref()
                 .map(|p| p.bytes.as_slice())
                 .unwrap_or(&graphics.bytes);
-            if changed && !image.is_empty() && !model.sheet && !model.menu {
+            if changed && !image.is_empty() && !overlay {
                 use std::io::Write;
                 print!("\x1b[s\x1b[{};{}H", geometry.3, geometry.2);
                 std::io::stdout().write_all(image)?;
@@ -227,7 +250,9 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             }
             let bytes = terminal.read()?;
             for key in decoder.feed(&bytes, bytes.is_empty()) {
-                actions::key(&mut model, &key, &map, &mut wire)?;
+                if let Err(e) = actions::key(&mut model, &key, &map, &mut wire) {
+                    model.error = e.to_string();
+                }
             }
             if decoder.sixel && graphics.protocol == graphics::Protocol::None {
                 graphics.protocol = graphics::Protocol::Sixel;
@@ -237,6 +262,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             if next != size {
                 size = next;
                 model.height = size.1.saturating_sub(2).max(1);
+                model.columns = size.0;
                 model.window(&mut wire)?;
             }
         }

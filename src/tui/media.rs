@@ -20,8 +20,9 @@ use std::time::{Duration, Instant};
 
 pub struct Player {
     child: Child,
-    socket: UnixStream,
-    events: Receiver<Json>,
+    socket: Option<UnixStream>,
+    events: Option<Receiver<Json>>,
+    started: Instant,
     directory: PathBuf,
     _input: File,
     pub path: PathBuf,
@@ -33,6 +34,7 @@ pub struct Player {
     pub error: String,
     pub geometry: (usize, usize, usize, usize),
     pub pixels: (usize, usize),
+    pub resume: Option<(f64, bool)>,
 }
 impl Player {
     pub fn start(
@@ -95,44 +97,18 @@ impl Player {
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::null());
-        let mut child = match command.spawn() {
+        let child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
                 cleanup(&directory);
                 return Err(error);
             }
         };
-        let started = Instant::now();
-        let socket = loop {
-            if let Ok(socket) = UnixStream::connect(&endpoint) {
-                break socket;
-            }
-            if child.try_wait()?.is_some() || started.elapsed() > Duration::from_secs(3) {
-                let _ = child.kill();
-                let _ = child.wait();
-                cleanup(&directory);
-                return Err(io::Error::other("mpv could not start the inline preview"));
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        let reader = socket.try_clone()?;
-        let (tx, events) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in BufReader::new(reader).lines() {
-                let Ok(line) = line else {
-                    break;
-                };
-                if let Ok(value) = jsondoc::parse(&line) {
-                    if tx.send(value).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        let mut player = Self {
+        Ok(Self {
             child,
-            socket,
-            events,
+            socket: None,
+            events: None,
+            started: Instant::now(),
             directory,
             _input: input,
             path: path.into(),
@@ -144,23 +120,32 @@ impl Player {
             error: String::new(),
             geometry,
             pixels,
-        };
-        for (i, property) in ["time-pos", "duration", "pause", "paused-for-cache"]
-            .iter()
-            .enumerate()
-        {
-            player.command(vec![word("observe_property"), number(i), word(property)])?;
-        }
-        Ok(player)
+            resume: None,
+        })
     }
     pub fn command(&mut self, command: Vec<Json>) -> io::Result<()> {
         let value = Json::Obj(vec![("command".into(), Json::Arr(command))]);
-        self.socket
+        let socket = self.socket.as_mut().ok_or_else(|| io::Error::other("Media preview is still loading"))?;
+        socket
             .write_all(jsondoc::render(&value).replace('\n', "").as_bytes())?;
-        self.socket.write_all(b"\n")
+        socket.write_all(b"\n")
     }
     pub fn poll(&mut self) {
-        while let Ok(value) = self.events.try_recv() {
+        if !self.error.is_empty() {
+            return;
+        }
+        if self.socket.is_none() {
+            match self.connect() {
+                Ok(false) => return,
+                Ok(true) => {}
+                Err(e) => {
+                    self.error = e.to_string();
+                    return;
+                }
+            }
+        }
+        let Some(events) = &self.events else { return };
+        while let Ok(value) = events.try_recv() {
             if text(&value, "event") == "property-change" {
                 let data = value.get("data").unwrap_or(&Json::Null);
                 match text(&value, "name") {
@@ -175,16 +160,56 @@ impl Player {
                 self.error = "Could not play selected media".into();
             }
         }
+        if self.child.try_wait().ok().flatten().is_some() {
+            self.error = "Media preview stopped".into();
+        }
+    }
+    fn connect(&mut self) -> io::Result<bool> {
+        const STARTUP_LIMIT: Duration = Duration::from_secs(3);
+        if self.child.try_wait()?.is_some() || self.started.elapsed() > STARTUP_LIMIT {
+            return Err(io::Error::other("mpv could not start the inline preview"));
+        }
+        let socket = match UnixStream::connect(self.directory.join("ipc")) {
+            Ok(socket) => socket,
+            Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        socket.set_write_timeout(Some(Duration::from_millis(100)))?;
+        let reader = socket.try_clone()?;
+        let (tx, events) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(reader).lines() {
+                let Ok(line) = line else { break };
+                if let Ok(value) = jsondoc::parse(&line) {
+                    if tx.send(value).is_err() { break; }
+                }
+            }
+        });
+        self.socket = Some(socket);
+        self.events = Some(events);
+        for (i, property) in ["time-pos", "duration", "pause", "paused-for-cache"].iter().enumerate() {
+            self.command(vec![word("observe_property"), number(i), word(property)])?;
+        }
+        if let Some((position, paused)) = self.resume.take() {
+            self.command(vec![word("seek"), Json::Num(position.max(0.0).to_string()), word("absolute")])?;
+            self.command(vec![word("set_property"), word("pause"), Json::Bool(paused)])?;
+            self.paused = paused;
+        }
+        Ok(true)
     }
     pub fn toggle(&mut self) -> io::Result<()> {
-        self.paused = !self.paused;
+        if self.socket.is_none() { return Ok(()); }
+        let paused = !self.paused;
         self.command(vec![
             word("set_property"),
             word("pause"),
-            Json::Bool(self.paused),
-        ])
+            Json::Bool(paused),
+        ])?;
+        self.paused = paused;
+        Ok(())
     }
     pub fn seek(&mut self, seconds: i32) -> io::Result<()> {
+        if self.socket.is_none() { return Ok(()); }
         self.command(vec![
             word("seek"),
             Json::Num(seconds.to_string()),
@@ -192,10 +217,14 @@ impl Player {
         ])
     }
     pub fn line(&self) -> String {
+        if self.socket.is_none() && self.error.is_empty() {
+            return "Loading media…".into();
+        }
         format!(
-            "{} {}  {} Seek  {} / {}{}",
-            if self.control == 0 { "[" } else { " " },
-            if self.paused { "Play]" } else { "Pause]" },
+            "{}{}{}  {} Seek  {} / {}{}",
+            if self.control == 0 { "[" } else { "" },
+            if self.paused { "Play" } else { "Pause" },
+            if self.control == 0 { "]" } else { "" },
             if self.control == 1 {
                 "[>]"
             } else {
@@ -210,14 +239,6 @@ impl Player {
 impl Drop for Player {
     fn drop(&mut self) {
         let _ = self.command(vec![word("quit")]);
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_millis(500) {
-            if self.child.try_wait().ok().flatten().is_some() {
-                cleanup(&self.directory);
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         cleanup(&self.directory);
