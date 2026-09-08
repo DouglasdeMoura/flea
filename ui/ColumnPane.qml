@@ -39,6 +39,7 @@ Item {
     // The listArea contract ui/ColumnsArea.qml drives the middle column through; the view is private.
     function positionViewAtIndex(index, mode) { view.positionViewAtIndex(index, mode) }
     function itemAtIndex(index) { return view.itemAtIndex(index) }
+    function contentY() { return view.contentY }
 
     ListView {
         id: view

@@ -193,6 +193,11 @@ QtObject {
             var item = root.pane.itemFor(i)
             return root.pane.header.columnSet() + "|" + (item ? item.columnSet() : "")
         }
+        // The three below read the view on screen, where rowIcon and rowAt read the list's own delegates whatever the view.
+        function rowHovered(i: int): bool { var item = root.pane.visibleItemFor(i); return item ? item.hovered === true : false }
+        function rowThumb(i: int): string { var item = root.pane.visibleItemFor(i); return item && item.thumb !== undefined ? item.thumb : "" }
+        function viewContentY(): int { return Math.round(root.pane.viewMode === "columns" && root.columns ? root.columns.activeContentY() : root.pane.listArea.contentY) }
+        function listAreaRect(): string { return root.fleaWindow.rectOf(root.pane.listArea) }
         function rowIcon(i: int): string {
             var item = root.pane.itemFor(i)
             return item ? String(item.iconUrl) : ""

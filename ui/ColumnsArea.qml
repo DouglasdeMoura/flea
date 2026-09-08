@@ -95,6 +95,7 @@ Item {
     // The middle column's model is held-relative, unlike the list's and the grid's, so a caller
     // holding an absolute cursor index reaches a delegate through here rather than directly.
     function itemAtIndex(index) { return active.itemAtIndex(index - root.pane.held) }
+    function activeContentY() { return active.contentY() }
 
     // A neighbour column's row, which the pane has no cursor on: a directory becomes the pane's own
     // listing, which is this view's reveal, and a file goes to the opener.
