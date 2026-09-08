@@ -775,10 +775,11 @@ goto_row() {
 }
 
 # Counts the pixels in one crop that satisfy a channel expression, see AGENTS.md "Testing".
+# The count is printed as a plain integer: magick writes a million pixels as 1.25604e+06, which bash arithmetic refuses.
 count_pixels() {
     local png="$1" geometry="$2" expression="$3"
     magick "$png" -crop "$geometry" +repage -fx "$expression ? 1.0 : 0.0" \
-        -format "%[fx:int(mean*w*h+0.5)]" info:
+        -format "%[fx:int(mean*w*h+0.5)]" info: | awk '{printf "%d\n", $1}'
 }
 
 # Finds a row by name rather than by a predicted sort order, which has been wrong here before.
