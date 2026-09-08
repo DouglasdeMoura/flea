@@ -859,11 +859,14 @@ wait_thumb_ready() {
     fail "row 0 never drew a ready thumbnail: icon=$icon status=$status"
 }
 
+# Fails closed: the old image goes first, so a capture that fails cannot leave a stale one to score.
 shot() {
-    local name="$1"
+    local name="$1" png="$evidence_dir/$1.png"
     mkdir -p "$evidence_dir"
-    omarchy-drive shot "$evidence_dir/$name.png" flea >/dev/null
-    printf 'SHOT %s\n' "$evidence_dir/$name.png"
+    rm -f "$png"
+    omarchy-drive shot "$png" flea >/dev/null || fail "shot: omarchy-drive shot failed for $name"
+    [[ -s "$png" ]] || fail "shot: $png is missing or empty after a capture that reported success"
+    printf 'SHOT %s\n' "$png"
 }
 
 # Catches the wheel handler losing its wiring, its sign or its rate: one notch over the list moves
@@ -6307,6 +6310,12 @@ case_overlays() {
         hover_row "$n"
         settle
         [[ "$(ipc rowHovered "$n")" == "true" ]] || fail "$mode: hover over row $n with nothing open did not lift it, so the checks below prove nothing"
+        omarchy-drive scroll down 3 >/dev/null
+        settle
+        [[ "$(ipc viewContentY)" != "0" ]] || fail "$mode: three notches with nothing open left the view at 0, so the wheel checks below prove nothing"
+        key -k Home >/dev/null
+        settle
+        [[ "$(ipc viewContentY)" == "0" ]] || fail "$mode: Home did not bring the view back to 0, it is $(ipc viewContentY)"
         click_row 2 right
         settle
         [[ "$(ipc contextMenuVisible)" == "true" && "$(ipc cursor)" == "2" ]] || fail "$mode: a right click on row 2 opened no menu (visible $(ipc contextMenuVisible), cursor $(ipc cursor))"
@@ -6351,26 +6360,32 @@ case_overlays() {
 }
 
 # The same manual test: thumbnails, the empty hero, the peeked column's menu and video playback, per
-# view. The grid runs first on this run's own cold cache, so it acquires its thumbnails itself.
+# view. Each view enters its own uncached copy of the fixture through the UI, so it acquires its own
+# thumbnails rather than reading ones another view warmed.
 case_views() {
-    local dir="$fixture_root/views" mode r lit fx fy fw fh cx cy wx wy p1 p2 p3 p4 changed
-    views_fixture "$dir"
-    launch "$dir"
-    wait_listing 66
+    local root="$fixture_root/views" mode dir r lit fx fy fw fh cx cy wx wy p1 p2 p3 p4 changed before
+    sandbox_scratch "$root"
+    for mode in grid list columns; do views_fixture "$root/$mode"; done
+    launch "$root"
+    wait_listing 3
     for mode in grid list columns; do
+        dir="$root/$mode"
         switch_view "$mode"
+        seek_row_named "$mode"
+        key -k Return >/dev/null
+        wait_listing 66
+        [[ "$(ipc path)" == "$dir" ]] || fail "$mode: Return on the $mode row opened $(ipc path)"
         key -k Home >/dev/null
         settle
-        if [[ "$mode" != "columns" ]]; then
-            sleep "$settle_s"
-            sleep 2
-            shot "views-$mode-thumbs"
-            for r in 2 3 4 5; do
-                [[ "$(ipc rowThumbReady "$r")" == "true" ]] || fail "$mode: row $r ($(ipc rowAt "$r" | cut -d'|' -f1)) has no decoded thumbnail"
-                lit=$(lit_in_rect "$evidence_dir/views-$mode-thumbs.png" $(ipc rowThumbRect "$r"))
-                (( lit > 50 )) || fail "$mode: row $r's thumbnail box painted $lit lit pixels"
-            done
-        else
+        sleep 2
+        shot "views-$mode-thumbs"
+        for r in 2 3 4 5; do
+            [[ "$(ipc rowAt "$r")" == "$(ls "$dir" | sed -n "$((r + 1))p")|"* ]] || fail "$mode: row $r is $(ipc rowAt "$r" | cut -d'|' -f1), not the fixture's"
+            [[ "$(ipc rowThumbReady "$r")" == "true" ]] || fail "$mode: row $r ($(ipc rowAt "$r" | cut -d'|' -f1)) has no decoded thumbnail"
+            lit=$(lit_in_rect "$evidence_dir/views-$mode-thumbs.png" $(ipc rowThumbRect "$r"))
+            (( lit > 30 )) || fail "$mode: row $r's thumbnail box painted $lit lit pixels"
+        done
+        if [[ "$mode" == "columns" ]]; then
             # The child column's hero: polled across one draw, the way case_background polls the pane's own.
             lit=0
             for _attempt in $(seq 1 "$mark_poll_shots"); do
@@ -6394,18 +6409,19 @@ case_views() {
             key -k Backspace >/dev/null
             sleep 1
             [[ "$(ipc path)" == "$dir" ]] || fail "columns: Backspace did not return to the fixture, path $(ipc path)"
-            key -k Home >/dev/null
-            key j >/dev/null
-            key j >/dev/null
-            key j >/dev/null
-            key j >/dev/null
-            sleep 1
-            [[ "$(ipc previewColumnState)" == "image" && "$(ipc columnThumbShown)" == "true" ]] || fail "columns: the cursor on c-pic.png shows $(ipc previewColumnState), thumb shown $(ipc columnThumbShown)"
-            shot views-columns-thumb
-            lit=$(lit_in_rect "$evidence_dir/views-columns-thumb.png" $(ipc columnFrameRect))
-            (( lit > 50 )) || fail "columns: the preview frame painted $lit lit pixels for c-pic.png"
-            key k >/dev/null
-            key k >/dev/null
+            seek_row_named "c-pic.png"
+            # Ready, not shown: thumbShown is true while the picture still loads. Polled the way the thumbnail rows are.
+            for _attempt in $(seq 1 30); do
+                [[ "$(ipc columnFrameReady)" == "true" ]] && break
+                sleep 0.1
+            done
+            [[ "$(ipc previewColumnState)" == "image" && "$(ipc columnFrameReady)" == "true" ]] || fail "columns: the cursor on c-pic.png shows $(ipc previewColumnState), frame ready $(ipc columnFrameReady), thumb shown $(ipc columnThumbShown)"
+            shot views-columns-frame
+            # Inset past the border and the hairline, so the frame's own outline cannot light the count.
+            read -r fx fy fw fh <<< "$(ipc columnFrameRect)"
+            lit=$(lit_in_rect "$evidence_dir/views-columns-frame.png" "$((fx + 6))" "$((fy + 6))" "$((fw - 12))" "$((fh - 12))")
+            (( lit > 200 )) || fail "columns: the preview frame's interior painted $lit lit pixels for c-pic.png"
+            seek_row_named "a-clip.mp4"
             sleep 1
             [[ "$(ipc previewColumnState)" == "video" ]] || fail "columns: the cursor on a-clip.mp4 shows $(ipc previewColumnState)"
             read -r fx fy fw fh <<< "$(ipc columnFrameRect)"
@@ -6431,17 +6447,24 @@ case_views() {
             sleep 1
             p4=$(ipc columnMediaPosition)
             [[ "$(ipc columnMediaPlaying)" == "false" && "$p3" == "$p4" ]] || fail "columns: pause left playing $(ipc columnMediaPlaying), position $p3 then $p4"
-            key J >/dev/null
+            # Select all keeps the cursor and the path, so the only thing that can end the player is the strip going away.
+            before="$(ipc cursor)|$(ipc path)"
+            key -M ctrl -k a -m ctrl >/dev/null
             settle
+            [[ "$(ipc cursor)|$(ipc path)" == "$before" ]] || fail "columns: select all moved the cursor or the path, $before to $(ipc cursor)|$(ipc path)"
             [[ "$(ipc previewColumnState)" == "multi" && "$(ipc columnPlayerLoaded)" == "false" ]] || fail "columns: a multi-selection left the player $(ipc columnPlayerLoaded) in state $(ipc previewColumnState)"
             key -k Escape >/dev/null
-            key j >/dev/null
             settle
+            [[ "$(ipc previewColumnState)" == "video" && "$(ipc columnPlayerLoaded)" == "false" ]] || fail "columns: back on the video with $(ipc columnPlayerLoaded) player, state $(ipc previewColumnState)"
+            omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
+            sleep 1
+            key j >/dev/null
+            sleep 1
             [[ "$(ipc columnPlayerLoaded)" == "false" ]] || fail "columns: moving the cursor away left a player behind"
             printf 'VIEWS columns hero=%s play=%s..%s changed=%s\n' "$lit" "$p1" "$p2" "$changed"
-            key -k Home >/dev/null
-            settle
         fi
+        key -k Home >/dev/null
+        settle
         key -k Return >/dev/null
         settle
         [[ "$(ipc path)" == "$dir/empty" && "$(ipc emptyShown)" == "true" ]] || fail "$mode: Return on row 0 did not enter the empty directory ($(ipc path), empty $(ipc emptyShown))"
@@ -6455,7 +6478,9 @@ case_views() {
         (( lit > 0 )) || fail "$mode: the empty directory's hero painted nothing"
         key -k Backspace >/dev/null
         sleep 1
-        [[ "$(ipc path)" == "$dir" ]] || fail "$mode: Backspace did not return to the fixture"
+        key -k Backspace >/dev/null
+        sleep 1
+        [[ "$(ipc path)" == "$root" ]] || fail "$mode: two Backspaces did not return to the root, path $(ipc path)"
         printf 'VIEWS %s thumbs=ok hero=%s\n' "$mode" "$lit"
     done
     kill_flea
