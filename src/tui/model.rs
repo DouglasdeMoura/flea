@@ -2,7 +2,7 @@ use super::wire::{count, flag, number, text, word, Wire};
 use crate::jsondoc::Json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct Row {
@@ -71,15 +71,24 @@ pub struct Model {
     pub clipboard: Vec<String>,
     pub cut: bool,
     pub preview: Vec<String>,
+    pub preview_display: Vec<String>,
+    pub preview_body: String,
+    pub preview_metadata: Vec<String>,
+    pub preview_line_count: usize,
+    pub preview_layout_scroll: usize,
+    pub preview_layout_height: usize,
+    pub preview_width: usize,
+    pub preview_layout_generation: usize,
     pub preview_path: PathBuf,
     pub preview_visible: bool,
     pub preview_auto: bool,
+    pub preview_loaded: bool,
     pub preview_focus: bool,
     pub quicklook: bool,
     pub sheet: bool,
     pub menu: bool,
     pub menu_cursor: usize,
-    pub editor: Option<(String, String)>,
+    pub editor: Option<super::editor::Editor>,
     pub preset: String,
     pub player: Option<super::media::Player>,
     pub pdf: Option<super::pdf::Pdf>,
@@ -97,8 +106,10 @@ pub struct Model {
     pub back: Vec<PathBuf>,
     pub forward: Vec<PathBuf>,
     pub wrap: bool,
+    pub navigation_before: Option<(Vec<PathBuf>, Vec<PathBuf>, usize)>,
     pub columns: usize,
     pub completion: String,
+    pub completer: super::completion::Completion,
     pub preview_failed: Option<PathBuf>,
     pub playback: Option<(PathBuf, f64, bool)>,
     pub taildrop: super::taildrop::Taildrop,
@@ -106,7 +117,10 @@ pub struct Model {
     pub last_click: Option<(PathBuf, std::time::Instant)>,
     pub drag_anchor: Option<usize>,
     pub key_arm: String,
+    pub trash_armed_at: Option<std::time::Instant>,
     pub preview_generation: usize,
+    pub preview_requested: usize,
+    pub preview_children: Option<PathBuf>,
 }
 impl Model {
     pub fn new(path: PathBuf, settings: &Json) -> Self {
@@ -153,12 +167,21 @@ impl Model {
             clipboard: Vec::new(),
             cut: false,
             preview: Vec::new(),
+            preview_display: Vec::new(),
+            preview_body: String::new(),
+            preview_metadata: Vec::new(),
+            preview_line_count: 0,
+            preview_layout_scroll: 0,
+            preview_layout_height: 0,
+            preview_width: 0,
+            preview_layout_generation: 0,
             preview_path: PathBuf::new(),
             preview_visible: preview
                 .get("column")
                 .and_then(Json::as_bool)
                 .unwrap_or(true),
             preview_auto: text(preview, "loadOn") != "manual",
+            preview_loaded: false,
             preview_focus: false,
             quicklook: false,
             sheet: false,
@@ -188,8 +211,10 @@ impl Model {
             back: Vec::new(),
             forward: Vec::new(),
             wrap: flag(settings, "wrapAtEnds"),
+            navigation_before: None,
             columns: 80,
             completion: String::new(),
+            completer: super::completion::Completion::new(settings),
             preview_failed: None,
             playback: None,
             taildrop: super::taildrop::Taildrop::new(),
@@ -197,7 +222,10 @@ impl Model {
             last_click: None,
             drag_anchor: None,
             key_arm: String::new(),
+            trash_armed_at: None,
             preview_generation: 0,
+            preview_requested: 0,
+            preview_children: None,
         }
     }
     pub fn open(&mut self, path: PathBuf, wire: &mut Wire) -> io::Result<()> {
@@ -205,7 +233,7 @@ impl Model {
             return Ok(());
         }
         self.pending = Some(path.clone());
-        wire.send(vec![
+        let result = wire.send(vec![
             ("c", word("list")),
             ("path", word(&path.to_string_lossy())),
             ("first", number(self.height)),
@@ -214,7 +242,21 @@ impl Model {
             ("desc", Json::Bool(self.reverse)),
             ("foldersFirst", Json::Bool(self.folders_first)),
             ("groupByKind", Json::Bool(self.group_by_kind)),
-        ])
+        ]);
+        if result.is_err() {
+            self.pending = None;
+            self.restore_navigation();
+        }
+        result
+    }
+    pub fn restore_navigation(&mut self) {
+        if let Some((back, forward, tab)) = self.navigation_before.take() {
+            self.back = back;
+            self.forward = forward;
+            self.tab = tab;
+        }
+        self.restore_cursor = None;
+        self.restore_path = None;
     }
     pub fn window(&mut self, wire: &mut Wire) -> io::Result<()> {
         if self.cursor < self.top {
@@ -330,6 +372,8 @@ impl Model {
                     self.searching = false;
                     self.search_from = None;
                     self.filter.clear();
+                    self.tabs[self.tab].path = self.path.clone();
+                    self.navigation_before = None;
                 }
                 self.total = count(&value, "n");
                 self.invalidate_rows();
@@ -392,7 +436,40 @@ impl Model {
                     self.image_file = Some(PathBuf::from(text(&value, "file")));
                 }
             }
+            "meta" => {
+                if self.pending.is_none() && count(&value, "row") == self.cursor
+                    && count(&value, "token") == self.preview_requested
+                    && self.current_path().as_ref() == Some(&self.preview_path)
+                {
+                    for (label, value) in [
+                        ("Dimensions", if count(&value, "w") > 0 && count(&value, "h") > 0 { format!("{} × {}", count(&value, "w"), count(&value, "h")) } else { String::new() }),
+                        ("Duration", if count(&value, "ms") > 0 { super::media::clock(count(&value, "ms") as f64 / 1000.0) } else { String::new() }),
+                        ("Rate", if count(&value, "rate") > 0 { format!("{} kHz", count(&value, "rate") as f64 / 1000.0) } else { String::new() }),
+                        ("Entries", if count(&value, "entries") > 0 { count(&value, "entries").to_string() } else { String::new() }),
+                        ("Unpacked", if count(&value, "unpacked") > 0 { super::render::bytes(count(&value, "unpacked")) } else { String::new() }),
+                    ] {
+                        if !value.is_empty() { self.preview_metadata.push(format!("{} · {}", label, value)); }
+                    }
+                    if flag(&value, "afailed") { self.preview_metadata.push("This archive could not be read.".into()); }
+                    self.preview_width = 0;
+                }
+            }
             "peeked" => {
+                if self.preview_children.as_ref().is_some_and(|path| path.to_string_lossy() == text(&value, "path"))
+                    && self.current_path().as_ref() == self.preview_children.as_ref()
+                {
+                    self.preview.truncate(2);
+                    if flag(&value, "failed") { self.preview.push("This folder could not be read.".into()); }
+                    else {
+                        for row in value.get("rows").and_then(Json::as_array).unwrap_or(&[]) {
+                            self.preview.push(format!("{} {}", if flag(row, "d") { "›" } else { "□" }, text(row, "n")));
+                        }
+                        if count(&value, "n") == 0 { self.preview.push("Empty folder".into()); }
+                    }
+                    self.preview_width = 0;
+                    self.preview_children = None;
+                    return Ok(());
+                }
                 if self
                     .path
                     .parent()
@@ -413,13 +490,15 @@ impl Model {
                     && self.search.is_empty()
                     && text(&value, "path") == self.path.to_string_lossy()
                 {
+                    self.restore_cursor = Some(self.cursor);
+                    self.restore_path = self.current_path();
                     self.open(self.path.clone(), wire)?;
                 }
             }
             "paths" => {
                 let paths: Vec<String> = value.get("paths").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(str::to_owned).collect();
                 if let Some(peer) = self.taildrop_target.take() {
-                    match super::taildrop::send(&peer, &paths) {
+                    match self.taildrop.send(&peer, &paths) {
                         Ok(()) => self.message = format!("Sending to {}", peer.label),
                         Err(e) => self.error = format!("Taildrop: {}", e),
                     }
@@ -487,30 +566,66 @@ impl Model {
                     self.error = format!("{}: {}", text(&value, "name"), text(&value, "err"));
                 }
             }
-            "transferdone" | "trashed" | "undone" | "renamed" | "made" => {
-                self.transfer.clear();
-                self.transfer_id = 0;
-                self.message = match text(&value, "t") {
+            "transferdone" | "trashed" | "undone" | "redone" | "renamed" | "made" | "duplicated" => {
+                let operation = text(&value, "t");
+                if operation == "transferdone" {
+                    if count(&value, "id") != self.transfer_id { return Ok(()); }
+                    self.transfer.clear();
+                    self.transfer_id = 0;
+                }
+                if matches!(operation, "undone" | "redone" | "renamed" | "made" | "duplicated") && !flag(&value, "ok") {
+                    if let Some(editor) = &mut self.editor { editor.pending = false; }
+                    return Ok(());
+                }
+                self.message = match operation {
                     "renamed" => "Renamed · Undo available".into(),
                     "made" => "Folder created · Undo available".into(),
+                    "duplicated" => "Duplicated · Undo available".into(),
                     "undone" => format!("Undid {}", text(&value, "op")),
+                    "redone" => format!("Redid {} · Undo available", text(&value, "op")),
                     "trashed" => format!(
                         "Moved {} items to Trash · Undo available",
                         count(&value, "ok")
                     ),
-                    _ => format!("Transferred {} items", count(&value, "ok")),
+                    _ => format!("{} {} items{}", if flag(&value, "cancelled") { "Cancelled after" } else { "Transferred" }, count(&value, "ok"), if count(&value, "skipped") > 0 { format!(" · {} skipped", count(&value, "skipped")) } else { String::new() }),
                 };
                 if count(&value, "failed") > 0 {
                     self.error = format!("{} failed", count(&value, "failed"));
                 }
+                if matches!(operation, "renamed" | "made" | "duplicated") {
+                    self.restore_path = Some(PathBuf::from(text(&value, "path")));
+                    self.editor = None;
+                }
                 self.open(self.path.clone(), wire)?;
+            }
+            "menuaction" if text(&value, "op") == "newFile" => {
+                if !self.editor.as_ref().is_some_and(|e| e.kind == "newfile" && e.pending) { return Ok(()); }
+                if flag(&value, "ok") {
+                    self.editor = None;
+                    self.message = "File created · Undo available".into();
+                    self.restore_path = Some(PathBuf::from(text(&value, "path")));
+                    self.open(self.path.clone(), wire)?;
+                } else if let Some(editor) = &mut self.editor {
+                    editor.pending = false;
+                    editor.error = text(&value, "error").into();
+                }
             }
             "error" => {
                 self.error = format!("{}: {}", text(&value, "where"), text(&value, "msg"));
-                self.pending = None;
-                self.restore_path = None;
-                self.pending_clipboard = false;
-                self.taildrop_target = None;
+                if let Some(editor) = &mut self.editor {
+                    if text(&value, "where") == editor.kind {
+                        editor.pending = false;
+                        editor.error = text(&value, "msg").into();
+                    }
+                }
+                if text(&value, "where") == "scan" && self.pending.as_ref().is_some_and(|p| p.to_string_lossy() == text(&value, "path")) {
+                    self.pending = None;
+                    self.restore_navigation();
+                }
+                if text(&value, "where") == "paths" {
+                    self.pending_clipboard = false;
+                    self.taildrop_target = None;
+                }
             }
             _ => {}
         }

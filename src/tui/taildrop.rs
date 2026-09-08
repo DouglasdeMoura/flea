@@ -18,11 +18,13 @@ pub struct Taildrop {
     pub peers: Vec<Peer>,
     pub error: String,
     pub submenu: bool,
+    sending: Option<String>,
+    pub sent: Option<Result<String, String>>,
 }
 
 impl Taildrop {
     pub fn new() -> Self {
-        Self { child: None, output: None, result: None, started: Instant::now(), peers: Vec::new(), error: String::new(), submenu: false }
+        Self { child: None, output: None, result: None, started: Instant::now(), peers: Vec::new(), error: String::new(), submenu: false, sending: None, sent: None }
     }
     pub fn refresh(&mut self) {
         if self.child.is_some() { return; }
@@ -51,6 +53,24 @@ impl Taildrop {
     pub fn loading(&self) -> bool { self.child.is_some() }
     pub fn poll(&mut self) {
         let Some(child) = &mut self.child else { return };
+        if let Some(label) = &self.sending {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    self.sent = Some(if status.success() { Ok(format!("Sent to {}", label)) } else { Err(format!("Taildrop to {} failed ({})", label, status)) });
+                    self.child = None;
+                    self.sending = None;
+                }
+                Err(e) => {
+                    self.sent = Some(Err(format!("Taildrop process: {}", e)));
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    self.child = None;
+                    self.sending = None;
+                }
+                Ok(None) => {}
+            }
+            return;
+        }
         const STATUS_DEADLINE: Duration = Duration::from_secs(5);
         if self.started.elapsed() > STATUS_DEADLINE {
             let _ = child.kill();
@@ -82,22 +102,27 @@ impl Taildrop {
             _ => self.error = "Taildrop status failed".into(),
         }
     }
+    pub fn send(&mut self, peer: &Peer, paths: &[String]) -> io::Result<()> {
+        if self.child.is_some() { return Err(io::Error::other("Taildrop is already busy")); }
+        if paths.is_empty() || paths.iter().any(|path| !std::path::Path::new(path).is_absolute()) {
+            return Err(io::Error::other("Taildrop needs an absolute file selection"));
+        }
+        self.child = Some(Command::new("omarchy-tailscale-send").arg(&peer.address).args(paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?);
+        self.sending = Some(peer.label.clone());
+        self.sent = None;
+        Ok(())
+    }
 }
 
 impl Drop for Taildrop {
     fn drop(&mut self) {
-        if let Some(child) = &mut self.child { let _ = child.kill(); let _ = child.wait(); }
+        if let Some(mut child) = self.child.take() {
+            if self.sending.is_some() {
+                // The OEM sender owns its notification and continues after the TUI closes.
+                std::thread::spawn(move || { let _ = child.wait(); });
+            } else { let _ = child.kill(); let _ = child.wait(); }
+        }
     }
-}
-
-pub fn send(peer: &Peer, paths: &[String]) -> io::Result<()> {
-    if paths.is_empty() || paths.iter().any(|path| !std::path::Path::new(path).is_absolute()) {
-        return Err(io::Error::other("Taildrop needs an absolute file selection"));
-    }
-    let mut child = Command::new("omarchy-tailscale-send").arg(&peer.address).args(paths).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
-    // The OEM command owns its notifications; reaping this child does not keep the TUI open.
-    std::thread::spawn(move || { let _ = child.wait(); });
-    Ok(())
 }
 
 fn text<'a>(value: &'a Json, key: &str) -> &'a str { value.get(key).and_then(Json::as_str).unwrap_or("") }

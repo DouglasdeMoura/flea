@@ -1,6 +1,7 @@
 mod actions;
 mod completion;
 mod empty;
+mod editor;
 mod graphics;
 mod input;
 mod job;
@@ -52,31 +53,43 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
         let mut graphics = graphics::Graphics::new();
         let mut thumbnail = PathBuf::new();
         let mut preview_generation = 0;
+        let mut last_message = String::new();
+        let mut message_at = std::time::Instant::now();
         while !model.quit && !terminal.stopped() {
             while let Ok(event) = wire.events.try_recv() {
                 match event {
                     Ok(value) => model.receive(value, &mut wire)?,
-                    Err(e) => {
-                        model.error = e;
-                        model.quit = true;
-                    }
+                    Err(e) => return Err(io::Error::other(e)),
                 }
             }
             preview::load(&mut model, false);
+            preview::request(&mut model, &mut wire)?;
+            preview::layout(&mut model);
             model.taildrop.poll();
+            if let Some(result) = model.taildrop.sent.take() {
+                match result { Ok(message) => model.message = message, Err(error) => model.error = error }
+            }
+            if let Some(completion) = model.completer.poll() { model.completion = completion; }
+            if model.message != last_message {
+                last_message = model.message.clone();
+                message_at = std::time::Instant::now();
+            }
+            // Match StatusBar.messageMs while keeping the actionable undo receipt until dismissed.
+            const MESSAGE_TIME: std::time::Duration = std::time::Duration::from_millis(4000);
+            if !model.message.contains("Undo available") && message_at.elapsed() >= MESSAGE_TIME { model.message.clear(); }
             let visible = (model.preview_visible || model.quicklook) && model.selected.len() < 2;
             let overlay = model.menu || model.sheet || model.editor.is_some();
             let current = model.current_path();
-            let preview_allowed = model.preview_auto
-                || model.quicklook
-                || current.as_ref() == Some(&model.preview_path);
+            let preview_allowed = model.preview_loaded
+                && current.as_ref() == Some(&model.preview_path);
+            let reserved = 7 + model.preview_metadata.len().min(3);
             let geometry = if model.quicklook {
-                (size.0.saturating_sub(2), size.1.saturating_sub(7), 2, 4)
+                (size.0.saturating_sub(2), size.1.saturating_sub(reserved), 2, 4)
             } else {
                 (
                     size.0
                         .saturating_sub(size.0 * 22 / 100 + size.0 * 40 / 100 + 2),
-                    size.1.saturating_sub(7),
+                    size.1.saturating_sub(reserved),
                     size.0 * 22 / 100 + size.0 * 40 / 100 + 3,
                     4,
                 )
@@ -185,6 +198,9 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     }
                 }
             } else {
+                if let Some(index) = model.thumb_index.take() {
+                    wire.send(vec![("c", wire::word("thumbcancel")), ("rows", crate::jsondoc::Json::Arr(vec![wire::number(index)]))])?;
+                }
                 graphics.clear();
                 model.image_file = None;
                 thumbnail = PathBuf::new();
@@ -200,7 +216,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 frame.clear();
             }
             if !graphics.error.is_empty() {
-                model.error = format!("Image preview: {}", graphics.error);
+                model.error = format!("Image preview: {}", std::mem::take(&mut graphics.error));
             }
             if let Some(player) = &mut model.player {
                 player.poll();
@@ -224,7 +240,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     frame.clear();
                 }
                 if !pdf.error.is_empty() {
-                    model.error = pdf.error.clone();
+                    model.error = std::mem::take(&mut pdf.error);
                 }
             }
             let changed = render::draw(
@@ -241,6 +257,10 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 .as_ref()
                 .map(|p| p.bytes.as_slice())
                 .unwrap_or(&graphics.bytes);
+            if changed && graphics.protocol == graphics::Protocol::Kitty {
+                print!("\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
+                std::io::Write::flush(&mut std::io::stdout())?;
+            }
             if changed && !image.is_empty() && !overlay {
                 use std::io::Write;
                 print!("\x1b[s\x1b[{};{}H", geometry.3, geometry.2);

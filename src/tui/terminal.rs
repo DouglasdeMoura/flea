@@ -62,7 +62,11 @@ impl Terminal {
     }
     pub fn read(&self) -> io::Result<Vec<u8>> {
         let mut bytes = [0; 256];
-        let n = io::stdin().read(&mut bytes)?;
+        let n = match io::stdin().read(&mut bytes) {
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => 0,
+            Err(e) => return Err(e),
+        };
         Ok(bytes[..n].to_vec())
     }
 }

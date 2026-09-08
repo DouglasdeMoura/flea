@@ -28,7 +28,7 @@ impl Theme {
             symlink: role(if values.contains_key("cyan") { "cyan" } else { "color6" }, "#94e2d5", false),
             executable: role(if values.contains_key("green") { "green" } else { "color2" }, "#a6e3a1", false),
             selected: ansi(&blend(values.get("accent").map(String::as_str).unwrap_or("#ffffff"), values.get("background").map(String::as_str).unwrap_or("#101315"), 0.22), true),
-            border: role("dark_background", "#262b40", false),
+            border: role("muted", "#707880", false),
         }
     }
 }

@@ -22,7 +22,7 @@ impl Key {
             pointer: None,
         }
     }
-    fn character(c: char, mods: &str) -> Self {
+    pub fn character(c: char, mods: &str) -> Self {
         let name = match c {
             ' ' => "Space".into(),
             ',' => "Comma".into(),
@@ -239,6 +239,12 @@ fn csi(text: &str) -> Option<Key> {
         if text[..text.len() - 1].split(';').nth(1).and_then(|v| v.split(':').nth(1)) == Some("3") {
             return None;
         }
+        let functional = match code {
+            57348 => "Insert", 57349 => "Delete", 57350 => "Left", 57351 => "Right",
+            57352 => "Up", 57353 => "Down", 57354 => "PageUp", 57355 => "PageDown",
+            57356 => "Home", 57357 => "End", 57365 => "F2", 127 => "Backspace", _ => "",
+        };
+        if !functional.is_empty() { return Some(Key::named(functional, mods)); }
         return char::from_u32(code).map(|c| match c {
             '\r' => Key::named("Return", mods),
             '\t' => Key::named("Tab", mods),
@@ -304,5 +310,20 @@ mod tests {
         );
         assert!(d.feed(b"\x1b", false).is_empty());
         assert_eq!(d.feed(b"", true), vec![Key::named("Escape", "")]);
+    }
+    #[test]
+    fn mouse_modifiers_paste_and_release_keep_separate_meanings() {
+        let mut decoder = Decoder::default();
+        let mouse = decoder.feed(b"\x1b[<4;12;3M", false);
+        assert_eq!(mouse[0].mods, "shift");
+        assert_eq!(mouse[0].pointer, Some(Pointer { button: 0, x: 12, y: 3, released: false, motion: false }));
+        assert!(decoder.feed(b"\x1b[200~ddq", false).is_empty());
+        let pasted = decoder.feed(b"\x1b[201~", false);
+        assert_eq!(pasted.len(), 1);
+        assert_eq!(pasted[0].name, "Paste");
+        assert_eq!(pasted[0].text, "ddq");
+        assert!(decoder.feed(b"\x1b[113;1:3u", false).is_empty());
+        assert_eq!(decoder.feed(b"\x1b[57365u\x1b[1;11D", false), vec![Key::named("F2", ""), Key::named("Left", "superalt")]);
+        assert_eq!(decoder.feed(b"\x1b[1;7D", false)[0].mods, "unsupported");
     }
 }

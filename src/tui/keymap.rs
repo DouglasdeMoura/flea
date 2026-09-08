@@ -36,10 +36,10 @@ impl Map {
         self.in_context(key, preset, "listing")
     }
     pub fn in_context(&self, key: &Key, preset: &str, context: &str) -> String {
-        if key.name == "Insert" && key.mods == "ctrl" {
+        if context == "listing" && key.name == "Insert" && key.mods == "ctrl" {
             return "copy".into();
         }
-        if key.name == "Insert" && key.mods == "shift" {
+        if context == "listing" && key.name == "Insert" && key.mods == "shift" {
             return "paste".into();
         }
         if preset == "mac" && key.mods == "ctrl" && key.name == "X" {
@@ -56,7 +56,7 @@ impl Map {
                 };
                 if kind == "preset" && get(block, "name") == name
                     && get(block, "frontend") != "gui"
-                    && (here == context || here == "all" || (here.is_empty() && context == "listing"))
+                    && (here.split(',').any(|part| part == context || part == "all") || (here.is_empty() && context == "listing"))
                     && key_matches
                 {
                     return get(block, "action").into();
@@ -77,13 +77,36 @@ impl Map {
         }
         String::new()
     }
-    pub fn sheet(&self) -> Vec<String> {
-        self.blocks
-            .iter()
-            .filter(|(kind, _)| kind == "sheet")
-            .map(|(_, b)| format!("{}  {}", get(b, "keys"), get(b, "label")))
-            .collect()
+    pub fn sheet(&self, preset: &str) -> Vec<String> {
+        let mut rows = Vec::new();
+        for (_, label) in self.blocks.iter().filter(|(kind, _)| kind == "sheet") {
+            let action = get(label, "action");
+            if !supported(action) { continue; }
+            let mut keys = Vec::new();
+            for (kind, block) in &self.blocks {
+                let mods = if kind == "preset" { get(block, "mods") } else { kind };
+                let name = if kind == "text" { get(block, "char") } else { get(block, "key") };
+                if name.is_empty() || !matches!(mods, "text" | "code" | "none" | "" | "shift" | "ctrl" | "ctrlshift" | "alt" | "super" | "supershift" | "superalt") { continue; }
+                let text_key = mods == "text";
+                let key = if text_key { Key::character(name.chars().next().unwrap(), "") } else { Key::named(name, if matches!(mods, "code" | "none") { "" } else { mods }) };
+                let found = self.action(&key, preset);
+                if canonical(&found) != action { continue; }
+                let prefix = match key.mods.as_str() { "ctrl" => "Ctrl+", "ctrlshift" => "Ctrl+Shift+", "alt" => "Alt+", "super" => "Super+", "supershift" => "Super+Shift+", "superalt" => "Super+Alt+", "shift" => "Shift+", _ => "" };
+                let chord = format!("{}{}{}", prefix, name, if found.ends_with("Arm") { name } else { "" });
+                if !keys.contains(&chord) { keys.push(chord); }
+            }
+            if !keys.is_empty() { rows.push(format!("{}  {}", keys.join(" / "), get(label, "label"))); }
+        }
+        rows.push("1–9  Select tab".into());
+        rows.push("q  Quit".into());
+        rows
     }
+}
+fn canonical(action: &str) -> &str {
+    match action { "copyArm" => "copy", "cutArm" => "cut", "pasteArm" => "paste", "cursorFirstArm" => "cursorFirst", "trashArm" => "trash", _ => action }
+}
+fn supported(action: &str) -> bool {
+    matches!(action, "cursorDown" | "cursorUp" | "extendDown" | "extendUp" | "pageDown" | "pageUp" | "cursorFirst" | "cursorLast" | "parent" | "historyBack" | "historyForward" | "open" | "toggleSelect" | "selectAll" | "toggleHidden" | "pathBar" | "filter" | "search" | "rename" | "newFolder" | "copy" | "cut" | "paste" | "trash" | "undo" | "sortNext" | "sortReverse" | "tabNew" | "tabClose" | "tabNext" | "tabPrevious" | "preview" | "togglePreview" | "loadPreview" | "focusPreview" | "focusNext" | "menu" | "keymapSheet" | "reveal" | "escape" | "quit")
 }
 fn get<'a>(map: &'a HashMap<String, String>, key: &str) -> &'a str {
     map.get(key).map(String::as_str).unwrap_or("")
@@ -130,5 +153,16 @@ mod tests {
             ),
             "paste"
         );
+    }
+    #[test]
+    fn contexts_share_only_declared_actions_and_sheet_matches_preset() {
+        let map = Map::load();
+        assert_eq!(map.in_context(&Key::character('d', ""), "vim", "pdf"), "");
+        assert_eq!(map.in_context(&Key::named("Space", ""), "mac", "pdf"), "preview");
+        assert_eq!(map.in_context(&Key::named("Tab", "shift"), "windows", "media"), "focusPrevious");
+        assert_eq!(map.in_context(&Key::named("Insert", "ctrl"), "default", "editor"), "");
+        assert_eq!(map.action(&Key::character('y', ""), "vim"), "copyArm");
+        assert!(map.sheet("vim").iter().any(|line| line.contains("yy")));
+        assert!(!map.sheet("default").iter().any(|line| line.to_lowercase().contains("grid")));
     }
 }

@@ -1,4 +1,5 @@
 use super::{
+    editor::Editor,
     input::Key,
     keymap::Map,
     model::{Model, Tab},
@@ -8,35 +9,37 @@ use crate::jsondoc::Json;
 use std::{io, path::PathBuf};
 
 pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Result<()> {
+    let armed = std::mem::take(&mut model.key_arm);
     if let Some(pointer) = &key.pointer {
-        model.key_arm.clear();
         return pointer_key(model, key, pointer, map, wire);
     }
     if model.editor.is_some() {
         return edit(model, key, wire);
     }
     if model.sheet {
-        if key.name == "Escape" || key.text == "?" {
+        let action = map.in_context(key, &model.preset, "panel");
+        if action == "escape" || (key.mods.is_empty() && key.text == "?") {
             model.sheet = false;
-        } else if key.name == "Down" || key.text == "j" {
-            model.sheet_top = (model.sheet_top + 1).min(map.sheet().len().saturating_sub(1));
-        } else if key.name == "Up" || key.text == "k" {
+        } else if action == "cursorDown" {
+            model.sheet_top = (model.sheet_top + 1).min(map.sheet(&model.preset).len().saturating_sub(1));
+        } else if action == "cursorUp" {
             model.sheet_top = model.sheet_top.saturating_sub(1);
         }
         return Ok(());
     }
     if model.menu {
         let count = if model.taildrop.submenu { model.taildrop.peers.len().max(1) } else { 3 };
-        match key.name.as_str() {
-            "Escape" | "Left" => {
+        let action = map.in_context(key, &model.preset, "menu");
+        match action.as_str() {
+            "escape" | "parent" => {
                 if model.taildrop.submenu {
                     model.taildrop.submenu = false;
                     model.menu_cursor = 2;
                 } else { model.menu = false; }
             }
-            "Down" => model.menu_cursor = (model.menu_cursor + 1) % count,
-            "Up" => model.menu_cursor = (model.menu_cursor + count - 1) % count,
-            "Return" | "Space" | "Right" => {
+            "cursorDown" => model.menu_cursor = (model.menu_cursor + 1) % count,
+            "cursorUp" => model.menu_cursor = (model.menu_cursor + count - 1) % count,
+            "open" | "preview" | "menuRight" => {
                 if model.taildrop.submenu {
                     if model.pending_clipboard || model.taildrop_target.is_some() { return Ok(()); }
                     if let Some(peer) = model.taildrop.peers.get(model.menu_cursor) {
@@ -55,7 +58,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     }
                     return Ok(());
                 }
-                if key.name == "Right" { return Ok(()); }
+                if action == "menuRight" { return Ok(()); }
                 model.menu = false;
                 return act(
                     model,
@@ -67,11 +70,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     wire,
                 );
             }
-            _ => {
-                if key.text == "j" || key.text == "k" {
-                    model.menu_cursor = if key.text == "j" { (model.menu_cursor + 1) % count } else { (model.menu_cursor + count - 1) % count };
-                }
-            }
+            _ => {}
         }
         return Ok(());
     }
@@ -86,26 +85,31 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
         return Ok(());
     }
     if model.preview_focus || model.quicklook {
-        if key.name == "Escape" || (key.name == "Tab" && key.mods == "ctrl") {
+        let context = if model.pdf.is_some() { "pdf" } else if model.player.is_some() { "media" } else { "preview" };
+        let action = map.in_context(key, &model.preset, context);
+        if action == "escape" || action == "focusPreview" {
             model.preview_focus = false;
             model.quicklook = false;
             return Ok(());
         }
         if let Some(pdf) = &mut model.pdf {
             let controls = if model.quicklook { 6 } else { 5 };
-            match key.name.as_str() {
-                "Tab" => {
-                    pdf.control = if key.mods == "shift" {
+            match action.as_str() {
+                "focusNext" | "focusPrevious" => {
+                    pdf.control = if action == "focusPrevious" {
                         (pdf.control + controls - 1) % controls
                     } else {
                         (pdf.control + 1) % controls
                     }
                 }
-                "Left" => pdf.turn(-1),
-                "Right" => pdf.turn(1),
-                "Up" => pdf.scroll(-1),
-                "Down" => pdf.scroll(1),
-                "Return" | "Space" => match pdf.control {
+                "seekBack" => pdf.turn(-1),
+                "seekForward" | "pageForward" => pdf.turn(1),
+                "cursorUp" => pdf.scroll(-1),
+                "cursorDown" => pdf.scroll(1),
+                "zoomOut" => pdf.zoom(-1),
+                "zoomIn" => pdf.zoom(1),
+                "expand" => model.quicklook = true,
+                "open" | "preview" => match pdf.control {
                     0 => pdf.turn(-1),
                     1 => pdf.turn(1),
                     2 => pdf.zoom(-1),
@@ -117,48 +121,36 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     }
                     _ => {}
                 },
-                _ => match key.text.as_str() {
-                    "h" => pdf.turn(-1),
-                    "l" => pdf.turn(1),
-                    _ => {}
-                },
+                _ => {}
             }
         } else if let Some(player) = &mut model.player {
-            match key.name.as_str() {
-                "Tab" => player.control = 1 - player.control,
-                "Space" => player.toggle()?,
-                "Return" => {
+            match action.as_str() {
+                "focusNext" | "focusPrevious" => player.control = 1 - player.control,
+                "preview" => player.toggle()?,
+                "open" => {
                     if player.control == 0 {
                         player.toggle()?;
                     }
                 }
-                "Left" => {
+                "seekBack" => {
                     if player.control == 1 {
                         player.seek(-5)?;
                     }
                 }
-                "Right" => {
+                "seekForward" | "pageForward" => {
                     if player.control == 1 {
                         player.seek(5)?;
                     }
                 }
-                _ => {
-                    if player.control == 1 {
-                        match key.text.as_str() {
-                            "h" => player.seek(-5)?,
-                            "l" => player.seek(5)?,
-                            _ => {}
-                        }
-                    }
-                }
+                _ => {}
             }
         } else {
-            match key.name.as_str() {
-                "Down" => {
+            match action.as_str() {
+                "cursorDown" => {
                     model.preview_scroll =
-                        (model.preview_scroll + 1).min(model.preview.len().saturating_sub(1))
+                        (model.preview_scroll + 1).min(model.preview_line_count.saturating_sub(1))
                 }
-                "Up" => model.preview_scroll = model.preview_scroll.saturating_sub(1),
+                "cursorUp" => model.preview_scroll = model.preview_scroll.saturating_sub(1),
                 _ => {}
             }
         }
@@ -188,7 +180,13 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
     }
     let mut action = map.action(key, &model.preset);
     if matches!(action.as_str(), "copyArm" | "cutArm" | "pasteArm" | "cursorFirstArm" | "trashArm") {
-        if model.key_arm != action {
+        const TRASH_ARM: std::time::Duration = std::time::Duration::from_millis(1500);
+        let expired = action == "trashArm" && model.trash_armed_at.map_or(true, |at| at.elapsed() >= TRASH_ARM);
+        if armed != action || expired {
+            if action == "trashArm" {
+                model.trash_armed_at = Some(std::time::Instant::now());
+                model.message = "Press d again to trash, or Delete on its own.".into();
+            }
             model.key_arm = action;
             return Ok(());
         }
@@ -196,8 +194,8 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
             "copyArm" => "copy", "cutArm" => "cut", "pasteArm" => "paste", "cursorFirstArm" => "cursorFirst", _ => "trash",
         }.into();
     }
-    model.key_arm.clear();
     if action.is_empty() {
+        if !key.mods.is_empty() { return Ok(()); }
         match key.text.as_str() {
             "q" => model.quit = true,
             "H" if matches!(model.preset.as_str(), "default" | "vim") => history(model, false, wire)?,
@@ -215,14 +213,14 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
     if m.searching
         && matches!(
             action,
-            "paste" | "trash" | "trashArm" | "rename" | "copy" | "cut"
+            "paste" | "movePaste" | "duplicate" | "trash" | "trashArm" | "rename" | "copy" | "cut"
         )
     {
         m.error = "Wait for search to settle before a file operation".into();
         return Ok(());
     }
     if !m.rows.contains_key(&m.cursor)
-        && matches!(action, "open" | "copy" | "cut" | "trash" | "trashArm" | "rename" | "preview" | "reveal" | "toggleSelect")
+        && matches!(action, "open" | "duplicate" | "copy" | "cut" | "trash" | "trashArm" | "rename" | "preview" | "reveal" | "toggleSelect")
     {
         return Ok(());
     }
@@ -275,32 +273,32 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             m.open(m.path.clone(), w)?;
         }
         "pathBar" => {
-            m.editor = Some(("path".into(), String::new()));
-            m.completion.clear();
+            m.editor = Some(Editor::new("path", String::new(), m.path.clone()));
+            m.completion = m.completer.request("", &m.path);
         }
-        "filter" => m.editor = Some(("filter".into(), m.filter.clone())),
-        "search" => m.editor = Some(("search".into(), String::new())),
+        "filter" => m.editor = Some(Editor::new("filter", m.filter.clone(), m.path.clone())),
+        "search" => m.editor = Some(Editor::new("search", String::new(), m.path.clone())),
         "rename" => {
             if m.selected.len() > 1 {
                 m.error = "Select one item to rename".into();
             } else if let Some(row) = m.rows.get(&m.cursor) {
-                m.editor = Some(("rename".into(), row.name.clone()));
+                m.editor = Some(Editor::rename(row.name.clone(), m.row_path(row), row.directory)?);
             }
         }
-        "newFolder" => m.editor = Some(("mkdir".into(), "New Folder".into())),
+        "newFolder" => m.editor = Some(Editor::new("mkdir", "New Folder".into(), m.path.clone())),
         "copy" | "cut" => {
             if m.pending_clipboard || m.taildrop_target.is_some() { return Ok(()); }
             m.cut = action == "cut";
             m.pending_clipboard = true;
             w.send(vec![("c", word("paths")), ("rows", m.indices())])?;
         }
-        "paste" => {
+        "paste" | "movePaste" => {
             if m.clipboard.is_empty() {
                 m.message = "Nothing to paste".into();
             } else {
                 w.send(vec![
                     ("c", word("transfer")),
-                    ("op", word(if m.cut { "move" } else { "copy" })),
+                    ("op", word(if m.cut || action == "movePaste" { "move" } else { "copy" })),
                     (
                         "paths",
                         Json::Arr(m.clipboard.iter().map(|p| word(p)).collect()),
@@ -314,7 +312,9 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
                 w.send(vec![("c", word("trash")), ("rows", m.indices())])?;
             }
         }
-        "undo" => w.send(vec![("c", word("undo"))])?,
+        "undo" | "redo" => w.send(vec![("c", word(action))])?,
+        "duplicate" => { if let Some(path) = m.current_path() { w.send(vec![("c", word("duplicate")), ("path", word(&path.to_string_lossy()))])?; } },
+        "newFile" => m.editor = Some(Editor::new("newfile", "New File".into(), m.path.clone())),
         "sortNext" | "sortReverse" => {
             if action == "sortReverse" {
                 m.reverse = !m.reverse;
@@ -423,7 +423,7 @@ fn pointer_key(m: &mut Model, key: &Key, pointer: &super::input::Pointer, map: &
     let scroll = match pointer.button { 64 => -1, 65 => 1, _ => 0 };
     if m.editor.is_some() { return Ok(()); }
     if m.sheet || m.menu {
-        let rows = if m.sheet { map.sheet() } else { super::render::menu_rows(m) };
+        let rows = if m.sheet { map.sheet(&m.preset) } else { super::render::menu_rows(m) };
         let (x, y, width, count) = super::render::overlay_rect(&rows, m.columns, m.height + 2);
         if scroll != 0 {
             return self::key(m, &Key::named(if scroll < 0 { "Up" } else { "Down" }, ""), map, w);
@@ -442,7 +442,7 @@ fn pointer_key(m: &mut Model, key: &Key, pointer: &super::input::Pointer, map: &
         if scroll != 0 {
             return self::key(m, &Key::named(if scroll < 0 { "Up" } else { "Down" }, ""), map, w);
         }
-        if pointer.button == 0 && !pointer.motion && pointer.y == m.height {
+        if pointer.button == 0 && pointer.y == m.height {
             let cell = pointer.x.saturating_sub(if m.quicklook { 1 } else { left + middle + 3 });
             if let Some(pdf) = &mut m.pdf {
                 if let Some(control) = pdf.control_at(cell, m.quicklook) {
@@ -450,11 +450,12 @@ fn pointer_key(m: &mut Model, key: &Key, pointer: &super::input::Pointer, map: &
                     return self::key(m, &Key::named("Return", ""), map, w);
                 }
             } else if let Some(player) = &mut m.player {
-                if cell < 7 {
+                if cell < 7 && !pointer.motion {
                     player.control = 0;
                     return player.toggle();
                 }
                 player.control = 1;
+                return player.seek_at(cell, if m.quicklook { m.columns } else { super::render::panes(m.columns, true).2 });
             }
         }
         return Ok(());
@@ -523,11 +524,15 @@ fn pointer_key(m: &mut Model, key: &Key, pointer: &super::input::Pointer, map: &
     Ok(())
 }
 fn navigate(m: &mut Model, path: PathBuf, w: &mut Wire) -> io::Result<()> {
+    if m.pending.is_some() { return Ok(()); }
+    m.navigation_before = Some((m.back.clone(), m.forward.clone(), m.tab));
     m.back.push(m.path.clone());
     m.forward.clear();
     m.open(path, w)
 }
 fn history(m: &mut Model, forward: bool, w: &mut Wire) -> io::Result<()> {
+    if m.pending.is_some() { return Ok(()); }
+    m.navigation_before = Some((m.back.clone(), m.forward.clone(), m.tab));
     let next = if forward {
         m.forward.pop()
     } else {
@@ -544,9 +549,10 @@ fn history(m: &mut Model, forward: bool, w: &mut Wire) -> io::Result<()> {
     Ok(())
 }
 fn tab(m: &mut Model, index: usize, w: &mut Wire) -> io::Result<()> {
-    if index >= m.tabs.len() || index == m.tab {
+    if m.pending.is_some() || index >= m.tabs.len() || index == m.tab {
         return Ok(());
     }
+    m.navigation_before = Some((m.back.clone(), m.forward.clone(), m.tab));
     m.tabs[m.tab] = Tab {
         path: m.path.clone(),
         cursor: m.cursor,
@@ -571,23 +577,25 @@ fn save_preview_column(m: &mut Model) {
     save("preview", Json::Obj(vec![("column".into(), Json::Bool(m.preview_visible))]), m);
 }
 fn edit(m: &mut Model, key: &Key, w: &mut Wire) -> io::Result<()> {
-    let (kind, mut value) = m.editor.take().unwrap();
+    let mut editor = m.editor.take().unwrap();
+    let kind = editor.kind;
+    if editor.pending { m.editor = Some(editor); return Ok(()); }
     if key.name == "Escape" {
         if kind == "filter" {
             m.apply_filter(String::new());
         }
         return Ok(());
     }
-    if key.name == "Backspace" {
-        value.pop();
-    } else if key.name == "Return" {
-        match kind.as_str() {
+    if key.name == "Return" || key.name == "Enter" {
+        if !editor.valid() { m.editor = Some(editor); return Ok(()); }
+        let value = &editor.value;
+        match kind {
             "path" => {
                 let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
-                let p = super::completion::expand(&value, &home, &m.path);
+                let p = super::completion::expand(value, &home, &editor.path);
                 navigate(m, p, w)?;
             }
-            "filter" => m.apply_filter(value),
+            "filter" => m.apply_filter(value.clone()),
             "search" => {
                 if value.is_empty() {
                     return Ok(());
@@ -608,42 +616,46 @@ fn edit(m: &mut Model, key: &Key, w: &mut Wire) -> io::Result<()> {
                 w.send(vec![
                     ("c", word("search")),
                     ("path", word(&m.path.to_string_lossy())),
-                    ("query", word(&value)),
+                    ("query", word(value)),
                     ("hidden", Json::Bool(m.hidden)),
                 ])?;
             }
             "rename" => {
-                if let Some(p) = m.current_path() {
-                    w.send(vec![
+                w.send(vec![
                         ("c", word("rename")),
-                        ("path", word(&p.to_string_lossy())),
-                        ("to", word(&value)),
-                    ])?;
-                }
+                        ("path", word(&editor.path.to_string_lossy())),
+                        ("to", word(value)),
+                ])?;
             }
-            "mkdir" => w.send(vec![
-                ("c", word("mkdir")),
-                ("path", word(&m.path.to_string_lossy())),
-                ("name", word(&value)),
+            "mkdir" | "newfile" => w.send(vec![
+                ("c", word(kind)),
+                ("op", word("newFile")),
+                ("id", super::wire::number(1)),
+                ("path", word(&editor.path.to_string_lossy())),
+                ("name", word(value)),
             ])?,
             _ => {}
+        }
+        if matches!(kind, "rename" | "mkdir" | "newfile") {
+            editor.pending = true;
+            m.editor = Some(editor);
         }
         return Ok(());
     } else if key.name == "Tab" && kind == "path" {
         if !m.completion.is_empty() {
-            value = m.completion.clone();
+            editor.replace(m.completion.clone());
         }
     } else if key.name == "Tab" && kind == "search" {
         m.search_here = !m.search_here;
-    } else if key.mods.is_empty() {
-        value.push_str(&key.text);
+    } else {
+        editor.update(key);
     }
     if kind == "filter" {
-        m.apply_filter(value.clone());
+        m.apply_filter(editor.value.clone());
     }
     if kind == "path" {
-        m.completion = super::completion::suggest(&value, &m.path);
+        m.completion = m.completer.request(&editor.value, &editor.path);
     }
-    m.editor = Some((kind, value));
+    m.editor = Some(editor);
     Ok(())
 }

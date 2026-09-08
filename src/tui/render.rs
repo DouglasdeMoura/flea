@@ -7,10 +7,12 @@ use std::io::{self, Write};
 
 extern "C" {
     fn wcwidth(c: i32) -> i32;
+    fn ctime_r(time: *const i64, buffer: *mut std::ffi::c_char) -> *mut std::ffi::c_char;
 }
 pub fn clean(text: &str) -> String {
-    text.chars().filter(|c|!c.is_control() && !matches!(*c,'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}'|'\u{200e}'|'\u{200f}'|'\u{061c}')).collect()
+    text.chars().filter(|c| safe(*c)).collect()
 }
+pub fn safe(c: char) -> bool { !c.is_control() && !matches!(c,'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}'|'\u{200e}'|'\u{200f}'|'\u{061c}') }
 fn width(c: char) -> usize {
     let n = unsafe { wcwidth(c as i32) };
     if n < 0 {
@@ -20,6 +22,26 @@ fn width(c: char) -> usize {
     }
 }
 pub fn text_width(text: &str) -> usize { clean(text).chars().map(width).sum() }
+pub struct Wrapped<'a> { remaining: Option<&'a str>, columns: usize }
+impl<'a> Wrapped<'a> {
+    pub fn new(text: &'a str, columns: usize) -> Self { Self { remaining: (columns > 0).then_some(text), columns } }
+}
+impl<'a> Iterator for Wrapped<'a> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<Self::Item> {
+        let text = self.remaining.take()?;
+        let mut used = 0;
+        for (offset, c) in text.char_indices() {
+            let cells = width(c);
+            if used + cells > self.columns && offset > 0 {
+                self.remaining = Some(&text[offset..]);
+                return Some(&text[..offset]);
+            }
+            used += cells;
+        }
+        Some(text)
+    }
+}
 pub fn panes(columns: usize, preview: bool) -> (usize, usize, usize) {
     let left = columns * 22 / 100;
     let middle = if preview { columns * 40 / 100 } else { columns.saturating_sub(left + 1) };
@@ -40,18 +62,30 @@ pub fn fit(text: &str, limit: usize) -> String {
     result
 }
 pub fn bytes(n: usize) -> String {
-    const KIB: usize = 1024;
-    const MIB: usize = KIB * KIB;
-    const GIB: usize = MIB * KIB;
-    if n >= GIB {
-        format!("{:.1} GB", n as f64 / GIB as f64)
-    } else if n >= MIB {
-        format!("{:.1} MB", n as f64 / MIB as f64)
-    } else if n >= KIB {
-        format!("{} KB", n / KIB)
-    } else {
-        format!("{} B", n)
-    }
+    const BYTES_PER_UNIT: f64 = 1000.0;
+    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
+    if n < BYTES_PER_UNIT as usize { return format!("{} B", n); }
+    let mut value = n as f64;
+    let mut unit = 0;
+    while value >= BYTES_PER_UNIT && unit < UNITS.len() - 1 { value /= BYTES_PER_UNIT; unit += 1; }
+    format!("{:.1} {}", value, UNITS[unit])
+}
+pub fn modified(mtime: i64) -> String {
+    if mtime <= 0 { return String::new(); }
+    const SECONDS_PER_MINUTE: u64 = 60;
+    const SECONDS_PER_HOUR: u64 = 3600;
+    const SECONDS_PER_DAY: u64 = 86400;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let age = now.saturating_sub(mtime as u64);
+    if age < SECONDS_PER_HOUR { return format!("{} min", age / SECONDS_PER_MINUTE); }
+    if age < SECONDS_PER_DAY { return format!("{} h", age / SECONDS_PER_HOUR); }
+    if age < SECONDS_PER_DAY * 7 { return format!("{} d", age / SECONDS_PER_DAY); }
+    let mut buffer = [0; 32];
+    if unsafe { ctime_r(&mtime, buffer.as_mut_ptr()) }.is_null() { return String::new(); }
+    // Sample input: Mon Sep  7 23:16:02 2026; ctime_r supplies the local calendar without a subprocess.
+    let stamp = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
+    let parts: Vec<&str> = stamp.split_whitespace().collect();
+    if parts.len() >= 3 { format!("{} {}", parts[1], parts[2]) } else { String::new() }
 }
 fn row(row: &Row, columns: usize) -> String {
     let mark = if !row.link.is_empty() {
@@ -74,8 +108,8 @@ fn row(row: &Row, columns: usize) -> String {
             format!(" → {}", row.link)
         }
     );
-    if columns > 18 && !row.directory && row.link.is_empty() {
-        let size = bytes(row.size);
+    if columns > 18 && row.link.is_empty() {
+        let size = if row.directory { modified(row.modified) } else { bytes(row.size) };
         format!("{} {}", fit(&label, columns - size.len() - 1), size)
     } else {
         fit(&label, columns)
@@ -97,6 +131,9 @@ pub fn draw(
     }
     let (left, middle, right) = panes(columns, m.preview_visible);
     let body = lines - 2;
+    let graphical = m.player.is_some() || m.pdf.is_some() || m.image_file.is_some();
+    let details = m.preview_metadata.len().min(3);
+    let details_start = body.saturating_sub(2 + details);
     let base = format!("\x1b[0m{}{}", theme.background, theme.foreground);
     let mut out = format!("\x1b[H{}", base);
     let home = std::env::var("HOME").unwrap_or_default();
@@ -123,15 +160,19 @@ pub fn draw(
     for y in 0..body {
         out.push_str(&format!("\x1b[{};1H{}", y + 2, base));
         if m.quicklook {
-            let content = if y == body.saturating_sub(2) {
+            let content = if m.selected.len() > 1 {
+                selection_line(m, y, columns)
+            } else if y == body.saturating_sub(2) {
                 m.player
                     .as_ref()
-                    .map(|p| p.line())
+                    .map(|p| p.line(columns))
                     .or_else(|| m.pdf.as_ref().map(|p| p.line(true)))
                     .unwrap_or_default()
-            } else {
-                m.preview
-                    .get(y + m.preview_scroll)
+            } else if graphical && y >= details_start && y < details_start + details {
+                m.preview_metadata[y - details_start].clone()
+            } else if graphical && y >= 2 { String::new() } else {
+                m.preview_display
+                    .get(y)
                     .cloned()
                     .unwrap_or_default()
             };
@@ -181,14 +222,18 @@ pub fn draw(
         let preview = if y == body.saturating_sub(2) && (m.player.is_some() || m.pdf.is_some()) {
             m.player
                 .as_ref()
-                .map(|p| p.line())
+                .map(|p| p.line(right))
                 .or_else(|| m.pdf.as_ref().map(|p| p.line(false)))
                 .unwrap_or_default()
         } else if m.selected.len() > 1 {
             selection_line(m, y, right)
+        } else if graphical && y >= details_start && y < details_start + details {
+            m.preview_metadata[y - details_start].clone()
+        } else if graphical && y >= 2 {
+            String::new()
         } else if m.preview_visible || m.quicklook {
-            m.preview
-                .get(y + m.preview_scroll)
+            m.preview_display
+                .get(y)
                 .cloned()
                 .unwrap_or_default()
         } else {
@@ -199,12 +244,8 @@ pub fn draw(
         out.push_str(&base);
     }
     out.push_str(&format!("\x1b[{};1H{}", lines, base));
-    let status = if let Some((kind, value)) = &m.editor {
-        if kind == "path" {
-            format!(": {}▏{}", value, m.completion.strip_prefix(value).unwrap_or(""))
-        } else if kind == "search" {
-            format!("Search: {} · in {} · Tab changes scope", value, if m.search_here { path.clone() } else { "Home".into() })
-        } else { format!("{}: {}", kind, value) }
+    let status = if m.editor.is_some() {
+        String::new()
     } else {
         let primary = if !m.error.is_empty() {
             &m.error
@@ -240,15 +281,24 @@ pub fn draw(
     if !m.error.is_empty() {
         out.push_str(&theme.error);
     }
-    out.push_str(&fit(&status, columns));
+    if let Some(editor) = &m.editor {
+        let prefix = if editor.kind == "path" { ": ".into() } else { format!("{}: ", editor.kind) };
+        let suffix = if editor.pending { " · Working…".into() }
+            else if editor.kind == "path" { m.completion.strip_prefix(&editor.value).unwrap_or("").into() }
+            else if editor.kind == "search" { format!(" · in {} · Tab changes scope", if m.search_here { path.clone() } else { "Home".into() }) }
+            else { String::new() };
+        out.push_str(&editor.line(&prefix, &suffix, columns, &base, &theme.muted));
+    } else { out.push_str(&fit(&status, columns)); }
     if m.sheet {
-        let sheet = map.sheet();
+        let sheet = map.sheet(&m.preset);
         overlay(
             &mut out,
             &sheet[m.sheet_top.min(sheet.len())..],
             columns,
             lines,
             &base,
+            None,
+            "keys",
             None,
         );
     }
@@ -260,10 +310,11 @@ pub fn draw(
             lines,
             &base,
             Some(m.menu_cursor),
+            if m.taildrop.submenu { "taildrop" } else { "open" },
+            if !m.taildrop.submenu && m.taildrop.peers.is_empty() { Some((&theme.muted, 2)) } else { None },
         );
     }
     if *last != out {
-        print!("\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
         print!("{}\x1b[0m", out);
         io::stdout().flush()?;
         *last = out;
@@ -307,21 +358,26 @@ fn overlay(
     lines: usize,
     base: &str,
     selected: Option<usize>,
+    title: &str,
+    dim: Option<(&str, usize)>,
 ) {
     let (x, y, width, count) = overlay_rect(rows, columns, lines);
+    let heading = format!("─ {} ", title);
     out.push_str(&format!(
-        "\x1b[{};{}H{}┌{}┐",
+        "\x1b[{};{}H{}┌{}{}┐",
         y + 1,
         x + 1,
         base,
-        "─".repeat(width)
+        fit(&heading, text_width(&heading).min(width)),
+        "─".repeat(width.saturating_sub(text_width(&heading)))
     ));
     for (i, row) in rows.iter().take(count).enumerate() {
         out.push_str(&format!(
-            "\x1b[{};{}H{}│{}{}{}│",
+            "\x1b[{};{}H{}│{}{}{}{}│",
             y + i + 2,
             x + 1,
             base,
+            dim.filter(|(_, index)| *index == i).map(|(color, _)| color).unwrap_or(""),
             if selected == Some(i) { "\x1b[7m" } else { "" },
             fit(row, width),
             base
@@ -343,5 +399,13 @@ mod tests {
         assert_eq!(clean("a\x1b]52;c;evil\x07\u{202e}b"), "a]52;c;evilb");
         assert_eq!(fit("abcdef", 3), "abc");
         assert_eq!(fit("a", 3), "a  ");
+        assert_eq!(Wrapped::new("abcdef", 2).collect::<Vec<_>>(), vec!["ab", "cd", "ef"]);
+        assert_eq!(Wrapped::new("", 2).collect::<Vec<_>>(), vec![""]);
+        assert!(Wrapped::new("abc", 0).next().is_none());
+        assert_eq!(panes(100, true), (22, 40, 36));
+        assert_eq!(panes(100, false), (22, 77, 0));
+        assert_eq!(bytes(999), "999 B");
+        assert_eq!(bytes(1000), "1.0 kB");
+        assert_eq!(bytes(1_200_000_000), "1.2 GB");
     }
 }

@@ -216,20 +216,33 @@ impl Player {
             word("relative"),
         ])
     }
-    pub fn line(&self) -> String {
+    pub fn seek_at(&mut self, cell: usize, columns: usize) -> io::Result<()> {
+        if self.socket.is_none() || self.duration <= 0.0 { return Ok(()); }
+        let (start, length) = self.track(columns);
+        let ratio = cell.saturating_sub(start).min(length.saturating_sub(1)) as f64 / length.saturating_sub(1).max(1) as f64;
+        self.command(vec![word("seek"), Json::Num((ratio * 100.0).to_string()), word("absolute-percent")])
+    }
+    fn track(&self, columns: usize) -> (usize, usize) {
+        const PLAY_WIDTH: usize = 7;
+        const CONTROL_GAP: usize = 2;
+        let clocks = format!("{} / {}", clock(self.position), clock(self.duration));
+        let start = PLAY_WIDTH + CONTROL_GAP;
+        (start, columns.saturating_sub(start + CONTROL_GAP + clocks.len()).max(1))
+    }
+    pub fn line(&self, columns: usize) -> String {
         if self.socket.is_none() && self.error.is_empty() {
             return "Loading media…".into();
         }
+        let (_, length) = self.track(columns);
+        let ratio = if self.duration > 0.0 { (self.position / self.duration).clamp(0.0, 1.0) } else { 0.0 };
+        let position = (ratio * length.saturating_sub(1) as f64).round() as usize;
+        let track: String = (0..length).map(|cell| if cell == position { if self.control == 1 { '◆' } else { '●' } } else { '─' }).collect();
         format!(
-            "{}{}{}  {} Seek  {} / {}{}",
-            if self.control == 0 { "[" } else { "" },
+            "{}{:<5}{}  {}  {} / {}{}",
+            if self.control == 0 { "[" } else { " " },
             if self.paused { "Play" } else { "Pause" },
-            if self.control == 0 { "]" } else { "" },
-            if self.control == 1 {
-                "[>]"
-            } else {
-                "───"
-            },
+            if self.control == 0 { "]" } else { " " },
+            track,
             clock(self.position),
             clock(self.duration),
             if self.buffering { " · Buffering" } else { "" }
@@ -244,9 +257,12 @@ impl Drop for Player {
         cleanup(&self.directory);
     }
 }
-fn clock(seconds: f64) -> String {
+pub fn clock(seconds: f64) -> String {
     let seconds = seconds.max(0.0) as u64;
-    format!("{}:{:02}", seconds / 60, seconds % 60)
+    const SECONDS_PER_HOUR: u64 = 3600;
+    const SECONDS_PER_MINUTE: u64 = 60;
+    if seconds >= SECONDS_PER_HOUR { format!("{}:{:02}:{:02}", seconds / SECONDS_PER_HOUR, seconds % SECONDS_PER_HOUR / SECONDS_PER_MINUTE, seconds % SECONDS_PER_MINUTE) }
+    else { format!("{}:{:02}", seconds / SECONDS_PER_MINUTE, seconds % SECONDS_PER_MINUTE) }
 }
 fn temporary() -> io::Result<PathBuf> {
     let output = Command::new("mktemp")
