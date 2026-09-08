@@ -24,6 +24,8 @@ Item {
     signal pointerMoved()
     // For a parent that lights the pointer's row without moving its own cursor, as ui/ShareBrowser.qml does.
     readonly property bool hovered: pointer.hovered
+    // For ui/Ipc.qml's contextMenuRowProbe: whether the pointer is over this row and where, before a test judges a move.
+    function probe() { return pointer.hovered + " " + Math.round(pointer.mouseX) + " " + Math.round(pointer.mouseY) + " " + Math.round(pointer.restX) + " " + Math.round(pointer.restY) }
 
     readonly property bool isSeparator: root.entry.separator === true
     // Menu.hasSubmenu and not a local test, because a local one read submenu === true and the menu sets an array.

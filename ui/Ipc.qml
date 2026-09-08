@@ -126,6 +126,7 @@ QtObject {
         // pixel derived from a row count the Menus settings section can change under it.
         function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
         function contextMenuRect(): string { return root.fleaWindow.rectOf(root.pane.contextMenu()) }
+        function contextMenuRowProbe(i: int): string { var item = root.pane.contextMenu().itemFor(i); return item ? item.probe() : "" }
         // Where a driven right click reaches the background menu: the centre of the surface that
         // answers for the directory being shown, which in the columns view is the pane's own column
         // and not the peek beside it. An empty directory has no row to aim from, and it is the case

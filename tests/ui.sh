@@ -1634,9 +1634,14 @@ case_menu() {
     key m >/dev/null
     settle
     [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "menu: the m key did not reopen the menu under the resting pointer"
+    # The target is proven before the move is judged: the reopened menu's Rename row is where it was, and the pointer is over it.
+    [[ "$(ipc contextMenuRowCentre "$rest_row")" == "$rest_x $rest_y" ]] || fail "menu: the reopened menu put Rename at $(ipc contextMenuRowCentre "$rest_row"), not $rest_x $rest_y"
+    [[ "$(ipc contextMenuRowProbe "$rest_row")" == "true "* ]] || fail "menu: the pointer is not over Rename after the reopen, probe '$(ipc contextMenuRowProbe "$rest_row")'"
     [[ "$(ipc contextMenuCursor)" == "0" ]] || fail "menu: a menu opened under a resting pointer moved its cursor to row $(ipc contextMenuCursor)"
+    printf 'MENU probe before the move: %s\n' "$(ipc contextMenuRowProbe "$rest_row")"
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 3 -y 0 >/dev/null 2>&1
     settle
+    printf 'MENU probe after the move: %s\n' "$(ipc contextMenuRowProbe "$rest_row")"
     [[ "$(ipc contextMenuCursor)" == "$rest_row" ]] || fail "menu: the pointer moved inside row $rest_row (Rename) and the cursor stayed on row $(ipc contextMenuCursor)"
     printf 'MENU pointer rest=0 moved=%s\n' "$rest_row"
     key -k Escape >/dev/null
@@ -6924,7 +6929,9 @@ vaapi_warning="VAAPITextureConverter: No rhi or non openGL based RHI"
 # case_formats and case_previewviews open a file with no permission bits on purpose; Qt names it, and this run's fixture path is the whole match.
 unreadable_warning="$fixture_root/formats/shut.jpg"
 unreadable_warning2="$fixture_root/previewviews/shut.jpg"
-if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
+# Qt has no HEIC plugin on Omarchy and says so for the original; the preview then stands the thumbnail in, which case_previewviews proves.
+heic_warning="$fixture_root/previewviews/p.heic"
+if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" -e "$heic_warning" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
     printf 'FAIL log\n'
     failures=$((failures + 1))
 fi
