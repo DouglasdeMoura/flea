@@ -66,7 +66,7 @@ stale_fixture="$FIXTURE_ROOT/flea-ui-stale-$$"
 thumb_rows=200
 # A settle is 120 ms and a round trip through the pool is tens of ms, so a screen has a second.
 thumb_fill_s=20
-# ydotool delivers 200 detents in 0.15 s, so a fling has to be this long to outlast one IPC sample.
+# 1500 detents carry any fixture past its last row, so the cursor witness in case_thumbs moves whatever the notch rate.
 fling_clicks=1500
 # The backend's own DRAIN_LIMIT is 25 s, so anything alive past this is wedged rather than draining.
 drain_wait_s=30
@@ -1757,13 +1757,19 @@ case_background() {
     done
     [[ "$(ipc path)" == "$dir/dest" ]] || fail "background: the case is in $(ipc path), not $dir/dest"
     [[ "$(ipc total)" == "0" ]] || fail "background: $dir/dest listed $(ipc total) rows, not 0"
-    # The mark has to paint, not only be flagged: a z below the view's own paint hid it outright once.
-    shot background-empty
-    local mark lit
+    # The mark has to paint, not only be flagged (a z below the view's paint once hid it), and its draw is blank for its first 380 ms (ui/FleaMark.qml), so poll one draw cycle.
+    local mark lit=0 shots=0
     mark=$(ipc emptyMarkRect)
     set -- $mark
-    lit=$(count_pixels "$evidence_dir/background-empty.png" "${3}x${4}+${1}+${2}" "((r+g+b)/3) > 0.25")
-    (( lit > 0 )) || fail "background: the empty mark painted no pixel inside ${3}x${4}+${1}+${2}"
+    for _attempt in $(seq 1 15); do
+        omarchy-drive shot "$evidence_dir/background-empty.png" flea >/dev/null
+        shots=$_attempt
+        lit=$(count_pixels "$evidence_dir/background-empty.png" "${3}x${4}+${1}+${2}" "((r+g+b)/3) > 0.25")
+        (( lit > 0 )) && break
+        sleep 0.2
+    done
+    printf 'SHOT %s\nBACKGROUND mark rect=%s lit=%s shots=%s\n' "$evidence_dir/background-empty.png" "$mark" "$lit" "$shots"
+    (( lit > 0 )) || fail "background: the empty mark painted no pixel inside ${3}x${4}+${1}+${2} across $shots shots"
     # The empty listing is also the strongest case for this menu, and it has no row to aim from.
     click_background
     settle
@@ -2612,21 +2618,19 @@ case_thumbs() {
     [[ "$pitch" == "$row_height" ]] || fail "a thumbnail made the rendered pitch $pitch, not the $row_height the theme asks for"
 
     # Nothing is requested while the list is moving: the cursor tracks the viewport, so it is the witness.
-    local wx wy ww wh before_requests moved_without_request cursor_a cursor_b scroller
+    local wx wy ww wh before_requests moved cursor_a cursor_b
     read -r wx wy ww wh < <(window_box)
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
     before_requests=$(ipc thumbRequests)
-    moved_without_request=0
-    # Every detent lands before the scroll call returns, so the fling is sampled while it is still being sent.
-    omarchy-drive scroll down "$fling_clicks" >/dev/null &
-    scroller=$!
+    # Read before the fling starts: the list saturates within its first notches, 21 of 1500 here, so a sample taken during it already reads the end.
     cursor_a=$(ipc cursor)
-    wait "$scroller"
+    omarchy-drive scroll down "$fling_clicks" >/dev/null
     sleep 0.5
     cursor_b=$(ipc cursor)
-    [[ "$cursor_b" != "$cursor_a" ]] && moved_without_request=1
-    printf 'THUMBS fling before=%s during_samples=%s after=%s\n' \
-        "$before_requests" "$moved_without_request" "$(ipc thumbRequests)"
+    moved=0
+    [[ "$cursor_b" != "$cursor_a" ]] && moved=1
+    printf 'THUMBS fling before=%s cursor=%s..%s moved=%s after=%s\n' \
+        "$before_requests" "$cursor_a" "$cursor_b" "$moved" "$(ipc thumbRequests)"
     sleep 1
 
     # Every number is read while the window lives and asserted after it dies, so the cache count can go first.
@@ -2651,17 +2655,8 @@ case_thumbs() {
     # And a lower bound, because a settle timer no scroll ever restarts would also issue none at all.
     (( requests - before_requests >= 1 )) \
         || fail "the fling stopped on rows nothing had asked for and settled without asking"
-    # Measured before and after the fling rather than sampled inside it. The sampled form asked to
-    # catch the cursor moving with no request in flight, and could not do so reliably: it read a
-    # settled value and reported zero samples on a fling that had plainly moved 9 rows, which made
-    # the witness unprovable rather than false, and that is worse. Not because the fling is short.
-    # It is 1500 ydotool spawns, and 1500 spawns of /usr/bin/true alone take about 0.8 s here, against
-    # an ipc round trip of a few hundred ms (190 to 565 ms measured, see clip_seconds below), so the
-    # fling outlasts a round trip several times over, as fling_clicks says. Why the sampling window
-    # admitted so few reads is an open question. What the witness still does is the job it was for:
-    # a fling that moves nothing fails here instead of passing quietly, and the "nothing is requested
-    # while moving" property is carried by the request-count bounds above.
-    (( moved_without_request >= 1 )) \
+    # A fling that moves nothing fails here instead of passing quietly; "nothing is requested while moving" is carried by the request-count bounds above.
+    (( moved >= 1 )) \
         || fail "the fling did not move the viewport at all, so the bounds above prove nothing"
     [[ "$(ls -A "$cache_large" | grep -c '^\.flea-')" == "0" ]] || fail "a temp file was left in the shared cache"
 }
