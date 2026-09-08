@@ -6575,7 +6575,8 @@ PYEOF
     printf 'fn main() {\n    println!("hi");\n}\n' > "$dir/main.rs"
     printf '{"a": 1}\n' > "$dir/data.json"
     ( cd "$dir" && bsdtar -a -cf a.zip sample.txt notes.md && bsdtar --zstd -cf b.tar.zst sample.txt main.rs )
-    : > "$dir/empty.zip"
+    # A valid archive with no members: the end-of-central-directory record alone, 22 bytes.
+    { printf 'PK\005\006'; head -c 18 /dev/zero; } > "$dir/empty.zip"
     head -c 4096 /dev/urandom > "$dir/corrupt.zip"
     ln -s "$dir/sample.txt" "$dir/link-file"
     mkdir -p "$dir/subdir"
@@ -6656,6 +6657,9 @@ case_formats() {
     column_expect sample.txt text
     for _attempt in $(seq 1 40); do [[ "$(ipc columnTextLines)" == "hello from flea|"* ]] && break; sleep 0.1; done
     [[ "$(ipc columnTextLines)" == "hello from flea|second line"* ]] || fail "formats: sample.txt's lines read '$(ipc columnTextLines)'"
+    shot formats-sample-lines
+    lit=$(lit_in_rect "$evidence_dir/formats-sample-lines.png" $(ipc columnLinesRect))
+    (( lit > 50 )) || fail "formats: sample.txt's lines box painted $lit lit pixels"
     column_expect notes.md text
     for _attempt in $(seq 1 40); do [[ "$(ipc columnTextLines)" == "# Notes"* ]] && break; sleep 0.1; done
     [[ "$(ipc columnTextLines)" == "# Notes"* ]] || fail "formats: notes.md's lines read '$(ipc columnTextLines)'"
@@ -6670,12 +6674,17 @@ case_formats() {
     column_expect a.zip archive
     for _attempt in $(seq 1 40); do [[ "$(ipc columnArchiveNames)" == *"sample.txt"* ]] && break; sleep 0.1; done
     [[ "$(ipc columnArchiveNames)" == *"sample.txt"* && "$(ipc columnArchiveNames)" == *"notes.md"* ]] || fail "formats: a.zip's members read '$(ipc columnArchiveNames)'"
+    shot formats-zip-members
+    lit=$(lit_in_rect "$evidence_dir/formats-zip-members.png" $(ipc columnArchiveRect))
+    (( lit > 50 )) || fail "formats: a.zip's member box painted $lit lit pixels"
     column_expect b.tar.zst archive
     for _attempt in $(seq 1 40); do [[ "$(ipc columnArchiveNames)" == *"main.rs"* ]] && break; sleep 0.1; done
     [[ "$(ipc columnArchiveNames)" == *"main.rs"* ]] || fail "formats: b.tar.zst's members read '$(ipc columnArchiveNames)'"
-    column_expect empty.zip error
-    [[ "$(ipc columnFailure)" == "This archive could not be read." ]] || fail "formats: empty.zip's sentence is '$(ipc columnFailure)'"
+    column_expect empty.zip archive
+    sleep 0.5
+    [[ "$(ipc columnArchiveNames)" == "" && "$(ipc columnFailure)" == "" ]] || fail "formats: the empty archive reads members '$(ipc columnArchiveNames)', failure '$(ipc columnFailure)'"
     column_expect corrupt.zip error
+    [[ "$(ipc columnFailure)" == "This archive could not be read." ]] || fail "formats: corrupt.zip's sentence is '$(ipc columnFailure)'"
     column_expect link-file symlink
     column_expect link-dir symlink
     column_expect link-broken symlink
@@ -6692,10 +6701,20 @@ case_formats() {
     kill_flea
 }
 
+# Lit pixels inside the preview's content box, inset past any border; the name and floor are the caller's.
+preview_surface_lit() {
+    local tag="$1" floor="$2" what="$3" sx sy sw sh lit
+    read -r sx sy sw sh <<< "$(ipc previewSurfaceRect)"
+    [[ -n "$sh" ]] && (( sw > 12 && sh > 12 )) || fail "previewviews: $what has no box on screen ('$(ipc previewSurfaceRect)')"
+    shot "previewviews-$tag" >&2
+    lit=$(lit_in_rect "$evidence_dir/previewviews-$tag.png" "$((sx + 6))" "$((sy + 6))" "$((sw - 12))" "$((sh - 12))")
+    (( lit > floor )) || fail "previewviews: $what painted $lit lit pixels inside its box"
+}
+
 # The shared Space preview entered from each view on the same rows, judged on content, with the
 # lifetimes GM's review named: a column player dies on a view switch and yields to Space.
 case_previewviews() {
-    local dir="$fixture_root/previewviews" mode wx wy cx cy p1 p2 _attempt
+    local dir="$fixture_root/previewviews" mode name wx wy cx cy fx fy fw fh p1 p2 changed _attempt
     formats_fixture "$dir"
     launch "$dir"
     wait_listing 26
@@ -6738,10 +6757,77 @@ case_previewviews() {
         switch_view "$mode"
         key -k space >/dev/null
         for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "archive" ]] && break; sleep 0.1; done
-        [[ "$(ipc previewKind)" == "archive" && "$(ipc previewState)" == "archive" ]] || fail "$mode: Space on a.zip: kind $(ipc previewKind), state $(ipc previewState)"
+        [[ "$(ipc previewKind)" == "archive" && "$(ipc previewState)" == "archive" && "$(ipc previewArchiveNames)" == *"sample.txt"* ]] \
+            || fail "$mode: Space on a.zip: kind $(ipc previewKind), state $(ipc previewState), members '$(ipc previewArchiveNames)'"
+        preview_surface_lit "$mode-zip" 50 "a.zip's members"
         key -k Escape >/dev/null
         settle
-        printf 'PREVIEWVIEWS %s image=ok pdf=ok error=ok archive=ok\n' "$mode"
+        # The three other image formats through the original file, not a cached thumbnail: PreviewImage reads the file itself.
+        for name in p.png p.webp p.heic; do
+            switch_view list
+            goto_row "$(row_index_of "$name")"
+            switch_view "$mode"
+            key -k space >/dev/null
+            for _attempt in $(seq 1 60); do [[ "$(ipc previewState)" == "image" ]] && break; sleep 0.1; done
+            [[ "$(ipc previewKind)" == "image" && "$(ipc previewState)" == "image" ]] || fail "$mode: Space on $name: kind $(ipc previewKind), state $(ipc previewState)"
+            preview_surface_lit "$mode-$name" 200 "$name's picture"
+            key -k Escape >/dev/null
+            settle
+        done
+        for name in sample.txt main.rs; do
+            switch_view list
+            goto_row "$(row_index_of "$name")"
+            switch_view "$mode"
+            key -k space >/dev/null
+            for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "text" ]] && break; sleep 0.1; done
+            [[ "$(ipc previewKind)" == "text" && "$(ipc previewText)" == *"$([[ $name == sample.txt ]] && echo 'hello from flea' || echo 'fn main')"* ]] \
+                || fail "$mode: Space on $name: kind $(ipc previewKind), state $(ipc previewState), text '$(ipc previewText | cut -c1-40)'"
+            preview_surface_lit "$mode-$name" 50 "$name's text"
+            key -k Escape >/dev/null
+            settle
+        done
+        # Audio and the three video containers: a player exists, its position advances, the picture moves, and Escape empties the loader.
+        for name in tone.wav v.mp4 v.mkv v.webm; do
+            switch_view list
+            goto_row "$(row_index_of "$name")"
+            switch_view "$mode"
+            key -k space >/dev/null
+            for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "playing" ]] && break; sleep 0.1; done
+            [[ "$(ipc previewMediaLoaded)" == "true" && "$(ipc previewState)" == "playing" ]] || fail "$mode: Space on $name: loaded $(ipc previewMediaLoaded), state $(ipc previewState)"
+            sleep 0.8
+            p1=$(ipc previewPosition)
+            shot "previewviews-$mode-$name-1"
+            sleep 1.2
+            p2=$(ipc previewPosition)
+            shot "previewviews-$mode-$name-2"
+            (( p2 > p1 )) || fail "$mode: $name's position did not advance, $p1 then $p2"
+            if [[ "$name" != tone.wav ]]; then
+                read -r fx fy fw fh <<< "$(ipc previewSurfaceRect)"
+                (( fw > 0 && fh > 0 )) || fail "$mode: $name's picture has no box"
+                changed=$(magick \( "$evidence_dir/previewviews-$mode-$name-1.png" -crop "${fw}x${fh}+${fx}+${fy}" +repage \) \
+                    \( "$evidence_dir/previewviews-$mode-$name-2.png" -crop "${fw}x${fh}+${fx}+${fy}" +repage \) \
+                    -compose difference -composite -threshold 10% -format "%[fx:int(mean*w*h+0.5)]" info:)
+                (( changed > 1000 )) || fail "$mode: $name's picture changed $changed pixels in 1.2 s of playback"
+            fi
+            key -k Escape >/dev/null
+            settle
+            [[ "$(ipc previewOpen)" == "false" && "$(ipc previewMediaLoaded)" == "false" ]] || fail "$mode: after Escape on $name, open $(ipc previewOpen), media loaded $(ipc previewMediaLoaded)"
+        done
+        # Bad then good in the image reader: an unreadable picture, then two rows up to a readable one.
+        switch_view list
+        goto_row "$(row_index_of shut.jpg)"
+        switch_view "$mode"
+        key -k space >/dev/null
+        for _attempt in $(seq 1 40); do [[ "$(ipc previewState)" == "This image could not be read." ]] && break; sleep 0.1; done
+        [[ "$(ipc previewState)" == "This image could not be read." ]] || fail "$mode: Space on shut.jpg reads '$(ipc previewState)'"
+        key k >/dev/null
+        key k >/dev/null
+        for _attempt in $(seq 1 60); do [[ "$(ipc previewState)" == "image" ]] && break; sleep 0.1; done
+        [[ "$(ipc previewState)" == "image" ]] || fail "$mode: the preview did not recover from shut.jpg to p.webp, state $(ipc previewState)"
+        preview_surface_lit "$mode-recovered" 200 "the recovered picture"
+        key -k Escape >/dev/null
+        settle
+        printf 'PREVIEWVIEWS %s image=4 pdf=ok error=ok archive=ok text=2 media=4 recovery=ok\n' "$mode"
     done
     # The column player and the two things that must end it: another view, and Space on the same file.
     switch_view list
