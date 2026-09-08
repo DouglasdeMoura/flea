@@ -20,7 +20,7 @@ Item {
     property bool compact: false
 
     signal activated()
-    // The parent owns the cursor, so a pointer that moves over the row asks for it; a menu opened under a resting pointer asks nothing, or Enter would fire the pointer's row (0d626ed).
+    // The parent owns the cursor, so a pointer that moves onto the row asks for it; a menu opened under a resting pointer asks nothing, or Enter would fire the pointer's row (0d626ed).
     signal pointerMoved()
     // For a parent that lights the pointer's row without moving its own cursor, as ui/ShareBrowser.qml does.
     readonly property bool hovered: pointer.hovered
@@ -156,26 +156,22 @@ Item {
         }
     }
 
-    // A MouseArea rather than a HoverHandler, because only it reports hover motion: the first position after entry is where the pointer rested (a menu can open under it), and any later, different one is the pointer moving.
-    MouseArea {
+    HoverHandler {
         id: pointer
-        anchors.fill: parent
         enabled: !root.isSeparator
-        acceptedButtons: Qt.NoButton
-        hoverEnabled: true
-        readonly property bool hovered: containsMouse
+        // The first point after entry is where the pointer rested; only a later, different one is motion.
         property bool armed: false
-        property real restX: 0
-        property real restY: 0
-        onEntered: pointer.armed = false
-        onPositionChanged: function (mouse) {
+        property point restingAt
+        onHoveredChanged: pointer.armed = false
+        onPointChanged: {
+            if (!pointer.hovered)
+                return
             if (!pointer.armed) {
                 pointer.armed = true
-                pointer.restX = mouse.x
-                pointer.restY = mouse.y
+                pointer.restingAt = pointer.point.position
                 return
             }
-            if (mouse.x !== pointer.restX || mouse.y !== pointer.restY)
+            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
                 root.pointerMoved()
         }
     }

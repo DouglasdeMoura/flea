@@ -1614,12 +1614,15 @@ case_menu() {
     [[ "$(ipc cursor)" == "0" ]] || fail "the list did not take the keyboard back after the menu closed"
     # The pointer rule, both halves: a menu opened under a resting pointer keeps its first row (0d626ed,
     # or Enter fires the pointer's row), and a pointer that then moves lights the row it moved onto.
-    local rest_x rest_y
+    # An action row by name: a separator sits at index 2 and disables hover on purpose, so an index alone proves nothing.
+    local rest_x rest_y rest_row
     key m >/dev/null
     settle
     [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "menu: the m key did not open the menu at the cursor"
-    read -r rest_x rest_y <<< "$(ipc contextMenuRowCentre 2)"
-    [[ -n "$rest_y" ]] || fail "menu: the menu has no row 2 to rest the pointer on"
+    rest_row=$(menu_row_index "Rename")
+    [[ -n "$rest_row" && "$rest_row" -ge 0 ]] || fail "menu: no Rename row in $(ipc contextMenuEntries)"
+    read -r rest_x rest_y <<< "$(ipc contextMenuRowCentre "$rest_row")"
+    [[ -n "$rest_y" ]] || fail "menu: the menu has no row $rest_row to rest the pointer on"
     key -k Escape >/dev/null
     settle
     read -r wx wy ww wh < <(window_box)
@@ -1633,8 +1636,8 @@ case_menu() {
     [[ "$(ipc contextMenuCursor)" == "0" ]] || fail "menu: a menu opened under a resting pointer moved its cursor to row $(ipc contextMenuCursor)"
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 3 -y 0 >/dev/null 2>&1
     settle
-    [[ "$(ipc contextMenuCursor)" == "2" ]] || fail "menu: the pointer moved onto row 2 and the cursor stayed on row $(ipc contextMenuCursor)"
-    printf 'MENU pointer rest=0 moved=2\n'
+    [[ "$(ipc contextMenuCursor)" == "$rest_row" ]] || fail "menu: the pointer moved inside row $rest_row (Rename) and the cursor stayed on row $(ipc contextMenuCursor)"
+    printf 'MENU pointer rest=0 moved=%s\n' "$rest_row"
     key -k Escape >/dev/null
     settle
     centre=$(ipc rowCentre 0)
