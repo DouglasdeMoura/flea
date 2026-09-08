@@ -90,6 +90,15 @@ Item {
         opacity: root.hoverOpacity
     }
 
+    Rectangle {
+        anchors.top: parent.top
+        width: parent.width
+        height: Theme.spacing.hairline
+        visible: root.isGroup && root.y > 0
+        color: Theme.color.muted
+        opacity: 0.4
+    }
+
     // A heading and a hint are the only two rows that are not a label and a control, so they draw
     // instead of the pair below rather than beside it.
     Text {
@@ -250,11 +259,13 @@ Item {
             width: root.hasBox ? Theme.markSize : 0
             height: Theme.markSize
             color: "transparent"
-            border.width: Theme.spacing.hairline
+            border.width: 2 * Theme.spacing.hairline
             border.color: root.boxGlyph.length > 0 ? Theme.color.accent : Theme.color.muted
 
             Flea.Glyph {
-                anchors.fill: parent
+                anchors.centerIn: parent
+                width: Theme.markSize / 2
+                height: width
                 visible: root.boxGlyph.length > 0
                 name: root.boxGlyph
                 color: Theme.color.accent

@@ -25,7 +25,7 @@ Item {
                 height: Theme.hitMin
                 color: "transparent"
                 border.width: Theme.spacing.hairline
-                border.color: index === root.row.actionIndex ? Theme.color.accent : Theme.color.muted
+                border.color: enabled && index === root.row.actionIndex ? Theme.color.accent : Theme.color.muted
                 Text {
                     id: label
                     anchors.centerIn: parent

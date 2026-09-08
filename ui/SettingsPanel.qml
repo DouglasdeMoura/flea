@@ -13,8 +13,7 @@ Item {
 
     property bool opened: false
     property Item focusHolder: null
-    // "keys", "display" or "menus"; the panel opens on Display because that is the promise it
-    // carries, and the rail keeps the boards' own relative order around it.
+    // Reopening keeps the last section selected in this process.
     property string section: "view"
     property int cursor: 0
     property int selectedFavourite: -1
@@ -31,9 +30,7 @@ Item {
     // The Menus board's work-area clamp: a floating surface never renders taller than its bounds
     // less this margin, and the pane scrolls inside that while the rail stays put.
     readonly property int clampMargin: 8
-    // GM's ruling for mouse users: the card keeps one height whichever section is up, so the rail and
-    // the rows never move under the pointer on a switch; a taller section scrolls inside it. The
-    // height is the median section's, so no section sits in a card mostly empty; see ui/SettingsPane.qml.
+    // GM's later ruling sizes every section to the tallest pane, clamped to the window.
     readonly property int chromeAndBorder: Theme.chromeHeight + 2 * Theme.spacing.hairline
     readonly property real groundOpacity: 0.5
     // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
@@ -247,8 +244,7 @@ Item {
         id: card
         anchors.centerIn: parent
         width: Math.min(root.panelWidth, Math.max(0, root.width - 2 * root.clampMargin))
-        // Each side carries its own inset, above the first row and below the last, the way
-        // Settings.dc.html gives the rail column a 10 of its own and the pane the row padding.
+        // Settings.html gives the rail and pane separate vertical insets.
         height: Math.min(root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
                                                           pane.tallest + 2 * Theme.spacing.rowPaddingY),
                          root.height - 2 * root.clampMargin)
@@ -281,10 +277,21 @@ Item {
                 anchors.top: parent.top
                 height: Theme.chromeHeight
 
-                Text {
-                    id: title
+                Flea.Glyph {
+                    id: titleMark
                     anchors.left: parent.left
                     anchors.leftMargin: Theme.spacing.rowPaddingX
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Theme.chromeMarkSize
+                    height: width
+                    name: "sliders"
+                    color: Theme.color.accent
+                }
+
+                Text {
+                    id: title
+                    anchors.left: titleMark.right
+                    anchors.leftMargin: Theme.spacing.gap
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Settings"
                     color: Theme.color.foreground

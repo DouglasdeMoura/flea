@@ -6266,12 +6266,12 @@ token_of() {
 }
 
 # The SettingsScale board's layout table, base|bodySmall|caption|paddingY|rowHeight|iconSize|mark.
-# mark is the board's own unrounded number rounded to whole pixels, which is what Theme draws.
+# Mark geometry retains the board's fractional bodySmall * 1.45 size.
 assert_board_row() {
     local want_base="$1" row got
-    for row in "9|8|7|5|24|14|12" "10|9|8|5|26|16|13" "11|10|9|6|30|18|15" \
-               "12|11|10|6|32|20|16" "14|13|12|7|37|23|19" "16|15|13|8|43|27|22" \
-               "20|18|17|10|52|32|26"; do
+    for row in "9|8|7|5|24|14|11.6" "10|9|8|5|26|16|13.05" "11|10|9|6|30|18|14.5" \
+               "12|11|10|6|32|20|15.95" "14|13|12|7|37|23|18.85" "16|15|13|8|43|27|21.75" \
+               "20|18|17|10|52|32|26.1"; do
         IFS='|' read -r base body caption padding height icon mark <<< "$row"
         [[ "$base" == "$want_base" ]] || continue
         got="$(token_of baseSize)|$(token_of bodySmall)|$(token_of caption)|$(token_of rowPaddingY)|$(token_of rowHeight)|$(token_of iconSize)|$(token_of markSize)"
