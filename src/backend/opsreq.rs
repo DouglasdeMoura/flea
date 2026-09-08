@@ -129,16 +129,23 @@ pub fn run_transfer(
         let src = PathBuf::from(raw);
         let name = base_name(&src);
         let dst = dest.join(&name);
-        let src_real = src.canonicalize().unwrap_or_else(|_| src.clone());
+        // A symlink is copied or moved as the link itself (copy_any, move_any), so it holds nothing and its target's tree is not its own; only a real directory can contain the destination.
+        let src_is_link = src.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
+        let src_real = if src_is_link { src.clone() } else { src.canonicalize().unwrap_or_else(|_| src.clone()) };
         // A folder into itself or its own subtree: copy_dir would read its own fresh copy until the disk
         // is full, so the refusal ui/js/Drag.js canDropInto makes is made again here, per item.
-        if dest_real.starts_with(&src_real) {
+        if !src_is_link && dest_real.starts_with(&src_real) {
             failed += 1;
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: INTO_ITSELF.to_string() });
             continue;
         }
+        // Where the entry itself lives, link or not: its parent resolved, plus its own name.
+        let src_here = match src.parent() {
+            Some(parent) => parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf()).join(&name),
+            None => src.clone(),
+        };
         // An item dropped into the folder it already lives in: copy_file would truncate it onto itself.
-        if dst == src || dest_real.join(&name) == src_real {
+        if dst == src || dest_real.join(&name) == src_here {
             failed += 1;
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: ALREADY_THERE.to_string() });
             continue;

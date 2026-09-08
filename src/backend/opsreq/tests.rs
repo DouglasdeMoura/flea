@@ -144,6 +144,33 @@ fn the_same_folder_reached_through_a_symlink_is_still_itself() {
     assert_eq!(refusal(rx).3, INTO_ITSELF, "and a folder into its own subtree through a link is still into itself");
 }
 
+// Review of 0.1.6: the guard canonicalised a link source, so a link to a folder could not land inside that folder.
+#[test]
+fn a_link_to_a_folder_lands_inside_that_folder_as_a_link_while_the_folder_itself_is_refused() {
+    let d = TestDir::new("linksource");
+    let real = d.dir("real");
+    d.file("real/a.txt", "body");
+    let out = d.dir("real/out");
+    let link = d.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let (tx, rx) = channel();
+    run_transfer(1, false, vec![link.to_string_lossy().to_string()], out.clone(), Arc::new(AtomicBool::new(false)), tx);
+    let (ok, failed, _, _, entry) = done_line(rx);
+    assert_eq!((ok, failed), (1, 0), "the link is the item, and a link holds nothing");
+    let landed = out.join("link");
+    assert!(landed.symlink_metadata().unwrap().file_type().is_symlink(), "what landed is a link, not a copy of the tree");
+    assert_eq!(std::fs::read_link(&landed).unwrap(), real, "and it still points where the source pointed");
+    assert_eq!(entry.steps, vec![Step::Created { path: landed.clone() }]);
+    let (tx, rx) = channel();
+    run_transfer(2, false, vec![real.to_string_lossy().to_string()], out.clone(), Arc::new(AtomicBool::new(false)), tx);
+    assert_eq!(refusal(rx).3, INTO_ITSELF, "the real folder into its own subtree is still refused");
+    let (tx, rx) = channel();
+    run_transfer(3, true, vec![link.to_string_lossy().to_string()], d.dir("elsewhere"), Arc::new(AtomicBool::new(false)), tx);
+    assert_eq!(done_line(rx).0, 1, "a move of the link is a rename of the link");
+    assert!(!link.exists() && d.join("elsewhere/link").symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(real.join("a.txt").exists(), "and the target was never touched");
+}
+
 #[test]
 fn a_copy_transfer_records_only_what_it_created_and_leaves_the_sources() {
     let d = TestDir::new("transfercopy");
