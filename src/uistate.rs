@@ -354,12 +354,15 @@ mod tests {
             .iter().filter_map(Json::as_str).collect();
         assert_eq!(hidden, ["delete", "newFolder", "copy-path", "copy_path"]);
         // Still bounded: anything that is not an id costs the key its own default, as it always did.
+        let shipped = crate::uischema::defaults();
+        let shipped = shipped
+            .get("menu").and_then(|m| m.get("hidden")).and_then(Json::as_array).expect("shipped menu.hidden").len();
         for bad in [r#"{"menu":{"hidden":["delete","rm -rf /"]}}"#, r#"{"menu":{"hidden":["delete",""]}}"#,
                     r#"{"menu":{"hidden":["delete","a/b"]}}"#, r#"{"menu":{"hidden":["delete",1]}}"#] {
             let read = from_file(bad);
             let fell_back = read
                 .get("menu").and_then(|m| m.get("hidden")).and_then(Json::as_array).expect("menu.hidden");
-            assert_eq!(fell_back.len(), 8, "{} must cost the key its own default", bad);
+            assert_eq!(fell_back.len(), shipped, "{} must cost the key its own default", bad);
         }
     }
 
