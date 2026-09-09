@@ -333,6 +333,13 @@ fn a_path_that_cannot_be_removed_is_counted_failed_and_stays() {
             msg = Some((ok, failed));
         }
     }
+    // 0555 stops an unprivileged process; UID 0 and CAP_DAC_OVERRIDE remove it anyway. The
+    // property is that the verdict reads off the filesystem, so each arm asserts its own truth
+    // and the privileged arm restores nothing, because there is nothing left to restore.
+    if !tree.exists() {
+        assert_eq!(msg, Some((1, 0)), "a path the process could remove is one success");
+        return;
+    }
     std::fs::set_permissions(&tree, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(msg, Some((0, 1)), "a path still on disk afterwards is the failure");
     assert_eq!(std::fs::read_to_string(tree.join("stuck.txt")).unwrap(), "body");

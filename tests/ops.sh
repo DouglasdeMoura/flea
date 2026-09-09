@@ -139,9 +139,15 @@ start_backend
 mkdir -p "$D/perm-locked"; printf 'stuck' > "$D/perm-locked/inner.txt"; chmod 555 "$D/perm-locked"
 send "{\"c\":\"delete\",\"paths\":[\"$D/perm-locked\"]}"
 await '"t":"deleted"' || fail=1
-check "the directory that could not be emptied is one failure" "1" "$(seen '"t":"deleted","ok":0,"failed":1')"
-chmod 755 "$D/perm-locked"
-check "what could not be removed is still there" "stuck" "$(cat "$D/perm-locked/inner.txt" 2>/dev/null)"
+# 0555 stops an unprivileged process and a root or DAC-override one removes it anyway, so the
+# report is judged against what is actually on disk rather than against one environment's answer.
+if [ -d "$D/perm-locked" ]; then
+  check "the directory that could not be emptied is one failure" "1" "$(seen '"t":"deleted","ok":0,"failed":1')"
+  chmod 755 "$D/perm-locked"
+  check "what could not be removed is still there" "stuck" "$(cat "$D/perm-locked/inner.txt" 2>/dev/null)"
+else
+  check "a process that empties it anyway is told one success" "1" "$(seen '"t":"deleted","ok":1,"failed":0')"
+fi
 stop_backend
 
 echo "--- copy transfer, and undo removes what it created ---"
