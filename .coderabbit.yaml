@@ -1,0 +1,8 @@
+# Every .js file in this tree is a QML JavaScript library: it opens with the
+# QML-only `.pragma library` directive, which Biome, a plain-JS tool, cannot
+# parse. Its run here can only report syntax errors on files that load fine
+# under qs, so the tool is turned off rather than fed files it cannot read.
+reviews:
+  tools:
+    biome:
+      enabled: false
