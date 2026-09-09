@@ -681,8 +681,8 @@ fn pointer_key(
                 w,
             );
         }
-        let inside = pointer.x > x
-            && pointer.x <= x + width
+        let inside = pointer.x > x + 1
+            && pointer.x <= x + width + 1
             && pointer.y > y + 1
             && pointer.y <= y + count + 1;
         if inside && m.menu {

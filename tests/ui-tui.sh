@@ -87,6 +87,7 @@ class Native:
         self.address = None
         self.product_pid = None
         self.checks = 0
+        self.undriven = []
         self.environment = os.environ.copy()
         self.environment["FLEA_TUI_TEST_CASE"] = str(self.case)
         self.log = open(self.case / "commands.log", "xb", buffering=0)
@@ -377,7 +378,7 @@ class Native:
             self.snapshot("rename-" + label + "-cancelled", lambda text: "Enter saves" not in text and self.cursor_is("amber"))
         self.key(":")
         self.key("am")
-        self.snapshot("path-completion", lambda text: "amber/" in text.splitlines()[-1])
+        self.snapshot("path-completion", lambda text: text.splitlines()[-1].startswith(": am\u258fber/"))
         self.key("-k", "Tab")
         self.key("-k", "Return")
         self.snapshot("path-completion-opened", lambda text: "1 amber" in text and "1 items" in text)
@@ -428,16 +429,18 @@ class Native:
     def menu_and_panel(self):
         for label, activate in [("letter", lambda: self.key("m")), ("shift-f10", lambda: self.chord("F10", "shift")),
                                 ("menu-key", lambda: self.key("-k", "Menu"))]:
+            hidden_label = "hide hidden" if label == "shift-f10" else "show hidden"
             activate()
-            self.snapshot("menu-" + label, lambda text: "show hidden" in text and "taildrop" in text)
+            self.snapshot("menu-" + label, lambda text: hidden_label in text and "taildrop" in text)
             self.key("r")
-            self.snapshot("menu-" + label + "-contained", lambda text: "show hidden" in text and "Enter saves" not in text)
+            self.snapshot("menu-" + label + "-contained", lambda text: hidden_label in text and "Enter saves" not in text)
             self.key("-k", "Tab")
             self.key("-k", "Return")
             expected = 6 if label != "shift-f10" else 5
-            self.snapshot("menu-" + label + "-activated", lambda text: "show hidden" not in text and f"{expected} items" in text)
+            self.snapshot("menu-" + label + "-activated", lambda text: hidden_label not in text and f"{expected} items" in text)
         self.key(".")
         self.snapshot("menu-hidden-restored", lambda text: "5 items" in text and ".hidden-proof" not in text)
+        self.tiny_menu()
         self.key("?")
         self.snapshot("keymap-panel", lambda text: "\u2500 keys " in text and "open" in text)
         self.key("r")
@@ -448,6 +451,143 @@ class Native:
             self.snapshot("keymap-scroll-" + label, lambda text: "\u2500 keys " in text and self.raw != before)
         self.key("-k", "Escape")
         self.snapshot("keymap-dismissed", lambda text: "\u2500 keys " not in text and "5 items" in text)
+
+    def cell_geometry(self):
+        window = self.identity()
+        rows, columns, pixels_x, pixels_y = self.terminal_size()
+        monitors = json.loads(command(["hyprctl", "monitors", "-j"]))
+        scale = next(item["scale"] for item in monitors if item["id"] == window["monitor"])
+        if min(rows, columns, pixels_x, pixels_y, scale) <= 0:
+            raise RuntimeError("native terminal did not report usable cell geometry")
+        return window, (rows, columns), (pixels_x / columns / scale, pixels_y / rows / scale)
+
+    def resize_window(self, width, height, label):
+        window = self.identity()
+        if not re.fullmatch(r"0x[0-9a-fA-F]+", self.address) or min(width, height) <= 0:
+            raise RuntimeError("native TUI resize has an invalid owned address or extent")
+        if not window["floating"]:
+            self.drive("window", "float", self.address)
+        dispatch = f'hl.dsp.window.resize({{ x = {width}, y = {height}, exact = true, window = "address:{self.address}" }})'
+        result = command(["hyprctl", "dispatch", dispatch]).decode().strip()
+        self.log.write((dispatch + "\n" + result + "\n").encode())
+        if not result.startswith("ok"):
+            raise RuntimeError("compositor refused native TUI resize: " + result)
+        self.drive("window", "center", self.address)
+        self.wait(label, lambda: self.identity()["size"] == [width, height])
+
+    def menu_entry(self, label):
+        # Native menu row: ESC[row;columnH + SGR colours + box border, padded label and box border.
+        chunks = re.split(rb"\x1b\[(\d+);(\d+)H", self.raw)
+        for index in range(1, len(chunks), 3):
+            run = chunks[index + 2]
+            text = ESCAPE.sub(b"", run).decode("utf-8", errors="replace")
+            if text.startswith("\u2502") and text.endswith("\u2502") and text[1:-1].strip() == label:
+                prefix = run.split(label.encode(), 1)[0]
+                colours = re.findall(rb"\x1b\[38;2;[0-9;]+m", prefix)
+                return {"row": int(chunks[index]), "column": int(chunks[index + 1]), "width": len(text),
+                        "selected": b"\x1b[7m" in prefix, "enabled": len(colours) == 1, "text": text}
+        return None
+
+    def click_cell(self, column, row, label):
+        def move(x, y):
+            self.drive("move", x, y)
+            # Compositor warps emit no pointer frame; one uinput pixel delivers terminal motion.
+            self.log.write(b"ydotool mousemove -x 1 -y 0\n")
+            command(["ydotool", "mousemove", "-x", "1", "-y", "0"], env=self.environment)
+
+        window, (rows, columns), (cell_x, cell_y) = self.cell_geometry()
+        if not (1 <= column <= columns and 1 <= row <= rows):
+            raise RuntimeError("native pointer target is outside the measured terminal grid")
+        self.drive("focus", self.address)
+        anchor_x = window["at"][0] + window["size"][0] // 2
+        anchor_y = window["at"][1] + window["size"][1] // 2
+        cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
+        if abs(cursor["x"] - anchor_x) < cell_x and abs(cursor["y"] - anchor_y) < cell_y:
+            anchor_x += round(cell_x * 2)
+        offset = (self.case / "input.bin").stat().st_size
+        # Actual SGR mouse report: ESC[<35;column;rowM. Its coordinates locate the cell without guessing terminal padding.
+        reports = lambda: re.findall(rb"\x1b\[<(\d+);(\d+);(\d+)([Mm])", (self.case / "input.bin").read_bytes()[offset:])
+        move(anchor_x, anchor_y)
+        self.wait(label + "-pointer-anchor", lambda: bool(reports()))
+        anchor = reports()[-1]
+        cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
+        anchor_x, anchor_y = cursor["x"], cursor["y"]
+        target_x = round(anchor_x + (column - int(anchor[1])) * cell_x)
+        target_y = round(anchor_y + (row - int(anchor[2])) * cell_y)
+        if not (window["at"][0] <= target_x < window["at"][0] + window["size"][0]
+                and window["at"][1] <= target_y < window["at"][1] + window["size"][1]):
+            raise RuntimeError("native cell mapping escaped its owned window")
+        if (int(anchor[1]), int(anchor[2])) != (column, row):
+            offset = (self.case / "input.bin").stat().st_size
+            move(target_x, target_y)
+            self.wait(label + "-pointer-cell", lambda: bool(reports()))
+            observed = reports()[-1]
+            if (int(observed[1]), int(observed[2])) != (column, row):
+                raise RuntimeError("native pointer did not reach the requested measured cell")
+            cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
+            target_x, target_y = cursor["x"], cursor["y"]
+        active = json.loads(command(["hyprctl", "activewindow", "-j"]))
+        current = self.identity()
+        if active.get("address") != self.address or current["at"] != window["at"] or current["size"] != window["size"] \
+                or not (window["at"][0] <= target_x < window["at"][0] + window["size"][0]
+                        and window["at"][1] <= target_y < window["at"][1] + window["size"][1]):
+            raise RuntimeError("native pointer target moved or lost focus before activation")
+        offset = (self.case / "input.bin").stat().st_size
+        self.drive("click", target_x, target_y, "left")
+        self.wait(label + "-pointer-press", lambda: any(int(button) == 0 and int(x) == column and int(y) == row and kind == b"M"
+                  for button, x, y, kind in reports()))
+        print(f"TUI_POINTER {label} cell={column},{row} pixel={target_x},{target_y} measured_cell={cell_x},{cell_y}", flush=True)
+
+    def tiny_menu(self):
+        original, cells, (_, cell_y) = self.cell_geometry()
+        self.key("m")
+        peer_ready = True
+        try:
+            self.snapshot("tiny-menu-peer-ready", lambda text: (entry := self.menu_entry("taildrop  \u25b6")) is not None and entry["enabled"])
+        except RuntimeError as error:
+            if str(error) != f"native TUI did not reach tiny-menu-peer-ready within {WAIT_SECONDS}s":
+                raise
+            self.snapshot("tiny-menu-peer-disabled", lambda text: (entry := self.menu_entry("taildrop  \u25b6")) is not None
+                          and not entry["enabled"] and (opened := self.menu_entry("open")) is not None and opened["enabled"])
+            peer_ready = False
+            gap = {"requirement": "Tui.html: six-row root menu scrolls to eligible Taildrop", "state": "undriven",
+                   "reason": f"Taildrop was still disabled after a {WAIT_SECONDS}s readiness wait; Open was enabled",
+                   "evidence": str(self.case / "evidence/tiny-menu-peer-disabled.json")}
+            self.undriven.append(gap)
+            guard(self.case, self.case / "evidence/undriven.json").write_text(json.dumps(self.undriven))
+            print("TUI_UNDRIVEN " + json.dumps(gap), flush=True)
+        try:
+            self.resize_window(original["size"][0], round(original["size"][1] + (6 - cells[0]) * cell_y), "tiny-menu-window")
+            self.wait("tiny-menu-six-rows", lambda: self.terminal_size()[:2] == (6, cells[1]))
+            self.snapshot("tiny-menu-open", lambda text: (entry := self.menu_entry("open")) is not None and entry["selected"]
+                          and self.menu_entry("show hidden") is not None)
+            self.key("-k", "Down")
+            if peer_ready:
+                self.key("-k", "Down")
+                self.snapshot("tiny-menu-taildrop-selected", lambda text: (entry := self.menu_entry("taildrop  \u25b6")) is not None
+                              and entry["selected"] and self.menu_entry("open") is None and self.menu_entry("show hidden") is not None)
+            else:
+                self.snapshot("tiny-menu-hidden-selected", lambda text: (entry := self.menu_entry("show hidden")) is not None
+                              and entry["selected"] and self.menu_entry("open") is not None)
+            entry = self.menu_entry("show hidden")
+            self.click_cell(entry["column"] + entry["width"] - 2, entry["row"], "tiny-menu-right-padding")
+            self.snapshot("tiny-menu-pointer-show", lambda text: self.menu_entry("show hidden") is None and "6 items" in text)
+            self.key("m")
+            self.snapshot("tiny-menu-hide-label", lambda text: self.menu_entry("hide hidden") is not None)
+            entry = self.menu_entry("hide hidden")
+            self.click_cell(entry["column"], entry["row"], "tiny-menu-left-border")
+            self.snapshot("tiny-menu-border-dismissed", lambda text: self.menu_entry("hide hidden") is None and "6 items" in text)
+            self.key("m")
+            self.snapshot("tiny-menu-hide-reopened", lambda text: self.menu_entry("hide hidden") is not None)
+            entry = self.menu_entry("hide hidden")
+            self.click_cell(entry["column"] + 1, entry["row"], "tiny-menu-left-padding")
+            self.snapshot("tiny-menu-pointer-hide", lambda text: self.menu_entry("hide hidden") is None and "5 items" in text)
+        finally:
+            self.resize_window(*original["size"], "tiny-menu-window-restored")
+            if not original["floating"]:
+                self.drive("window", "float", self.address)
+            self.wait("tiny-menu-cells-restored", lambda: self.terminal_size()[:2] == cells)
+        self.snapshot("tiny-menu-restored", lambda text: "5 items" in text and self.menu_entry("hide hidden") is None)
 
     def tabs(self):
         paths = []
@@ -664,7 +804,8 @@ def main():
         assert frame(b"\x1b[Hheader\x1b[2;1H\x1b[7msearch:abc ", 2, 10)[1] == "header\nsearch:abc "
         assert frame(b"\x1b[Hheader\x1b[2;1H1234567890\x1b_Ga=T;DATA\x1b\\", 2, 10)[1] == "header\n1234567890"
         assert frame(b"\x1b[Hheader\x1b[2;1H1234567890\x1bPqPARTIAL", 2, 10)[1] == "header\n1234567890"
-        print("TUI_OBSERVER_SELF_CHECK 5 passed; native coverage not exercised")
+        assert frame("\x1b[Hheader\x1b[2;1H: am\u258f\x1b[38;2;1;2;3mber/ ".encode(), 2, 10)[1].splitlines()[-1].startswith(": am\u258fber/")
+        print("TUI_OBSERVER_SELF_CHECK 6 passed; native coverage not exercised")
         return
     if len(ARGS) == 3 and ARGS[0] == "--child":
         raise SystemExit(child(ARGS[1], ARGS[2]))
@@ -709,6 +850,7 @@ def main():
             "source_status": command(["git", "-C", repo, "status", "--porcelain"]).decode(),
             "harness_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
             "keymap_sha256": hashlib.sha256((repo / "keys.toml").read_bytes()).hexdigest()}))
+        undriven = 0
         for terminal in terminals:
             for preset in presets:
                 native = Native(root, binary, preset, terminal)
@@ -716,7 +858,11 @@ def main():
                     native.smoke()
                 finally:
                     native.cleanup()
-                print(f"TUI_NATIVE terminal={terminal} preset={preset} checks={native.checks} failed=0 visual_inspection=pending", flush=True)
+                undriven += len(native.undriven)
+                print(f"TUI_NATIVE terminal={terminal} preset={preset} checks={native.checks} failed=0 undriven={len(native.undriven)} visual_inspection=pending", flush=True)
+        if undriven:
+            print(f"TUI_INCOMPLETE required_undriven={undriven}; independent coverage finished", flush=True)
+            raise SystemExit(2)
 
 
 try:

@@ -567,7 +567,8 @@ pub fn menu_rows(m: &Model) -> Vec<String> {
     if m.taildrop.submenu {
         return m.taildrop.peers.iter().skip(m.menu_top).map(|p| p.label.clone()).collect();
     }
-    vec!["open".into(), "show hidden".into(), "taildrop  ▶".into()]
+    ["open", if m.hidden { "hide hidden" } else { "show hidden" }, "taildrop  ▶"]
+        .into_iter().skip(m.menu_top).map(str::to_owned).collect()
 }
 pub fn panel_rows(m: &Model, map: &Map) -> Vec<String> {
     let rows = m.properties.clone().unwrap_or_else(|| map.sheet(&m.preset));
@@ -612,7 +613,7 @@ fn overlay(
     ));
     for (i, row) in rows.iter().take(count).enumerate() {
         out.push_str(&format!(
-            "\x1b[{};{}H{}│{}{}{}{}│",
+            "\x1b[{};{}H{}│{}{} {} {}│",
             y + i + 2,
             x + 1,
             base,
@@ -620,7 +621,7 @@ fn overlay(
                 .map(|(color, _)| color)
                 .unwrap_or(""),
             if selected == Some(i) { "\x1b[7m" } else { "" },
-            fit(row, width),
+            fit(row, width.saturating_sub(2)),
             base
         ));
     }
@@ -635,6 +636,25 @@ fn overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scrolled_root_menu_renders_the_selected_action() {
+        let mut model = Model::new(std::path::PathBuf::from("/"), &crate::jsondoc::Json::Null);
+        model.columns = 80;
+        model.height = 4;
+        model.menu_top = 1;
+        model.menu_cursor = 2;
+        let rows = menu_rows(&model);
+        assert_eq!(rows, ["show hidden", "taildrop  ▶"]);
+        assert_eq!(overlay_rect(&rows, model.columns, model.height + 2).3, 2);
+        let mut output = String::new();
+        overlay(&mut output, &rows, model.columns, model.height + 2, "",
+            Some(model.menu_cursor - model.menu_top), "open", None);
+        assert!(output.contains("\x1b[7m taildrop  ▶ │"));
+        assert!(!output.contains("\x1b[7m show hidden"));
+        assert!(output.contains("│ show hidden │"));
+        model.hidden = true;
+        assert_eq!(menu_rows(&model), ["hide hidden", "taildrop  ▶"]);
+    }
     #[test]
     fn confirmation_buttons_stay_visible_and_hit_testable_at_small_sizes() {
         let mut model = Model::new(std::path::PathBuf::from("/"), &crate::jsondoc::Json::Null);
@@ -653,6 +673,30 @@ mod tests {
                     assert!(*y > 0 && *y <= height + 2);
                 }
                 assert_ne!((buttons[0].1, buttons[0].2), (buttons[1].1, buttons[1].2));
+            }
+        }
+    }
+    #[test]
+    fn padded_overlays_preserve_confirmation_and_panel_text() {
+        let mut model = Model::new(std::path::PathBuf::from("/"), &crate::jsondoc::Json::Null);
+        model.deletion = Some(super::super::model::Deletion { token: 1, count: 3, bytes: 42, ..Default::default() });
+        let map = Map::load();
+        for columns in [12, 28, 30, 80] {
+            model.columns = columns;
+            let confirmation = deletion_rows(&model);
+            assert!(confirmation.concat().contains("This deletes them from disk. This cannot be undone."));
+            model.properties = None;
+            let keys = panel_rows(&model, &map);
+            model.properties = Some(vec!["Properties: a-long-file-name-with-an-extension.txt".into()]);
+            let properties = panel_rows(&model, &map);
+            for rows in [confirmation, keys, properties] {
+                let (_, _, width, _) = overlay_rect(&rows, columns, rows.len() + 4);
+                let mut output = String::new();
+                overlay(&mut output, &rows, columns, rows.len() + 4, "", None, "panel", None);
+                for row in rows.iter().filter(|row| !row.trim().is_empty()) {
+                    assert!(text_width(row) <= width - 2, "clipped {row:?} at {columns} columns");
+                    assert!(output.contains(&format!("│ {} │", fit(row, width - 2))));
+                }
             }
         }
     }
