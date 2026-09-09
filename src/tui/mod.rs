@@ -69,7 +69,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     false
                 }
                 Ok(None) => true,
-                Err(error) => { launch_errors.push(format!("Could not observe {}: {}", name, error)); false }
+                Err(error) => { launch_errors.push(format!("Could not observe {}: {}", name, crate::error::io_message(&error))); false }
             });
             for error in launch_errors { model.fail(error); }
             if model.menu_action == "bulkEditor" {
@@ -84,7 +84,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     }
                     Err(error) => {
                         if !terminal.ready() { return Err(error); }
-                        model.fail(error.to_string());
+                        model.fail(crate::error::io_message(&error));
                         model.menu_action.clear();
                         wire.send(vec![("c", wire::word("menuaction")), ("op", wire::word("close")), ("id", wire::number(model.action_id))])?;
                     }
@@ -193,7 +193,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                                 model.player = Some(player);
                             }
                             Err(e) => {
-                                model.fail(format!("Media preview: {}", e));
+                                model.fail(format!("Media preview: {}", crate::error::io_message(&e)));
                                 model.preview_failed = Some(path.clone());
                             }
                         }
@@ -317,7 +317,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             let bytes = terminal.read()?;
             for key in decoder.feed(&bytes, bytes.is_empty()) {
                 if let Err(e) = actions::key(&mut model, &key, &map, &mut wire) {
-                    model.fail(e.to_string());
+                    model.fail(crate::error::io_message(&e));
                 }
             }
             let protocol = if decoder.kitty { graphics::Protocol::Kitty }
@@ -342,7 +342,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
     match result {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("flea: terminal interface: {}", e);
+            eprintln!("flea: terminal interface: {}", crate::error::io_message(&e));
             2
         }
     }

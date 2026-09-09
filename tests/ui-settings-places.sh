@@ -197,7 +197,7 @@ places_drag_row() {
 
 places_concurrent() (
     local dir="$1" expected="$2" first_pid first_id second_pid="" second_id="" second_address=""
-    local instance pid address attempt rows width cursor active
+    local instance pid address attempt rows width cursor active permissions_checks=0
     first_pid=$(flea_pid)
     first_id=$(qs list --all --json | jq -er --arg path "$flea_ui/shell.qml" --argjson pid "$first_pid" '.[] | select(.config_path == $path and .pid == $pid) | .id')
     key -M ctrl -k n -m ctrl >/dev/null

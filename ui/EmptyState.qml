@@ -36,6 +36,7 @@ Item {
     opacity: root.visible ? 1 : 0
 
     Behavior on opacity {
+        id: entranceOpacity
         enabled: root.visible && !Theme.reducedMotion
         NumberAnimation { duration: Motion.durMs.open; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.bezierCurve }
     }
@@ -47,6 +48,7 @@ Item {
         spacing: Theme.spacing.gap
 
         Behavior on anchors.verticalCenterOffset {
+            id: entranceOffset
             enabled: root.visible && !Theme.reducedMotion
             NumberAnimation { duration: Motion.durMs.open; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.bezierCurve }
         }
@@ -113,7 +115,15 @@ Item {
     Connections {
         target: Theme
         function onReducedMotionChanged() {
-            if (Theme.reducedMotion) { fade.stop(); caption.opacity = 1 }
+            if (Theme.reducedMotion) {
+                // Disabling a Behavior leaves its current animation running until the next property write.
+                entranceOpacity.enabled = Qt.binding(function() { return root.visible && !Theme.reducedMotion })
+                entranceOffset.enabled = Qt.binding(function() { return root.visible && !Theme.reducedMotion })
+                root.opacity = Qt.binding(function() { return root.visible ? 1 : 0 })
+                content.anchors.verticalCenterOffset = Qt.binding(function() { return root.visible ? 0 : Motion.translateUpPx })
+                fade.stop()
+                caption.opacity = 1
+            }
         }
     }
 }

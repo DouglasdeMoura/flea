@@ -69,7 +69,8 @@ ShellRoot {
             if (!item)
                 return ""
             var rect = fleaWindow.itemRect(item)
-            return Math.round(rect.x) + " " + Math.round(rect.y) + " " + Math.round(rect.width) + " " + Math.round(rect.height)
+            var left = Math.round(rect.x), top = Math.round(rect.y)
+            return left + " " + top + " " + (Math.round(rect.x + rect.width) - left) + " " + (Math.round(rect.y + rect.height) - top)
         }
         // centreOf's sibling, "x width centre": the edges round because a click needs a whole pixel, the centre keeps three decimals because the misalignment it reads is half of one.
         function boxOf(item) {
@@ -440,7 +441,7 @@ ShellRoot {
                 property Item owner: primaryPane
                 onOwnerChanged: if (!owner) close()
                 visible: owner !== null && (owner === primaryPane || view.dualMode)
-                x: owner ? owner.mapToItem(view, owner.listSlot.x, 0).x : 0
+                x: owner ? (owner === primaryPane ? primaryPane.x : secondPane.x) + owner.listSlot.x : 0
                 y: owner ? tabBar.y + tabBar.height + owner.listSlot.y : 0
                 width: owner ? owner.listSlot.width : 0
                 height: owner ? owner.listSlot.height : 0

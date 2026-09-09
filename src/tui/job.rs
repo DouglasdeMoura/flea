@@ -24,7 +24,7 @@ impl Job {
         let stopped = cancel.clone();
         let (tx, result) = mpsc::channel();
         std::thread::spawn(move || {
-            let result = run(&path, &mut arguments, &stopped).map_err(|e| e.to_string());
+            let result = run(&path, &mut arguments, &stopped).map_err(|e| crate::error::io_message(&e));
             let _ = tx.send(result);
         });
         Self { cancel, result }
@@ -101,4 +101,19 @@ fn run(path: &Path, arguments: &mut [String], cancel: &AtomicBool) -> io::Result
         return Err(io::Error::other("Preview decoder failed"));
     }
     Ok(bytes)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use crate::backend::testdir::TestDir;
+
+    #[test]
+    fn missing_preview_source_reports_plain_worker_error() {
+        assert!(sandbox::available(), "preview worker test requires bwrap and prlimit");
+        let root = TestDir::new("tui-preview-error");
+        let job = Job::start(root.join("missing.pdf"), vec!["/usr/bin/pdfinfo".into(), "{input}".into()]);
+        let result = job.result.recv_timeout(Duration::from_secs(5)).expect("preview worker did not finish");
+        assert_eq!(result.unwrap_err(), "file or folder not found");
+    }
 }

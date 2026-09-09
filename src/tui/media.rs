@@ -141,7 +141,7 @@ impl Player {
                 Ok(false) => return,
                 Ok(true) => {}
                 Err(e) => {
-                    self.error = e.to_string();
+                    self.error = crate::error::io_message(&e);
                     return;
                 }
             }

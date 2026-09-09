@@ -859,7 +859,63 @@ class Native:
                 self.graphics("video-loaded", offset)
             self.chord("Tab", "ctrl")
             self.media_controls(name)
+        self.preview_failures(directory)
         self.navigate(self.case / "listing", "previews-returned", "5 items")
+
+    def preview_failures(self, media):
+        directory = guard(self.case, self.case / "preview-failures")
+        directory.mkdir()
+        image = guard(self.case, directory / "01-image.png")
+        command(["magick", "-size", "16x16", "xc:white", image])
+        for source, name in [("02-pages.pdf", "02-pages.pdf"), ("03-audio.wav", "03-audio.wav")]:
+            shutil.copyfile(guard(self.case, media / source), guard(self.case, directory / name))
+        for index, name in enumerate(["01-image.png", "02-pages.pdf", "03-audio.wav"]):
+            path = guard(self.case, directory / name)
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            path.chmod(0)
+            try:
+                try:
+                    path.read_bytes()
+                except PermissionError:
+                    pass
+                else:
+                    raise RuntimeError("unreadable preview fixture still permits reads")
+                label = "preview-denied-" + path.stem
+                self.navigate(directory, label + "-listing", "3 items")
+                self.key("-k", "Home")
+                for _ in range(index):
+                    self.key("-k", "Down")
+                self.snapshot(label + "-unloaded", lambda text: self.cursor_is(name) and "Ctrl+Space to load preview" in text)
+                self.chord("space", "ctrl")
+                self.snapshot(label, lambda text: re.search("permission denied", text, re.IGNORECASE) and "Esc dismisses" in text
+                              and (index != 1 or "Page 1 / ?" in text))
+                expected = ("Image preview: " if index == 0 else "Media preview: " if index == 2 else "") + "permission denied"
+                if expected not in self.text or "(os error " in self.text:
+                    raise RuntimeError(f"preview error copy is not plain words: {self.text.splitlines()[-1]}")
+                self.chord("Tab", "ctrl")
+                self.chord("Tab", "ctrl")
+                self.snapshot(label + "-persists", lambda text: expected in text and "Esc dismisses" in text and "(os error " not in text)
+                self.key("-k", "Escape")
+                self.snapshot(label + "-acknowledged", lambda text: "Esc dismisses" not in text)
+            finally:
+                guard(self.case, path).chmod(0o600)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                raise RuntimeError("preview refusal changed fixture bytes")
+            self.navigate(self.case / "listing", label + "-left", "5 items")
+            self.navigate(directory, label + "-reopened", "3 items")
+            self.key("-k", "Home")
+            for _ in range(index):
+                self.key("-k", "Down")
+            self.snapshot(label + "-recovery-unloaded", lambda text: self.cursor_is(name) and "Ctrl+Space to load preview" in text)
+            offset = (self.case / "output.bin").stat().st_size
+            self.chord("space", "ctrl")
+            def recovered(text):
+                return self.cursor_is(name) and "Ctrl+Space to load preview" not in text and "Esc dismisses" not in text \
+                    and (index != 1 or "Page 1 / 2" in text) and (index != 2 or "Play" in text and "0:00 / 0:12" in text)
+            self.snapshot(label + "-recovered", recovered)
+            if index != 2:
+                self.graphics(label + "-recovered", offset)
+            self.navigate(self.case / "listing", label + "-finished", "5 items")
 
     def pdf_controls(self):
         controls = ("\u2039", "\u203a", "\u2212", "+", "\u2197")

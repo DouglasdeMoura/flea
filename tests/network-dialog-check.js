@@ -177,13 +177,13 @@ const writerExit = writerSource.slice(writerSource.indexOf('id: writer')).match(
 assert.ok(writerExit, 'production favourites writer exit handler exists');
 const writerEvents = [];
 const writerContext = vm.createContext({
-    root: {failed() {}, wrote() {}, completed(...args) { writerEvents.push(args); }},
+    root: {finish() {}, failed() {}, wrote() {}, completed(...args) { writerEvents.push(args); }},
     writer: {pending: true, requestId: 'network-8', answer: '{broken', errorText: ''},
-    ViewState: {state: {}}, UiState: {withGroup: (state, key, value) => ({...state, [key]: value})}
+    ViewState: {refreshFavourites: () => true}
 });
 vm.runInContext('function exited(code) {' + writerExit[1] + '\n}', writerContext);
 writerContext.exited(0);
-check(writerEvents[0], ['network-8', true, 'Favourites were saved, but their new state could not be read.'],
+check(writerEvents[0], ['network-8', true, 'Favorites were saved, but their new state could not be read.'],
     'exit-zero response parse failure reports a committed operation');
 writerContext.writer.errorText = 'flea: State write refused';
 writerContext.exited(2);
@@ -191,5 +191,9 @@ check(writerEvents[1], ['network-8', false, 'State write refused'], 'failed CLI 
 writerContext.writer.answer = '{"places":{"favourites":[{"label":"Fixture","path":"/fixture"}]}}';
 writerContext.exited(0);
 check(writerEvents[2], ['network-8', true, ''], 'successful writer response reports completion after updating state');
+writerContext.ViewState.refreshFavourites = () => false;
+writerContext.exited(0);
+check(writerEvents[3], ['network-8', true, 'Favorites were saved, but their new state could not be read.'],
+    'failed post-commit read cannot replay the saved operation');
 
 console.log('network dialog: ' + checks + ' checks, 0 failed');
