@@ -160,7 +160,8 @@ Item {
     }
 
     FileView {
-        path: Quickshell.env("HOME") + "/.dropbox"
+        // A FileView directory watch does not report its own removal; its parent does.
+        path: Quickshell.env("HOME")
         preload: false
         watchChanges: true
         printErrors: false

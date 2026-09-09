@@ -134,13 +134,75 @@ def calibration_check(path, dimensions, pixels):
     print("TUI_CALIBRATION_SELF_CHECK 4 passed; native SGR proof not exercised")
 
 
-def child(case, binary):
-    case, binary = Path(case), Path(binary)
+def provider_fixture(case):
+    for directory in ["providers/bin", "home"]:
+        guard(case, case / directory).mkdir(parents=True)
+    binary_path = case / "providers/bin"
+    helpers = {"stty": Path(shutil.which("stty")).resolve(strict=True), "python3": Path(sys.executable).resolve(strict=True)}
+    for name, target in helpers.items():
+        guard(case, binary_path / name).symlink_to(target)
+    for name in ["tailscale", "omarchy-tailscale-send", "wl-copy", "wl-paste"]:
+        helper = guard(case, binary_path / name)
+        helper.write_text("#!/bin/sh\nexec " + shlex.join([shutil.which("bash"), str(SCRIPT), "--provider-helper", str(case), name]) + ' "$@"\n')
+        helper.chmod(0o700)
+    guard(case, case / "providers/calls.jsonl").write_text("")
+    os.mkfifo(guard(case, case / "providers/status-release"), 0o600)
+    theme = Path.home() / ".local/state/omarchy/current/theme/colors.toml"
+    if theme.is_file():
+        destination = guard(case, case / "home/.local/state/omarchy/current/theme/colors.toml")
+        destination.parent.mkdir(parents=True)
+        destination.write_bytes(theme.read_bytes())
+    guard(case, case / "providers/helpers.json").write_text(json.dumps({name: str(path) for name, path in helpers.items()}))
+    return str(binary_path)
+
+
+def provider_helper(case, name, args):
+    case = Path(case)
+    state = json.loads(guard(case, case / "providers/control.json").read_text())
+    call = {"name": name, "args": args, "pid": os.getpid(), "state": state["name"]}
+    if name == "tailscale":
+        if args != ["status", "--json"]:
+            raise RuntimeError("provider fixture refuses every non-status Tailscale invocation")
+        status = state["statusExit"]
+    elif name == "omarchy-tailscale-send":
+        if len(args) < 2 or args[0] not in ("alpha.fixture.invalid", "beta.fixture.invalid"):
+            raise RuntimeError("sender fixture refuses an unexpected peer or empty selection")
+        call["sources"] = [{"path": str(guard(case, Path(path))),
+                            "sha256": hashlib.sha256(guard(case, Path(path)).read_bytes()).hexdigest()} for path in args[1:]]
+        status = state["senderExit"]
+    elif name in ("wl-copy", "wl-paste"):
+        status = 97  # Clipboard spies never connect to the compositor.
+    else:
+        raise RuntimeError("unknown private provider helper")
+    with guard(case, case / "providers/calls.jsonl").open("a") as output:
+        output.write(json.dumps(call) + "\n")
+    if name == "tailscale":
+        if state.get("statusGate"):
+            with guard(case, case / "providers/status-release").open("rb", buffering=0) as release:
+                if release.read(1) != b"r":
+                    raise RuntimeError("status fixture gate closed without its release")
+        print(json.dumps(state["status"]))
+    return status
+
+
+def product_environment(case):
     guard(case, case / "listing")
     environment = os.environ.copy()
     for name, directory in [("XDG_STATE_HOME", "state"), ("XDG_CONFIG_HOME", "config"),
                             ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")]:
         environment[name] = str(guard(case, case / directory))
+    if "FLEA_TUI_PROVIDER_BIN" in environment:
+        expected = str(guard(case, case / "providers/bin"))
+        if environment["FLEA_TUI_PROVIDER_BIN"] != expected:
+            raise RuntimeError("provider PATH does not belong to this native case")
+        environment["PATH"] = expected
+        environment["HOME"] = str(guard(case, case / "home"))
+    return environment
+
+
+def child(case, binary):
+    case, binary = Path(case), Path(binary)
+    environment = product_environment(case)
     # A concrete PTY remains observable from SSH; reopening /dev/tty would select the observer's controlling terminal.
     with open(os.ttyname(sys.stdout.fileno()), "r+b", buffering=0) as terminal:
         before = command(["stty", "-g"], stdin=terminal).decode().strip()
@@ -151,6 +213,56 @@ def child(case, binary):
         after = command(["stty", "-g"], stdin=terminal).decode().strip()
         (case / "exit.json").write_text(json.dumps({"status": status, "before": before, "after": after}))
     return status
+
+
+def provider_self_check():
+    case = Path(tempfile.mkdtemp(prefix="flea-tui-provider-check.", dir="/tmp")).resolve()
+    (case / ".flea-test-sandbox").write_text("Flea provider helper self-check\n")
+    for directory in ("listing", "state", "config", "data", "cache", "fallback"):
+        guard(case, case / directory).mkdir()
+    source = guard(case, case / "listing/source.txt")
+    source.write_text("provider source stays unchanged\n")
+    control = {"name": "self-check", "status": {"BackendState": "NeedsLogin"}, "statusExit": 0, "senderExit": 0}
+    binary_path = provider_fixture(case)
+    guard(case, case / "providers/control.json").write_text(json.dumps(control))
+    fallback = guard(case, case / "fallback/omarchy-tailscale-send")
+    fallback.write_text("#!/bin/sh\nexit 88\n")
+    fallback.chmod(0o700)
+    before = dict(os.environ)
+    try:
+        os.environ["PATH"] = str(fallback.parent) + os.pathsep + before["PATH"]
+        os.environ["FLEA_TUI_PROVIDER_BIN"] = binary_path
+        environment = product_environment(case)
+    finally:
+        os.environ.clear()
+        os.environ.update(before)
+    assert environment["PATH"] == binary_path and environment["HOME"] == str(case / "home")
+    for name, directory in (("XDG_STATE_HOME", "state"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")):
+        assert environment[name] == str(case / directory)
+    assert json.loads(command(["tailscale", "status", "--json"], env=environment)) == control["status"]
+    command(["omarchy-tailscale-send", "alpha.fixture.invalid", source], env=environment)
+    sender = guard(case, case / "providers/bin/omarchy-tailscale-send")
+    held = guard(case, case / "providers/sender-held")
+    sender.rename(held)
+    for exception in (FileNotFoundError, PermissionError):
+        try:
+            subprocess.run(["omarchy-tailscale-send", "alpha.fixture.invalid", str(source)], env=environment, check=True)
+        except exception:
+            pass
+        else:
+            raise AssertionError("private sender absence/permissions fell through to another PATH")
+        if exception is FileNotFoundError:
+            guard(case, held).rename(guard(case, sender))
+            sender.chmod(0o600)
+    sender.chmod(0o700)
+    control["senderExit"] = 7
+    guard(case, case / "providers/control.json").write_text(json.dumps(control))
+    assert subprocess.run(["omarchy-tailscale-send", "alpha.fixture.invalid", str(source)], env=environment).returncode == 7
+    calls = [json.loads(line) for line in guard(case, case / "providers/calls.jsonl").read_text().splitlines()]
+    assert [call["name"] for call in calls] == ["tailscale", "omarchy-tailscale-send", "omarchy-tailscale-send"]
+    assert calls[-1]["args"] == ["alpha.fixture.invalid", str(source)]
+    assert calls[-1]["sources"] == [{"path": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}]
+    print(f"TUI_PROVIDER_SELF_CHECK private-HOME/XDG/PATH no-fallback status exact-dispatch exit-failure clipboard-uninvoked passed; native coverage not exercised; root={case}")
 
 
 class Native:
@@ -417,12 +529,227 @@ class Native:
         self.wait("native-resize", lambda: self.window()["size"] != before and self.terminal_size()[:2] != before_cells)
         self.snapshot("resized", lambda text: "5 items" in text and "1 listing" in text)
         self.geometry("resized", True)
+        self.quit()
+
+    def quit(self):
         self.key("q")
         self.wait("clean-quit", lambda: (self.case / "exit.json").is_file())
         receipt = json.loads((self.case / "exit.json").read_text())
         if receipt["status"] != 0 or receipt["before"] != receipt["after"]:
             raise RuntimeError(f"TUI exit or terminal restoration failed: {receipt}")
         self.wait("terminal-closed", lambda: not self.owned_process(self.product_pid) and self.launcher.poll() is not None)
+
+    def provider_calls(self, name):
+        return [row for line in guard(self.case, self.case / "providers/calls.jsonl").read_text().splitlines()
+                if (row := json.loads(line))["name"] == name]
+
+    def providers(self):
+        self.environment["FLEA_TUI_PROVIDER_BIN"] = provider_fixture(self.case)
+        self.provider_gate = os.open(guard(self.case, self.case / "providers/status-release"), os.O_RDWR | os.O_NONBLOCK)
+        source = guard(self.case, self.case / "listing/charlie.txt")
+        original = source.read_bytes()
+        sender = guard(self.case, self.case / "providers/bin/omarchy-tailscale-send")
+        held_sender = guard(self.case, self.case / "providers/sender-held")
+        taildrop_label = "taildrop  \u25b6"
+
+        def status(name, peer="Alpha", backend="Running", status_exit=0, sender_exit=0, capability=True, gate=False, node=None, address=None, online=True):
+            owner = {"UserID": 1, "Capabilities": ["https://tailscale.com/cap/file-sharing"] if capability else []}
+            peers = {} if peer is None else {node or peer: {"HostName": peer, "DNSName": address or peer.lower() + ".fixture.invalid.",
+                                                          "Online": online, "TaildropTarget": 1, "UserID": 1}}
+            guard(self.case, self.case / "providers/control.json").write_text(json.dumps({"name": name,
+                "status": {"BackendState": backend, "Self": owner, "Peer": peers},
+                "statusExit": status_exit, "senderExit": sender_exit, "statusGate": gate}))
+
+        def chosen(label):
+            row = self.menu_entry(label)
+            return row is not None and row["enabled"] and row["selected"]
+
+        def peer_menu(label, peer="Alpha"):
+            self.key("m")
+            self.snapshot(label + "-eligible", lambda text: chosen("open")
+                          and (row := self.menu_entry(taildrop_label)) is not None and row["enabled"])
+            self.key("-k", "Down")
+            self.key("-k", "Down")
+            self.snapshot(label + "-taildrop-focused", lambda text: chosen(taildrop_label))
+            self.key("-k", "Return")
+            self.snapshot(label + "-peer-focused", lambda text: chosen(peer)
+                          and self.menu_entry("Beta" if peer == "Alpha" else "Alpha") is None)
+
+        def no_clipboard_or_source_change():
+            assert not self.provider_calls("wl-copy") and not self.provider_calls("wl-paste"), "Taildrop touched the clipboard"
+            assert source.read_bytes() == original, "Taildrop changed the source fixture"
+            for call in self.provider_calls("omarchy-tailscale-send"):
+                assert call["args"] == ["alpha.fixture.invalid", str(source)], call
+                assert call["sources"] == [{"path": str(source), "sha256": hashlib.sha256(original).hexdigest()}], call
+
+        status("initial")
+        self.start()
+        self.snapshot("providers-listing", lambda text: "5 items" in text and "charlie.txt" in text)
+        expected = {"PATH": self.environment["FLEA_TUI_PROVIDER_BIN"], "HOME": str(self.case / "home"),
+                    **{name: str(self.case / directory) for name, directory in [("XDG_STATE_HOME", "state"),
+                       ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")]}}
+        actual = dict(row.decode().split("=", 1) for row in Path(f"/proc/{self.product_pid}/environ").read_bytes().split(b"\0") if b"=" in row)
+        terminal = dict(row.decode().split("=", 1) for row in Path(f'/proc/{self.window()["pid"]}/environ').read_bytes().split(b"\0") if b"=" in row)
+        assert all(actual.get(name) == value for name, value in expected.items()), "product provider environment escaped its fixture"
+        assert terminal["PATH"] == self.environment["PATH"] and terminal["HOME"] == os.environ["HOME"], "terminal startup environment changed"
+        guard(self.case, self.case / "evidence/providers-environment.json").write_text(json.dumps({"product": expected,
+            "terminal_path": terminal["PATH"], "terminal_home": terminal["HOME"], "real_sender_fallback": False}))
+        self.key("-k", "Home")
+        self.key("-k", "Down")
+        self.key("-k", "Down")
+        self.snapshot("providers-source", lambda text: self.cursor_is(source.name))
+
+        for scenario, message, calls in [
+            ("missing", "Taildrop: file or folder not found", 0),
+            ("nonexecutable", "Taildrop: permission denied", 0),
+            ("exit-failure", "Taildrop to Alpha failed (exit status: 7)", 1),
+            ("success", "Sent to Alpha", 1),
+        ]:
+            status(scenario, sender_exit=7 if scenario == "exit-failure" else 0)
+            before = len(self.provider_calls("omarchy-tailscale-send"))
+            peer_menu("provider-" + scenario)
+            # Change availability after an eligible peer is selected; PATH has no installed fallback.
+            if scenario == "missing":
+                guard(self.case, sender).rename(guard(self.case, held_sender))
+            elif scenario == "nonexecutable":
+                guard(self.case, sender).chmod(0o600)
+            try:
+                self.key("-k", "Return")
+                self.snapshot("provider-" + scenario + "-result", lambda text: message in text and self.menu_entry("Alpha") is None)
+            finally:
+                if scenario == "missing":
+                    guard(self.case, held_sender).rename(guard(self.case, sender))
+                elif scenario == "nonexecutable":
+                    guard(self.case, sender).chmod(0o700)
+            dispatches = self.provider_calls("omarchy-tailscale-send")
+            assert len(dispatches) == before + calls, (scenario, dispatches)
+            no_clipboard_or_source_change()
+            if scenario != "success":
+                assert "(os error" not in self.text, self.text
+                self.key("m")
+                self.snapshot("provider-" + scenario + "-retained", lambda text: message in text and self.menu_entry("open") is not None)
+                self.key("-k", "Escape")
+                self.snapshot("provider-" + scenario + "-menu-dismissed", lambda text: message in text and self.menu_entry("open") is None)
+                self.key("-k", "Escape")
+                self.snapshot("provider-" + scenario + "-acknowledged", lambda text: message not in text and self.cursor_is(source.name))
+
+        status_helper = guard(self.case, self.case / "providers/bin/tailscale")
+        held_status = guard(self.case, self.case / "providers/status-held")
+        for scenario, backend, peer, status_exit, capability, reason in [
+            ("status-missing", "Running", "Alpha", 0, True, "Taildrop unavailable: tailscale could not start"),
+            ("status-failed", "Running", "Alpha", 7, True, "Taildrop status failed"),
+            ("signed-out-stale-peer", "NeedsLogin", "Alpha", 0, True, "Tailscale is signed out"),
+            ("account-disabled-stale-peer", "Running", "Alpha", 0, False, "Taildrop is disabled for this account"),
+            ("empty", "Running", None, 0, True, "No peers reachable"),
+        ]:
+            status(scenario, peer, backend, status_exit, capability=capability)
+            if scenario == "status-missing":
+                guard(self.case, status_helper).rename(guard(self.case, held_status))
+            self.key("m")
+            if scenario != "status-missing":
+                self.wait(scenario + "-status-exited", lambda: (rows := self.provider_calls("tailscale"))
+                          and rows[-1]["state"] == scenario and not self.owned_process(rows[-1]["pid"]))
+            self.snapshot("provider-" + scenario + "-disabled", lambda text: chosen("open")
+                          and (row := self.menu_entry(taildrop_label)) is not None and not row["enabled"] and reason in row["text"])
+            row = self.menu_entry(taildrop_label)
+            self.click_cell(row["column"] + row["width"] // 2, row["row"], "provider-" + scenario)
+            self.snapshot("provider-" + scenario + "-refused", lambda text: self.menu_entry(taildrop_label) is not None
+                          and self.menu_entry("Alpha") is None)
+            assert len(self.provider_calls("omarchy-tailscale-send")) == 2, "disabled provider reached sender"
+            self.key("-k", "Escape")
+            self.snapshot("provider-" + scenario + "-closed", lambda text: self.menu_entry(taildrop_label) is None and self.cursor_is(source.name))
+            if scenario == "status-missing":
+                guard(self.case, held_status).rename(guard(self.case, status_helper))
+            no_clipboard_or_source_change()
+
+        for scenario, changed, reason in [
+            ("changed-node", {"node": "replacement-node"}, "Selected Taildrop device changed or is no longer reachable"),
+            ("changed-address", {"address": "beta.fixture.invalid."}, "Selected Taildrop device changed or is no longer reachable"),
+            ("peer-offline", {"online": False}, "No peers reachable"),
+            ("signed-out-on-activate", {"backend": "NeedsLogin"}, "Tailscale is signed out"),
+            ("account-disabled-on-activate", {"capability": False}, "Taildrop is disabled for this account"),
+        ]:
+            status(scenario + "-before")
+            peer_menu("provider-" + scenario)
+            status(scenario, **changed)
+            self.key("-k", "Return")
+            self.snapshot("provider-" + scenario + "-refused", lambda text: reason in text and self.menu_entry("Alpha") is None)
+            assert len(self.provider_calls("omarchy-tailscale-send")) == 2, "stale peer reached sender"
+            self.key("-k", "Escape")
+            self.snapshot("provider-" + scenario + "-acknowledged", lambda text: reason not in text and self.cursor_is(source.name))
+            no_clipboard_or_source_change()
+
+        for scenario in ("cancel-refresh", "source-changed-refresh", "repeat-refresh"):
+            status(scenario + "-before")
+            peer_menu("provider-" + scenario)
+            status(scenario, gate=True)
+            before = len(self.provider_calls("omarchy-tailscale-send"))
+            self.key("-k", "Return")
+            self.wait(scenario + "-status-started", lambda: (rows := self.provider_calls("tailscale")) and rows[-1]["state"] == scenario)
+            status_pid = self.provider_calls("tailscale")[-1]["pid"]
+            assert self.owned_process(status_pid), "status gate did not hold the real helper"
+            self.snapshot("provider-" + scenario + "-pending", lambda text: "Checking Taildrop availability" in text)
+            held_source = guard(self.case, self.case / "providers/source-held")
+            try:
+                if scenario == "cancel-refresh":
+                    self.key("-k", "Escape")
+                    self.snapshot("provider-cancel-refresh-dismissed", lambda text: "Checking Taildrop availability" not in text and self.cursor_is(source.name))
+                elif scenario == "source-changed-refresh":
+                    guard(self.case, source).rename(guard(self.case, held_source))
+                    guard(self.case, source).write_bytes(b"replacement must never be sent\n")
+                else:
+                    self.key("-k", "Return")
+                    self.key("-k", "Return")
+                    assert len([row for row in self.provider_calls("tailscale") if row["state"] == scenario]) == 1, "repeated activation started another refresh"
+                os.write(self.provider_gate, b"r")
+                self.wait(scenario + "-status-exited", lambda: not self.owned_process(status_pid))
+                if scenario == "repeat-refresh":
+                    self.snapshot("provider-repeat-refresh-sent-once", lambda text: "Sent to Alpha" in text)
+                    assert len(self.provider_calls("omarchy-tailscale-send")) == before + 1, "repeated activation sent more than once"
+                elif scenario == "source-changed-refresh":
+                    self.snapshot("provider-source-changed-refresh-refused", lambda text: "Taildrop cancelled: selection changed" in text or "Selected item changed" in text)
+                    assert len(self.provider_calls("omarchy-tailscale-send")) == before, "changed source reached sender"
+                else:
+                    # A new native menu round-trip observes the late reply without mutating product state through IPC.
+                    status("after-cancel")
+                    peer_menu("provider-after-cancel")
+                    assert len(self.provider_calls("omarchy-tailscale-send")) == before, "cancelled refresh sent after its late reply"
+                    self.key("-k", "Escape")
+                    self.snapshot("provider-after-cancel-parent", lambda text: chosen(taildrop_label))
+                    self.key("-k", "Escape")
+            finally:
+                if held_source.exists():
+                    guard(self.case, held_source).replace(guard(self.case, source))
+            if scenario == "source-changed-refresh":
+                self.key("-k", "Escape")
+                self.key("-k", "Home")
+                self.key("-k", "Down")
+                self.key("-k", "Down")
+                self.snapshot("provider-source-restored", lambda text: self.cursor_is(source.name) and "Selected item changed" not in text)
+            no_clipboard_or_source_change()
+
+        for peer in ("Alpha", "Beta"):
+            status("refresh-" + peer, peer)
+            peer_menu("provider-refresh-" + peer, peer)
+            self.key("-k", "Escape")
+            self.snapshot("provider-refresh-" + peer + "-parent", lambda text: chosen(taildrop_label))
+            self.key("-k", "Escape")
+            self.snapshot("provider-refresh-" + peer + "-closed", lambda text: self.menu_entry(taildrop_label) is None)
+        assert len(self.provider_calls("omarchy-tailscale-send")) == 3, "peer inspection dispatched an unrequested send"
+        no_clipboard_or_source_change()
+        status("quit-before")
+        peer_menu("provider-quit-refresh")
+        status("quit-refresh", gate=True)
+        self.key("-k", "Return")
+        self.wait("quit-refresh-status-started", lambda: (rows := self.provider_calls("tailscale")) and rows[-1]["state"] == "quit-refresh")
+        status_pid = self.provider_calls("tailscale")[-1]["pid"]
+        self.snapshot("provider-quit-refresh-pending", lambda text: "Checking Taildrop availability" in text)
+        self.quit()
+        assert not self.owned_process(status_pid), "pending provider helper survived TUI exit"
+        assert len(self.provider_calls("omarchy-tailscale-send")) == 3, "quitting dispatched the pending send"
+        no_clipboard_or_source_change()
+        print("TUI_PROVIDERS native-menu-peer-Return missing/nonexecutable/exit-failure/success exact-source-peer clipboard-untouched private-environment visible-refusal stale-status/peer/source-refusal cancel-late-result repeated-activation reopened-peer-refresh quit-pending=ok", flush=True)
+        print("TUI_PROVIDERS_UNVERIFIED real-peer-delivery matched-pixels", flush=True)
 
     def search_identity(self):
         listing = self.case / "listing"
@@ -615,8 +942,10 @@ class Native:
         for index in range(1, len(chunks), 3):
             run = chunks[index + 2]
             text = ESCAPE.sub(b"", run).decode("utf-8", errors="replace")
-            if text.startswith("\u2502") and text.endswith("\u2502") and text[1:-1].strip() == label:
-                prefix = run.split(label.encode(), 1)[0]
+            content = text[1:-1].strip()
+            if text.startswith("\u2502") and text.endswith("\u2502") and (content == label
+                    or label == "taildrop  \u25b6" and content.startswith("taildrop \u00b7 ")):
+                prefix = run.split(content.encode(), 1)[0]
                 colours = re.findall(rb"\x1b\[38;2;[0-9;]+m", prefix)
                 return {"row": int(chunks[index]), "column": int(chunks[index + 1]), "width": len(text),
                         "selected": b"\x1b[7m" in prefix, "enabled": len(colours) == 1, "text": text}
@@ -945,7 +1274,7 @@ class Native:
         self.key("-k", "Tab")
         self.key("-k", "Return")
         self.snapshot("pdf-zoom-in-enter", lambda text: "100%" in text)
-        self.key("-")
+        self.key("-k", "minus")
         self.snapshot("pdf-zoom-out-minus", lambda text: "75%" in text)
         self.key("+")
         self.snapshot("pdf-zoom-in-plus", lambda text: "100%" in text)
@@ -1166,12 +1495,19 @@ class Native:
                     pass
         if hasattr(self, "launcher"):
             self.launcher.wait(timeout=5)
+        if hasattr(self, "provider_gate"):
+            os.close(self.provider_gate)
         self.log.close()
         if remaining:
             raise RuntimeError(f"owned TUI processes failed to drain: {remaining}")
 
 
 def main():
+    if len(ARGS) >= 3 and ARGS[0] == "--provider-helper":
+        raise SystemExit(provider_helper(ARGS[1], ARGS[2], ARGS[3:]))
+    if ARGS == ["--providers-self-check"]:
+        provider_self_check()
+        return
     if len(ARGS) == 2 and ARGS[0] == "--calibration-check":
         path = Path(ARGS[1]).resolve(strict=True)
         dimensions = tuple(map(int, command(["magick", "identify", "-format", "%w %h", path]).split()))
@@ -1188,12 +1524,16 @@ def main():
         return
     if len(ARGS) == 3 and ARGS[0] == "--child":
         raise SystemExit(child(ARGS[1], ARGS[2]))
-    presets = ARGS or list(PRESETS)
+    providers = bool(ARGS and ARGS[0] == "--providers")
+    presets = (ARGS[1:] if providers else ARGS) or list(PRESETS)
     terminals = [os.environ["FLEA_TUI_TERMINAL"]] if "FLEA_TUI_TERMINAL" in os.environ else list(TERMINALS)
     if len(set(presets)) != len(presets) or any(preset not in PRESETS for preset in presets) or any(terminal not in TERMINALS for terminal in terminals):
-        raise RuntimeError("usage: [FLEA_TUI_TERMINAL=foot|kitty] tests/ui-tui.sh [default|vim|mac|windows ...]")
+        raise RuntimeError("usage: [FLEA_TUI_TERMINAL=foot|kitty] tests/ui-tui.sh [--providers] [default|vim|mac|windows ...]")
     os.environ["PATH"] = str(Path.home() / ".local/bin") + os.pathsep + os.environ["PATH"]
-    for helper in ["omarchy-drive", "xdg-terminal-exec", "script", "stty", "hyprctl", "ffmpeg", "pdfinfo", "pdftoppm", "mpv", "magick", *terminals]:
+    helpers = ["omarchy-drive", "xdg-terminal-exec", "script", "stty", "hyprctl", "magick", *terminals]
+    if not providers:
+        helpers.extend(["ffmpeg", "pdfinfo", "pdftoppm", "mpv"])
+    for helper in helpers:
         if not shutil.which(helper):
             raise RuntimeError(f"native TUI prerequisite missing: {helper}")
     repo = SCRIPT.parent.parent
@@ -1234,11 +1574,11 @@ def main():
             for preset in presets:
                 native = Native(root, binary, preset, terminal)
                 try:
-                    native.smoke()
+                    native.providers() if providers else native.smoke()
                 finally:
                     native.cleanup()
                 undriven += len(native.undriven)
-                print(f"TUI_NATIVE terminal={terminal} preset={preset} checks={native.checks} failed=0 undriven={len(native.undriven)} visual_inspection=pending", flush=True)
+                print(f"TUI_NATIVE group={'providers' if providers else 'smoke'} terminal={terminal} preset={preset} checks={native.checks} failed=0 undriven={len(native.undriven)} visual_inspection=pending", flush=True)
         if undriven:
             print(f"TUI_INCOMPLETE required_undriven={undriven}; independent coverage finished", flush=True)
             raise SystemExit(2)

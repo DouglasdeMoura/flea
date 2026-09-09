@@ -29,6 +29,13 @@ Item {
     property bool hovered: false
     property bool dropTarget: false
     property bool dropCopying: false
+    property bool renaming: false
+    property var renamePane: null
+    readonly property string editorText: editor.current
+    readonly property Item editorField: editor
+    signal renameCommitted(string newName)
+    signal renameAbandoned()
+    function commitEditor() { return editor.commit() }
 
     // Truthiness, like the two readers below: ui/ColumnPane.qml hands this rows[index] raw, so a
     // listing that shrank leaves a surviving delegate holding undefined, which is not null.
@@ -37,7 +44,7 @@ Item {
                                 : root.dim ? Theme.color.muted
                                 : Theme.color.foreground
 
-    implicitHeight: Theme.fileRowHeight
+    implicitHeight: root.renaming ? Math.max(Theme.fileRowHeight, editor.implicitHeight + 2 * Theme.spacing.rowPaddingY) : Theme.fileRowHeight
 
     Rectangle {
         anchors.fill: parent
@@ -96,6 +103,7 @@ Item {
 
     // corner: a filename is arbitrary text, so PlainText, the same rule every name on this surface follows.
     Text {
+        visible: !root.renaming
         anchors.left: markSlot.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: chevronSlot.left
@@ -107,6 +115,19 @@ Item {
         font.pixelSize: Theme.font.body
         textFormat: Text.PlainText
         elide: Text.ElideRight
+    }
+
+    Flea.RenameField {
+        id: editor
+        visible: root.renaming
+        anchors { left: markSlot.right; right: chevronSlot.left; verticalCenter: parent.verticalCenter }
+        anchors.leftMargin: Theme.spacing.gap
+        anchors.rightMargin: Theme.spacing.gap
+        height: implicitHeight
+        pane: root.renamePane
+        name: root.row ? root.row.n.split("/").pop() : ""
+        onCommitted: function(newName) { root.renameCommitted(newName) }
+        onAbandoned: root.renameAbandoned()
     }
 
     // Only a chosen directory carries it: it says the column to the right is showing what is inside.

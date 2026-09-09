@@ -22,6 +22,7 @@ Item {
     property var kindNames: []
     // The row is its own rename editor while this is true, per the States artboard.
     property bool renaming: false
+    property var renamePane: null
     // The folder under a drag right now, per States.dc.html "Drop target"; List.qml's delegate binds it.
     property bool dropTarget: false
     // Whether that drop would copy, so the label can say which; the status bar says the rest.
@@ -78,7 +79,7 @@ Item {
     // and the decode, and a row whose Image failed to load has to be marked by its kind instead.
     readonly property bool thumbDrawn: root.thumb.length > 0 && thumbImage.status !== Image.Error
 
-    implicitHeight: Theme.fileRowHeight
+    implicitHeight: root.renaming ? Math.max(Theme.fileRowHeight, editor.implicitHeight + 2 * Theme.spacing.rowPaddingY) : Theme.fileRowHeight
     implicitWidth: parent ? parent.width : 0
 
     Accessible.role: Accessible.ListItem
@@ -161,6 +162,7 @@ Item {
 
     // What the editor holds right now, for tests/ui.sh through ui/Ipc.qml's renameEditorText.
     readonly property string editorText: editor.current
+    readonly property Item editorField: editor
 
     signal renameCommitted(string newName)
     signal renameAbandoned()
@@ -174,8 +176,9 @@ Item {
         anchors.right: mode.left
         anchors.rightMargin: root.modeShown ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
-        height: Theme.rowHeight - 2 * Theme.spacing.rowPaddingY
-        name: root.row ? root.row.n : ""
+        height: implicitHeight
+        pane: root.renamePane
+        name: root.displayName
         onCommitted: function (newName) { root.renameCommitted(newName) }
         onAbandoned: root.renameAbandoned()
     }

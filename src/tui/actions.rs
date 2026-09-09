@@ -69,8 +69,9 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     }
                     if let Some(peer) = model.taildrop.peers.get(model.menu_cursor) {
                         model.taildrop_target = Some(peer.clone());
-                        model.menu_action = "taildrop".into();
-                        wire.send(vec![("c", word("menuaction")), ("op", word("validate")), ("id", super::wire::number(model.action_id)), ("action", word("taildrop"))])?;
+                        model.menu_action = "taildropRefresh".into();
+                        model.taildrop.refresh();
+                        model.say("Checking Taildrop availability".into());
                         model.menu = false;
                     }
                     return Ok(());
@@ -571,7 +572,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             m.restore_selection.clear();
             m.restore_marks.clear();
             m.delete_marks.clear();
-            m.taildrop_target = None;
+            if m.taildrop_target.take().is_some() { m.message.clear(); }
             if !m.error.is_empty() {
                 m.dismiss_error();
             } else if !m.filter.is_empty() {

@@ -50,7 +50,7 @@ Item {
     // A re-read replaces every row, so it waits for the states that name a row by index or hold one
     // open: an editor, the menu over a row, a filter being typed, a search listing, a selection whose
     // indices would name other files afterwards, and a list already in flight.
-    readonly property bool watchBusy: !pane || pane.listInFlight || pane.renamingIndex >= 0
+    readonly property bool watchBusy: !pane || pane.listInFlight || pane.renamingIndex >= 0 || pane.renamePending
             || pane.menuVisible || pane.menuActions.opened || pane.filterTyping || pane.searchMode.length > 0
             || pane.selectionCount() > 0 || pane.selectionBand !== null
     // ui/Pane.qml reaches the three through these: openCursor takes the opener, the menu reads the
@@ -123,24 +123,30 @@ Item {
         pane.backend.send({c: "locate", paths: root.retryPaths, transferId: root.retryId})
     }
 
-    // Only when the cursor really landed on the folder that was made: on a listing wider than the
-    // window the refresh may not hold that row at all, and ui/RenameField.qml lives in ui/Row.qml
-    // alone, so the other two views would arm an editor nothing draws and never disarm it.
+    // Only arm an editor after the new folder's actual row arrives in the held window.
     function openRenameOnArrival() {
         if (root.renameOnArrival.length === 0)
             return
         var target = root.renameOnArrival
         root.renameOnArrival = ""
         var row = pane.rowFor(pane.cursorIndex)
-        if (pane.viewMode === "list" && row && pane.join(pane.path, row.n) === target)
-            pane.renamingIndex = pane.cursorIndex
+        if (row && pane.join(pane.path, row.n) === target)
+            pane.act("rename")
+    }
+
+    function refreshRename(request, selected) {
+        if (pane.path !== request.folder) return
+        if (pane.listInFlight || pane.searchMode.length > 0) { root.stale = true; return }
+        root.stale = false
+        watchSettle.stop()
+        pane.refresh(selected)
     }
 
     Connections {
         target: pane.backend
 
         function onListed(total, readMs, sortMs) {
-            if (!pane.listInFlight && pane.searchMode.length === 0) {
+            if (!pane.dualMode && !pane.listInFlight && pane.searchMode.length === 0) {
                 ViewState.changeLeaf("sort", { key: pane.backend.sortBy === "mtime" ? "date" : pane.backend.sortBy,
                                              reverse: pane.backend.sortDesc })
                 pane.appliedListingPreferences = pane.listingPreferences
@@ -174,13 +180,13 @@ Item {
             pane.applyPendingSelect()
             root.anchor = Nav.applyAnchor(pane, root.anchor)
             Tabs.applyPending(pane)
-            root.openRenameOnArrival()
             pane.listArea.restartSettle()
             if (pane.listInFlight) {
                 pane.listInFlight = false
                 pane.listedSeen = false
             }
             root.locateRetry()
+            root.openRenameOnArrival()
         }
 
         function onLocated(message) {
@@ -321,7 +327,11 @@ Item {
         // The listing is re-read with the new name selected, so the row the operator was on stays
         // under the cursor; a rename the pointer committed keeps the pointer's own row instead.
         function onRenamed(ok, path) {
-            pane.refresh(Nav.renameRefreshTarget(pane, path))
+            var request = pane.renameRequest
+            if (!request || path !== request.destination) return
+            pane.renameRequest = null
+            pane.renamingIndex = -1
+            root.refreshRename(request, Nav.renameRefreshTarget(pane, path))
         }
 
         // Sample input: {"t":"made","ok":true,"path":"/home/gm/Pictures/New Folder"}
@@ -390,6 +400,30 @@ Item {
             // A listing that failed cannot seat the row a peeked right click asked for, so its menu intent dies here.
             pane.pendingMenu = false
             var text = Errors.sentence(where, message)
+            var terminal = where === "backend" || where === "read"
+            var request = pane.renameRequest
+            var renamePath = request && (input === request.source || input === request.destination
+                || (where === "rename" && (input.length === 0 || input.indexOf(request.source + "/") === 0
+                    || input.indexOf(request.destination + "/") === 0)))
+            if (request && (terminal || (renamePath && ["rename", "journal", "rename-kept"].indexOf(where) >= 0))) {
+                pane.renameRequest = null
+                pane.renameKeepsPointerRow = false
+                if (terminal) {
+                    text = "The backend stopped; rename outcome is unknown. Reopen Flea and check both names before retrying."
+                } else if (where === "rename-kept" || (where === "journal" && input === request.destination)) {
+                    // A destination-side journal failure happens after the filesystem rename succeeded.
+                    pane.renamingIndex = -1
+                    if (where === "journal") text = Errors.capitalised("rename completed, but Undo could not be recorded: " + message)
+                    pane.message(text, true)
+                    root.refreshRename(request, where === "journal" ? request.destination : "")
+                    return
+                } else {
+                    var reason = Errors.exists(message) ? Ops.leaf(request.destination) + " already exists." : Errors.capitalised(message)
+                    if (pane.renamingIndex >= 0) pane.renameError = reason
+                    else pane.message(reason, true)
+                    return
+                }
+            }
             if (where === "redo") { pane.transfer = Ops.emptyTransfer(); pane.sticky("") }
             // A refused sort changes nothing in the backend, so it changes nothing here: a notice in the
             // plain role, never the error role, which is for a listing that stopped being true.
@@ -400,12 +434,12 @@ Item {
             pane.listInFlight = false
             pane.listedSeen = false
             // Neither the child nor its stream comes back, so the listing it produced stops being true.
-            var terminal = where === "backend" || where === "read"
             // Only these two mean the refresh will never deliver rows. An editor left armed past that
             // would open over whatever row the cursor happens to hold in some later listing.
             if (terminal || where === "scan")
                 root.renameOnArrival = ""
             if (terminal) {
+                pane.renamingIndex = -1
                 root.retrySelectionText = ""
                 pane.total = 0
                 pane.held = 0

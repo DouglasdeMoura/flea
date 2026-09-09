@@ -279,12 +279,13 @@ providers_choose() {
 }
 
 providers_sharelink_checks() {
-    local scenario reason before clipboard_calls share_before share_requests
+    local scenario reason before clipboard_calls share_before share_requests warning
     for scenario in share-failed share-invalid share-socket-timeout share-missing clipboard-failed clipboard-missing; do
         providers_ready
         providers_selection "$menu_box/Dropbox"
         before=$(providers_calls wl-copy)
         clipboard_calls=0
+        warning=""
         case "$scenario" in
             share-failed)
                 providers_mode sharelink ready '' 'fixture share-link refusal' 7
@@ -297,6 +298,7 @@ providers_sharelink_checks() {
                 reason='Dropbox could not make a share link for that file.' ;;
             share-missing)
                 providers_mode dropbox-cli vanish 'Up to date'
+                warning="Process failed to start, likely because the binary could not be found. Command: QList(\"dropbox-cli\", \"sharelink\", \"$menu_box/Dropbox/b-cursor.txt\")"
                 reason='The Dropbox share link helper could not start.' ;;
             clipboard-failed)
                 providers_mode wl-copy ready '' 'fixture clipboard refusal' 7
@@ -304,6 +306,7 @@ providers_sharelink_checks() {
                 clipboard_calls=1 ;;
             clipboard-missing)
                 providers_install wl-copy no
+                warning='Process failed to start, likely because the binary could not be found. Command: QList("wl-copy", "https://fixture.invalid/share")'
                 reason='The clipboard helper could not start; the share link was not copied.' ;;
         esac
         providers_choose sharelink
@@ -311,6 +314,7 @@ providers_sharelink_checks() {
         menus_expect statusActivityState '.errors == 1' "$scenario records one persistent error"
         menus_equal "$scenario clipboard dispatch count" "$((before + clipboard_calls))" "$(providers_calls wl-copy)"
         providers_expect '.listFocus and (.pendingActivation | not)' "$scenario returns menu ownership to the listing"
+        if [[ -n "$warning" ]]; then printf '%s\n' "$warning" >> "$expected_warnings"; fi
         menus_shot "providers-$scenario"
         providers_install dropbox-cli yes
         providers_install wl-copy yes

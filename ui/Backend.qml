@@ -75,7 +75,7 @@ Item {
     property bool preserveSort: false
     property bool hasListed: false
     readonly property string sortPreference: JSON.stringify(ViewState.state.sort || {})
-    onSortPreferenceChanged: root.resetSort()
+    onSortPreferenceChanged: if (!root.preserveSort || !root.hasListed) root.resetSort()
 
     function resetSort() {
         root.sortBy = (ViewState.state.sort || {}).key || "name"

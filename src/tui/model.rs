@@ -285,6 +285,9 @@ impl Model {
         if self.pending.is_some() {
             return Ok(());
         }
+        if self.cancel_taildrop() {
+            wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
+        }
         if path == self.path && self.navigation_before.is_none() {
             self.restore_cursor.get_or_insert(self.cursor);
             if self.restore_path.is_none() && self.menu_action != "deleteRestore" { self.restore_path = self.current_path(); }
@@ -401,13 +404,37 @@ impl Model {
         wire.send(vec![("c", word("menuaction")), ("op", word("refreshDelete")), ("id", number(self.action_id))])
     }
     pub fn menu_enabled(&self, index: usize) -> bool {
-        if self.taildrop.submenu { return self.menu_ready && index < self.taildrop.peers.len(); }
+        if self.taildrop.submenu { return self.menu_ready && !self.taildrop.loading() && index < self.taildrop.peers.len(); }
         match index {
             0 => self.menu_ready && !self.menu_path.as_os_str().is_empty(),
             1 => true,
-            2 => self.menu_ready && self.menu_count > 0 && !self.taildrop.peers.is_empty(),
+            2 => self.menu_ready && self.menu_count > 0 && !self.taildrop.loading() && !self.taildrop.peers.is_empty(),
             _ => false,
         }
+    }
+    fn cancel_taildrop(&mut self) -> bool {
+        if self.taildrop_target.take().is_none() { return false; }
+        self.menu_action.clear();
+        self.menu = false;
+        self.message.clear();
+        self.fail("Taildrop cancelled: selection changed".into());
+        true
+    }
+    pub fn advance_taildrop(&mut self, wire: &mut Wire) -> io::Result<()> {
+        if self.menu_action != "taildropRefresh" || self.taildrop.loading() { return Ok(()); }
+        let current = self.taildrop_target.as_ref().and_then(|peer| self.taildrop.current_peer(peer));
+        if current.is_none() || !self.taildrop.error.is_empty() {
+            let reason = if self.taildrop.error.is_empty() { "Selected Taildrop device changed or is no longer reachable".into() }
+                else { self.taildrop.error.clone() };
+            self.taildrop_target = None;
+            self.menu_action.clear();
+            self.message.clear();
+            self.fail(reason);
+            return wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))]);
+        }
+        self.taildrop_target = current;
+        self.menu_action = "taildrop".into();
+        wire.send(vec![("c", word("menuaction")), ("op", word("validate")), ("id", number(self.action_id)), ("action", word("taildrop"))])
     }
     pub fn say(&mut self, message: String) {
         self.message = message;
@@ -458,6 +485,7 @@ impl Model {
         }
     }
     pub fn invalidate_rows(&mut self) {
+        self.cancel_taildrop();
         self.rows.clear();
         self.selected.clear();
         self.selected_rows.clear();
@@ -732,12 +760,6 @@ impl Model {
                     .filter_map(Json::as_str)
                     .map(str::to_owned)
                     .collect();
-                if let Some(peer) = self.taildrop_target.take() {
-                    match self.taildrop.send(&peer, &paths) {
-                        Ok(()) => self.say(format!("Sending to {}", peer.label)),
-                        Err(e) => self.fail(format!("Taildrop: {}", e)),
-                    }
-                }
                 if self.pending_clipboard {
                     self.pending_clipboard = false;
                     self.clipboard = paths;
@@ -922,7 +944,7 @@ impl Model {
                     if !flag(&value, "cancelled") { self.fail(text(&value, "error").into()); }
                     self.menu_action.clear();
                     self.menu = false;
-                    self.taildrop_target = None;
+                    if self.taildrop_target.take().is_some() { self.message.clear(); }
                     self.deletion = None;
                     wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
                 } else if text(&value, "op") == "snapshot" && self.menu_action == "menu" {
@@ -968,16 +990,18 @@ impl Model {
                             self.fail("Could not open selected file".into());
                         }
                     } else if action == "taildrop" {
+                        self.message.clear();
                         if let Some(peer) = self.taildrop_target.take() {
                             if self.menu_count == 0 || paths.len() < self.menu_count {
                                 self.fail("Taildrop failed: the validated selection is incomplete".into());
-                                return Ok(());
-                            }
-                            match self.taildrop.send(&peer, &paths[..self.menu_count]) {
-                                Ok(()) => self.say(format!("Sending to {}", peer.label)),
-                                Err(error) => self.fail(format!("Taildrop: {}", error)),
+                            } else {
+                                match self.taildrop.send(&peer, &paths[..self.menu_count]) {
+                                    Ok(()) => self.say(format!("Sending to {}", peer.label)),
+                                    Err(error) => self.fail(format!("Taildrop: {}", crate::error::io_message(&error))),
+                                }
                             }
                         }
+                        wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
                     }
                 }
             }
@@ -1041,6 +1065,20 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn listing_invalidation_cancels_pending_taildrop_intent() {
+        let mut model = Model::new(PathBuf::from("/"), &Json::Null);
+        model.taildrop_target = Some(super::super::taildrop::Peer { id: "node".into(), label: "peer".into(), address: "peer.invalid".into() });
+        model.menu_action = "taildropRefresh".into();
+        model.message = "Checking Taildrop availability".into();
+        model.invalidate_rows();
+        assert!(model.taildrop_target.is_none());
+        assert!(model.menu_action.is_empty());
+        assert!(model.message.is_empty());
+        assert_eq!(model.error, "Taildrop cancelled: selection changed");
+        assert!(!model.cancel_taildrop(), "late invalidation must not create another error");
+    }
+
 
     #[test]
     fn pdf_preview_uses_filename_not_generic_icon_or_localized_kind() {

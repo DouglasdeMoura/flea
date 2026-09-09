@@ -165,17 +165,26 @@ FocusScope {
     readonly property string listingPreferences: JSON.stringify([ViewState.state.hidden, ViewState.state.sort,
         ViewState.state.foldersFirst, ViewState.state.groupByKind])
     property string appliedListingPreferences: ""
-    onListingPreferencesChanged: preferences.restart()
+    onListingPreferencesChanged: {
+        // A hidden dual pane retains its session sort when the single pane changes the saved default.
+        if (root.backend && root.backend.preserveSort && !root.visible && root.appliedListingPreferences.length > 0) {
+            var applied = JSON.parse(root.appliedListingPreferences)
+            applied[1] = ViewState.state.sort
+            root.appliedListingPreferences = JSON.stringify(applied)
+        }
+        preferences.restart()
+    }
+    onVisibleChanged: if (root.visible) preferences.restart()
     onListInFlightChanged: if (!root.listInFlight) preferences.restart()
+    onSearchModeChanged: if (root.searchMode.length === 0) preferences.restart()
     Timer {
         id: preferences
         interval: 0
         onTriggered: {
             var desired = root.listOnly || ViewState.state.view === "dual" ? "list" : ViewState.state.view || "list"
             if (root.viewMode !== desired) root.viewMode = desired
-            if (!root.path || root.listInFlight || root.searchMode.length > 0
+            if (!root.visible || !root.path || root.listInFlight || root.searchMode.length > 0
                     || root.appliedListingPreferences === root.listingPreferences) return
-            root.showHidden = ViewState.state.hidden === true
             root.openWithoutHistory(root.path)
         }
     }
@@ -202,8 +211,16 @@ FocusScope {
     // Rename lives in ui/js/Ops.js with the other write operations; ui/List.qml's editor commits through this.
     function commitRename(newName) { Ops.commitRename(root, newName) }
     property int renameMenuId: 0
+    property string renameSource: ""
+    property string renameError: ""
+    property var renameRequest: null
+    readonly property bool renamePending: root.renameRequest !== null
     property var convertSource: null
-    onRenamingIndexChanged: if (root.renamingIndex < 0) root.renameMenuId = 0
+    onRenamingIndexChanged: if (root.renamingIndex < 0) {
+        root.renameMenuId = 0
+        root.renameSource = ""
+        root.renameError = ""
+    }
 
     // A set of row indices over the current listing, mutated in place; selectionVersion tells a reactive binding (List.qml's delegate, StatusBar's count) to re-read it. Task 8 declined ScriptModel plus ItemSelectionModel on measured memory, see AGENTS.md "The list model".
     property var selection: Selection.create()
@@ -238,7 +255,15 @@ FocusScope {
         Nav.open(root, newPath)
     }
 
-    function openWithoutHistory(newPath) { Nav.openWithoutHistory(root, newPath) }
+    function openWithoutHistory(newPath) {
+        if (!root.listInFlight) {
+            var applied = root.appliedListingPreferences ? JSON.parse(root.appliedListingPreferences) : []
+            // Search exit can enter here before the preferences timer consumes a deferred Settings change.
+            if (JSON.stringify(applied[1]) !== JSON.stringify(ViewState.state.sort)) root.backend.resetSort()
+            root.showHidden = ViewState.state.hidden === true
+        }
+        Nav.openWithoutHistory(root, newPath)
+    }
 
     // The toggle re-lists rather than filtering client-side: the model is a row count over the
     // backend's own listing, which never held the dotfiles to begin with when they were off.
@@ -280,8 +305,8 @@ FocusScope {
         if (action === "openTrash" || action === "emptyTrash" || action === "restoreAll") { trashHost.action(action); return }
         if (action === "settings") { root.settingsPanel.open(root); return }
         if (action === "permissions") { root.openPermissions(); return }
-        if (["newFile", "openWith", "moveTo", "copyTo", "properties", "deletePermanently"].indexOf(action) >= 0) {
-            menuActions.open(action)
+        if (["newFile", "rename", "openWith", "moveTo", "copyTo", "properties", "deletePermanently"].indexOf(action) >= 0) {
+            menuActions.open(action, menuId || 0)
             return
         }
         Focus.act(action, root, menuId, paths)
@@ -312,11 +337,20 @@ FocusScope {
     // ListView.Contain has no name inside a .pragma library, so the scroll itself stays here.
     function showRow(view) { root.listArea.positionViewAtIndex(view, ListView.Contain); root.listArea.restartCoalesce() }
 
-    // ui/js/Tap.js's click-away commit; only ui/List.qml draws an editor, so only it is asked.
-    function commitOpenRename() { if (root.renamingIndex >= 0) list.commitOpenRename() }
+    // A successful pointer commit preserves the newly selected row; a refusal returns to its editor.
+    function commitOpenRename() {
+        var item = root.renameEditor()
+        if (!item || root.renamePending) return
+        root.renameKeepsPointerRow = true
+        if (!item.commitEditor() || root.renameError.length > 0) root.renameKeepsPointerRow = false
+    }
 
     // The live editor or null: a set renamingIndex is not evidence one exists, see ui/RenameField.qml.
-    function renameEditor() { return root.viewMode === "list" ? list.renameEditor() : null }
+    function renameEditor() {
+        if (root.renamingIndex < 0) return null
+        var item = root.visibleItemFor(root.renamingIndex)
+        return item && item.renaming ? item : null
+    }
 
     function openCursor() { Nav.openCursor(root, wire.opener) }
 

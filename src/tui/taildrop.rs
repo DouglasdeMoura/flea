@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct Peer {
+    pub id: String,
     pub label: String,
     pub address: String,
 }
@@ -81,6 +82,14 @@ impl Taildrop {
     pub fn loading(&self) -> bool {
         self.child.is_some()
     }
+    pub fn reason(&self) -> &str {
+        if self.sending.is_some() { "Sending files" }
+        else if self.loading() { "Checking availability" }
+        else { &self.error }
+    }
+    pub fn current_peer(&self, selected: &Peer) -> Option<Peer> {
+        self.peers.iter().find(|peer| peer.id == selected.id && peer.address == selected.address).cloned()
+    }
     pub fn poll(&mut self) {
         let Some(child) = &mut self.child else { return };
         if let Some(label) = &self.sending {
@@ -136,7 +145,10 @@ impl Taildrop {
         match (status, result) {
             (status, Ok(bytes)) if status.success() => {
                 match jsondoc::parse(&String::from_utf8_lossy(&bytes)) {
-                    Ok(value) => self.peers = peers(&value),
+                    Ok(value) => match available_peers(&value) {
+                        Ok(peers) => self.peers = peers,
+                        Err(reason) => self.error = reason,
+                    },
                     Err(_) => self.error = "Taildrop status could not be read".into(),
                 }
             }
@@ -190,11 +202,30 @@ impl Drop for Taildrop {
 fn text<'a>(value: &'a Json, key: &str) -> &'a str {
     value.get(key).and_then(Json::as_str).unwrap_or("")
 }
+
+// Sample input: {"BackendState":"Running","Self":{"CapMap":{"https://tailscale.com/cap/file-sharing":[]}},"Peer":{}}.
+fn available_peers(value: &Json) -> Result<Vec<Peer>, String> {
+    match text(value, "BackendState") {
+        "Running" => {}
+        "NeedsLogin" => return Err("Tailscale is signed out".into()),
+        "" => return Err("Tailscale is unavailable".into()),
+        state => return Err(format!("Tailscale is {}", state)),
+    }
+    let capability = "https://tailscale.com/cap/file-sharing";
+    let owner = value.get("Self");
+    let mapped = owner.and_then(|owner| owner.get("CapMap")).and_then(|map| map.get(capability)).is_some();
+    let listed = owner.and_then(|owner| owner.get("Capabilities")).and_then(Json::as_array)
+        .unwrap_or(&[]).iter().any(|value| value.as_str() == Some(capability));
+    if !mapped && !listed { return Err("Taildrop is disabled for this account".into()); }
+    let peers = peers(value);
+    if peers.is_empty() { Err("No peers reachable".into()) } else { Ok(peers) }
+}
+
 // Sample input: {"Self":{"UserID":1},"Peer":{"node":{"Online":true,"TaildropTarget":1,"DNSName":"host.tail.ts.net."}}}.
 fn peers(value: &Json) -> Vec<Peer> {
     let owner = value.get("Self").and_then(|s| s.get("UserID"));
     let mut out = Vec::new();
-    for (_, peer) in value.get("Peer").and_then(Json::as_object).unwrap_or(&[]) {
+    for (id, peer) in value.get("Peer").and_then(Json::as_object).unwrap_or(&[]) {
         if peer.get("Online").and_then(Json::as_bool) != Some(true) {
             continue;
         }
@@ -242,6 +273,7 @@ fn peers(value: &Json) -> Vec<Peer> {
                 .unwrap_or(address)
         };
         out.push(Peer {
+            id: id.clone(),
             label: label.into(),
             address: address.into(),
         });
@@ -253,6 +285,37 @@ fn peers(value: &Json) -> Vec<Peer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn refreshed_target_keeps_node_and_address_identity() {
+        let mut taildrop = Taildrop::new();
+        let selected = Peer { id: "node-one".into(), label: "before".into(), address: "alpha.invalid".into() };
+        taildrop.peers = vec![Peer { label: "renamed".into(), ..selected.clone() }];
+        assert_eq!(taildrop.current_peer(&selected).unwrap().label, "renamed");
+        taildrop.peers[0].id = "node-two".into();
+        assert!(taildrop.current_peer(&selected).is_none());
+        taildrop.peers[0] = Peer { address: "beta.invalid".into(), ..selected.clone() };
+        assert!(taildrop.current_peer(&selected).is_none());
+        taildrop.peers.clear();
+        assert!(taildrop.current_peer(&selected).is_none());
+    }
+
+    #[test]
+    fn provider_state_overrides_stale_peer_eligibility() {
+        let fixture = r#"{"BackendState":"Running","Self":{"Capabilities":["https://tailscale.com/cap/file-sharing"]},"Peer":{"old":{"Online":true,"TaildropTarget":1,"HostName":"alpha"}}}"#;
+        assert_eq!(available_peers(&jsondoc::parse(fixture).unwrap()).unwrap()[0].label, "alpha");
+        for (state, reason) in [("NeedsLogin", "Tailscale is signed out"), ("Stopped", "Tailscale is Stopped"), ("", "Tailscale is unavailable")] {
+            let value = jsondoc::parse(&fixture.replace("Running", state)).unwrap();
+            assert_eq!(available_peers(&value).err().as_deref(), Some(reason));
+        }
+        let disabled = jsondoc::parse(&fixture.replace("https://tailscale.com/cap/file-sharing", "unrelated")).unwrap();
+        assert_eq!(available_peers(&disabled).err().as_deref(), Some("Taildrop is disabled for this account"));
+        let mapped = fixture.replace(r#""Capabilities":["https://tailscale.com/cap/file-sharing"]"#,
+                                     r#""CapMap":{"https://tailscale.com/cap/file-sharing":[]}"#);
+        assert_eq!(available_peers(&jsondoc::parse(&mapped).unwrap()).unwrap().len(), 1);
+        let empty = jsondoc::parse(&fixture.replace(r#""Online":true"#, r#""Online":false"#)).unwrap();
+        assert_eq!(available_peers(&empty).err().as_deref(), Some("No peers reachable"));
+    }
+
     #[test]
     fn targets_match_oem_eligibility_and_refuse_option_names() {
         let value = jsondoc::parse(r#"{"Self":{"UserID":1},"Peer":{"a":{"Online":true,"UserID":1,"HostName":"alpha"},"b":{"Online":false,"TaildropTarget":1,"HostName":"offline"},"c":{"Online":true,"TaildropTarget":2,"HostName":"denied"},"d":{"Online":true,"TaildropTarget":1,"DNSName":"exit.mullvad.ts.net."},"e":{"Online":true,"TaildropTarget":1,"HostName":"--help"},"f":{"Online":true,"TaildropTarget":1,"HostName":"localhost","DNSName":"beta.tail.ts.net."}}}"#).unwrap();

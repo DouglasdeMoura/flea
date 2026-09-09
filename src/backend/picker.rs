@@ -4,6 +4,7 @@ use super::mime::Db;
 use super::opsreq::OpMsg;
 use super::trashmanifest::Cancellation;
 use super::undo::ItemIdentity;
+use crate::error::io_message;
 use crate::json::{escape, field_bool, field_str, field_str_array, field_usize};
 use std::ffi::CString;
 use std::fs::{File, Metadata, OpenOptions};
@@ -68,18 +69,18 @@ impl Held {
     fn open(path: &Path, follow: bool) -> Result<Self, String> {
         if !path.is_absolute() { return Err("Picker paths must be absolute.".into()); }
         let file = OpenOptions::new().read(true).custom_flags(O_PATH | if follow { 0 } else { crate::oflags::O_NOFOLLOW })
-            .open(path).map_err(|error| format!("Could not inspect {}: {}", path.display(), error))?;
+            .open(path).map_err(|error| format!("Could not inspect {}: {}", path.display(), io_message(&error)))?;
         Ok(Self { path: path.into(), file, follow, target: None })
     }
     fn current(&self) -> Result<Metadata, String> {
-        let before = self.file.metadata().map_err(|error| error.to_string())?;
+        let before = self.file.metadata().map_err(|error| io_message(&error))?;
         let now = if self.follow { self.path.metadata() } else { self.path.symlink_metadata() }
             .map_err(|_| "Selected item moved or disappeared.".to_string())?;
         if !ItemIdentity::record(&before).same_item(&ItemIdentity::record(&now)) {
             return Err("Selected item changed; select it again.".into());
         }
         if let Some(target) = &self.target {
-            let before = target.metadata().map_err(|error| error.to_string())?;
+            let before = target.metadata().map_err(|error| io_message(&error))?;
             let now = self.path.metadata().map_err(|_| "Selected link target moved or disappeared.".to_string())?;
             if !ItemIdentity::record(&before).same_item(&ItemIdentity::record(&now)) {
                 return Err("Selected link target changed; select it again.".into());
@@ -116,7 +117,7 @@ impl State {
                     }
                     let metadata = held.current()?;
                     let directory = match &held.target {
-                        Some(target) => target.metadata().map_err(|error| error.to_string())?.is_dir(),
+                        Some(target) => target.metadata().map_err(|error| io_message(&error))?.is_dir(),
                         None => metadata.is_dir(),
                     };
                     if directory != field_bool(line, "directory") { return Err("This item is not the requested file type.".into()); }
@@ -142,14 +143,14 @@ impl State {
                             held.target = Some(Held::open(&path, true)?.file);
                         }
                         let directory = match &held.target {
-                            Some(target) => target.metadata().map_err(|error| error.to_string())?.is_dir(),
+                            Some(target) => target.metadata().map_err(|error| io_message(&error))?.is_dir(),
                             None => metadata.is_dir(),
                         };
                         if directory { return Err("This output name is a directory; choose a filename.".into()); }
                         Some(held)
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(error) => return Err(format!("Could not inspect output location: {}", error)),
+                    Err(error) => return Err(format!("Could not inspect output location: {}", io_message(&error))),
                 };
                 if let Some(target) = &target { target.current()?; }
                 let result = format!(r#""review":{},"path":"{}","collision":{}"#, id, escape(&path.to_string_lossy()), target.is_some());
@@ -218,6 +219,25 @@ pub fn filter_listing(listing: &mut Listing, db: &Db, line: &str) {
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+
+    #[test]
+    fn inaccessible_selection_reports_plain_cause_and_recovers() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TestDir::new("picker-plain-error");
+        let parent = dir.dir("locked");
+        let path = dir.file("locked/item", "retained contents");
+        let mut state = State::default();
+        let cancel = Cancellation::default();
+        let mark = format!(r#"{{"op":"mark","id":1,"path":"{}"}}"#, escape(&path.to_string_lossy()));
+        dir.assert_contains(&parent);
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0)).unwrap();
+        let refused = state.handle(&mark, &cancel);
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(refused.unwrap_err(), format!("Could not inspect {}: permission denied", path.display()));
+        assert!(state.marks.is_empty());
+        state.handle(&mark, &cancel).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"retained contents");
+    }
 
     #[test]
     fn marks_keep_order_across_navigation_and_drop_missing_or_replaced_items() {

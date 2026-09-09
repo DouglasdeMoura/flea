@@ -225,12 +225,15 @@ function run(check) {
           "Redoing move 2 of 3/move/2")
     check("progress creates a new sample without changing the prior state", redo.index, 0)
 
-    // Rename lives here with the other write operations. The editor opens only over a row the
-    // client holds, and a commit reads the row before clearing the index, since clearing closes it.
+    // Rename keeps its captured source and editor until the backend accepts the write.
     function renamePane(cursor, renaming, renamed, viewMode) {
         var p = windowedPane([])
         p.cursorIndex = cursor
         p.renamingIndex = renaming
+        p.renameRequest = null
+        Object.defineProperty(p, "renamePending", {get: function() { return p.renameRequest !== null }})
+        p.renameError = ""
+        p.setCursor = function(index) { p.cursorIndex = index }
         p.viewMode = viewMode ? viewMode : "list"
         p.said = ""
         p.message = function (text) { p.said = text }
@@ -243,34 +246,37 @@ function run(check) {
     var unheld = renamePane(9, -1, [])
     Ops.startRename(unheld)
     check("r on a row outside the held window opens nothing", unheld.renamingIndex, -1)
-    // Neither the grid nor the columns draws a row editor, so a rename started there would set the
-    // guard in ui/js/Focus.js with nothing left to clear it and swallow every key after it.
     var gridded = renamePane(2, -1, [], "grid")
     Ops.startRename(gridded)
-    check("r in the grid opens no editor and says why",
-          gridded.renamingIndex + "|" + gridded.said, "-1|Rename needs the list view.")
+    check("r in the grid opens the same editor", gridded.renamingIndex, 2)
     var columned = renamePane(2, -1, [], "columns")
     Ops.startRename(columned)
-    check("r in the columns view opens no editor either", columned.renamingIndex, -1)
+    check("r in the active column opens the same editor", columned.renamingIndex, 2)
     var renamed = []
     var committing = renamePane(0, 3, renamed)
     Ops.commitRename(committing, "g3")
-    check("a commit renames the row that was being edited and closes the editor",
-          renamed.join(",") + "|" + committing.renamingIndex, "/d/f3>g3|-1")
+    check("a commit retains the editor while the write is pending",
+          renamed.join(",") + "|" + committing.renamingIndex + "|" + committing.renamePending, "/d/f3>g3|3|true")
+    Ops.commitRename(committing, "again")
+    check("a repeated commit sends no second write", renamed.length, 1)
     var stale = []
     var gone = renamePane(0, 7, stale)
     Ops.commitRename(gone, "x")
-    check("a commit over a row the window no longer holds sends nothing and still closes",
-          stale.length + "|" + gone.renamingIndex, "0|-1")
+    check("a missing source cannot send a write or discard the draft",
+          stale.length + "|" + gone.renamingIndex + "|" + gone.renameError, "0|7|Selected item changed; reopen Rename.")
+    for (var invalid of ["", ".", "..", "a/b", "a\u0000b"]) {
+        var refusedWrites = [], refused = renamePane(2, 2, refusedWrites)
+        Ops.commitRename(refused, invalid)
+        check("invalid basename retains editor and explains refusal: " + JSON.stringify(invalid),
+              refusedWrites.length + "|" + refused.renamingIndex + "|" + refused.renamePending + "|" + (refused.renameError.length > 0), "0|2|false|true")
+    }
     var menuRename = renamePane(2, -1, [])
     var renameIdentity = 0
     menuRename.backend.rename = function (from, to, menuId) { renameIdentity = menuId }
     Ops.startRename(menuRename, 33)
     check("menu rename retains its identity for the editor lifetime", menuRename.renameMenuId, 33)
-    Object.defineProperty(menuRename, "renamingIndex", {get: function () { return 2 },
-        set: function () { menuRename.renameMenuId = 0 }})
     Ops.commitRename(menuRename, "renamed.txt")
-    check("committing retains the menu identity before closing the editor clears it", renameIdentity, 33)
+    check("committing retains the captured menu identity", renameIdentity, 33)
 
     var operationIds = []
     var convertedArguments = null

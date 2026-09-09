@@ -410,6 +410,30 @@ def test_cancel():
 
 
 def test_failure():
+    parent = guard(root / "permission-parent")
+    parent.mkdir()
+    folder = guard(parent / "listing")
+    folder.mkdir()
+    target = guard(folder / "retained.txt")
+    write(target, "retained picker contents")
+    denied = Request("SP09-permission", folder=folder).opened()
+    denied.row(target.name)
+    guard(parent).chmod(0)
+    try:
+        denied.key("-k", "space")
+        expected = f"Could not inspect {target}: permission denied"
+        refused = denied.until("kernel permission refusal is plain and retains the picker", lambda state:
+                               not state["marksBusy"] and state["messageError"] and state["message"] == expected)
+        check("refused selection has no accepted URI", not refused["marks"] and not refused["canAccept"], refused["marks"])
+        denied.capture("permission-denied")
+    finally:
+        guard(parent).chmod(0o700)
+    denied.mark(target.name)
+    denied.until("restored permissions allow the same item", lambda state: state["canAccept"] and len(state["marks"]) == 1)
+    denied.click("Open")
+    denied.answered(0, [target.as_uri()])
+    check("permission recovery keeps the original file contents", target.read_text() == "retained picker contents")
+
     for mode in ["open", "save"]:
         lost = Request(f"SP09-backend-{mode}", "SaveFile" if mode == "save" else "OpenFile",
                        **({"current_name": GLib.Variant("s", "draft.txt")} if mode == "save" else {})).opened()

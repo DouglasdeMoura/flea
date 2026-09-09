@@ -88,6 +88,8 @@ run_log="$run_root/run.log"
 # each case because a failed redirect would otherwise leave the previous case's bytes for the
 # refusal grep to find and report a refusal for a case that never ran.
 case_log="$run_root/case.log"
+expected_warnings="$run_root/expected-warnings"
+: > "$expected_warnings"
 printf 'NATIVE_EVIDENCE_ROOT=%s\n' "$run_root"
 
 # Ten bursts of twelve clicks moved the 100k viewport about eleven rows when measured.
@@ -6283,6 +6285,149 @@ case_dual() {
     printf 'DUAL navigation=ok focus=ok watch=ok restart=ok before=%s\n' "$before"
 }
 
+dual_sort_wait() {
+    local mark="$1" first="$2" deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        if [[ "$(ipc sortMark)" == "$mark" && "$(ipc rowAt 0)" == "$first|"* && "$(ipc listInFlight)" == false ]]; then
+            menus_checks=$((menus_checks + 1))
+            printf 'DUAL_SORT_CHECK %s mark=%s first=%s\n' "$menus_checks" "$mark" "$first"
+            return
+        fi
+        sleep 0.05
+    done
+    fail "dualsort: expected $mark/$first, observed $(ipc sortMark)/$(ipc rowAt 0)"
+}
+
+dual_sort_header() {
+    local column="$1" x width
+    IFS='|' read -r x width <<< "$(ipc headerCellRect "$column")"
+    [[ "$x" =~ ^[0-9]+$ && "$width" =~ ^[0-9]+$ && "$width" -gt 0 ]] \
+        || fail "dualsort: header $column has no native pointer target"
+    menus_point "$(( $(ipc headerLeft) + x + width / 2 )) $(( $(ipc headerTop) + $(ipc chromeHeight) / 2 ))"
+}
+
+case_dualsort() {
+    local dir="$fixture_root/dual-sort" state="$fixture_root/dual-sort-state" menus_checks=0
+    local side index name left right left_scroll right_scroll mode list_requests date_epoch=1700000000
+    sandbox_scratch "$dir"
+    sandbox_scratch "$state"
+    for side in left right; do
+        mkdir "$dir/$side" || fail 'dualsort: private listing directory failed'
+        for ((index = 0; index < 80; index++)); do
+            printf -v name 'file-%02d.txt' "$index"
+            truncate -s "$((index + 1))" "$dir/$side/$name" || fail 'dualsort: private file creation failed'
+            touch -d "@$((date_epoch + index))" "$dir/$side/$name" || fail 'dualsort: private file date failed'
+        done
+    done
+    seed_ui_state "$state" "$(jq -cn --arg left "$dir/left" --arg right "$dir/right" \
+        '{view:"dual",keys:"default",sort:{key:"name",reverse:false},dual:{paths:[$left,$right],focus:0}}')"
+    launch "$dir/left"
+    menus_expect dualState '.active and .focused == 0 and all(.panes[]; .total == 80 and (.loading | not))' 'both dual listings start independently'
+    dual_sort_wait name:asc file-00.txt
+    key -k End >/dev/null; key v >/dev/null
+    menus_expect dualState '.panes[0].cursor == 79 and .panes[0].selected == [79]' 'primary retains a nonzero marked cursor'
+    menus_expect listContentY '. > 0' 'primary scrolls to its marked cursor'
+    left=$(ipc dualState | jq -c '.panes[0] | del(.focused)')
+    left_scroll=$(ipc listContentY)
+    key -k Tab >/dev/null; key -M shift -k s -m shift >/dev/null
+    dual_sort_wait name:desc file-79.txt
+    menus_expect dualState ".focused == 1 and ((.panes[0] | del(.focused)) == $left)" 'secondary reverse leaves primary listing, marks and requests unchanged'
+    settings_wait_value '.sort.key == "name" and .sort.reverse == false'
+    key -k Tab >/dev/null
+    menus_equal 'primary scroll survives peer sorting' "$left_scroll" "$(ipc listContentY)"
+    menus_equal 'primary sort survives peer sorting' name:asc "$(ipc sortMark)"
+    dual_sort_header size
+    dual_sort_wait size:asc file-00.txt
+    key -k Tab >/dev/null
+    menus_equal 'secondary sort survives primary header click' name:desc "$(ipc sortMark)"
+    key -k End >/dev/null; key v >/dev/null
+    menus_expect dualState '.panes[1].cursor == 79 and .panes[1].selected == [79]' 'secondary retains a nonzero marked cursor'
+    menus_expect listContentY '. > 0' 'secondary scrolls to its marked cursor'
+    right=$(ipc dualState | jq -c '.panes[1] | del(.focused)')
+    right_scroll=$(ipc listContentY)
+    key -k Tab >/dev/null; key -M shift -k s -m shift >/dev/null
+    dual_sort_wait size:desc file-79.txt
+    menus_expect dualState ".focused == 0 and ((.panes[1] | del(.focused)) == $right)" 'primary reverse leaves secondary listing, marks and requests unchanged'
+    shot dual-sort-independent
+
+    click_chrome list
+    menus_expect dualState '(.active | not) and .focused == 0' 'leaving dual exposes the primary listing'
+    dual_sort_header size
+    dual_sort_wait size:asc file-00.txt
+    settings_wait_value '.sort.key == "size" and .sort.reverse == false'
+    menus_expect dualState "(.active | not) and ((.panes[1] | del(.focused)) == $right)" 'single-pane sort persistence leaves the hidden secondary session unchanged'
+    click_chrome dual
+    menus_expect dualState ".active and ((.panes[1] | del(.focused)) == $right)" 'reopening dual retains secondary listing and selection'
+    key -k Tab >/dev/null
+    menus_equal 'reopened secondary keeps its session sort' name:desc "$(ipc sortMark)"
+    menus_equal 'reopened secondary keeps its scroll' "$right_scroll" "$(ipc listContentY)"
+    shot dual-sort-reopened
+
+    settings_open_key
+    settle
+    settings_section view
+    settings_focus_row sort.key
+    key l >/dev/null
+    settings_wait_value '.sort.key == "date"'
+    key l >/dev/null
+    settings_wait_value '.sort.key == "kind" and .sort.reverse == false'
+    key -k Escape >/dev/null
+    dual_sort_wait kind:asc file-00.txt
+    key -k Tab >/dev/null
+    dual_sort_wait kind:asc file-00.txt
+    key -k Tab >/dev/null; key -M shift -k s -m shift >/dev/null
+    dual_sort_wait kind:desc file-79.txt
+    settings_wait_value '.sort.key == "kind" and .sort.reverse == false'
+    shot dual-sort-settings
+
+    for mode in typing results; do
+        dual_sort_header size
+        dual_sort_wait size:asc file-00.txt
+        key -M shift -k s -m shift >/dev/null
+        dual_sort_wait size:desc file-79.txt
+        key f >/dev/null
+        menus_expect keyDeliveryState '.searchMode == "typing"' "dual Search $mode starts through native key"
+        if [[ "$mode" == results ]]; then
+            key file- -k Return >/dev/null
+            menus_expect keyDeliveryState '.searchMode == "results" and (.searchRunning | not)' 'dual Search finishes its private fixture walk'
+        fi
+        click_chrome sliders
+        menus_expect settingsOpen '. == true' "Settings opens over dual Search $mode"
+        settings_section view
+        settings_focus_row sort.key
+        key h >/dev/null
+        settings_wait_value '.sort.key == "date" and .sort.reverse == false'
+        key -k Escape >/dev/null
+        menus_expect keyDeliveryState ".searchMode == \"$mode\"" "Settings preserves dual Search $mode"
+        menus_equal "dual Search $mode defers Settings sort until browsing" size:desc "$(ipc sortMark)"
+        list_requests=$(ipc dualState | jq -er '.panes[1].listRequests')
+        key -k Escape >/dev/null
+        menus_expect keyDeliveryState '.searchMode == ""' "Escape closes dual Search $mode"
+        dual_sort_wait mtime:asc file-00.txt
+        menus_expect dualState ".panes[1].listRequests == $((list_requests + 1))" "dual Search $mode consumes deferred sort in one listing"
+        key -k Tab >/dev/null
+        dual_sort_wait mtime:asc file-00.txt
+        key -k Tab >/dev/null
+        shot "dual-sort-search-$mode"
+        settings_open_key
+        menus_expect settingsOpen '. == true' 'Settings reopens after deferred sort applies'
+        settings_section view
+        settings_focus_row sort.key
+        key l >/dev/null
+        settings_wait_value '.sort.key == "kind" and .sort.reverse == false'
+        key -k Escape >/dev/null
+        dual_sort_wait kind:asc file-00.txt
+    done
+    kill_flea
+    launch "$dir/left"
+    menus_expect dualState '.active and .focused == 1 and all(.panes[]; .total == 80 and (.loading | not))' 'restart restores paths and focus with the saved default sort'
+    dual_sort_wait kind:asc file-00.txt
+    key -k Tab >/dev/null
+    dual_sort_wait kind:asc file-00.txt
+    kill_flea
+    printf 'DUAL_SORT native-key=independent header-pointer=independent hidden-session=retained settings=live search-settings=deferred single-persistence=ok restart=defaults checks=%s\n' "$menus_checks"
+}
+
 case_settings() {
     local dir="$fixture_root/settings"
     local config="$fixture_root/settings-config"
@@ -7791,6 +7936,7 @@ case_previewviews() {
 . "$repo/tests/ui-pdf.sh"
 . "$repo/tests/ui-trash.sh"
 . "$repo/tests/ui-menus.sh"
+. "$repo/tests/ui-rename-design.sh"
 . "$repo/tests/ui-providers.sh"
 . "$repo/tests/ui-dropbox-roots.sh"
 . "$repo/tests/ui-settings-layout.sh"
@@ -7859,7 +8005,15 @@ vaapi_warning="VAAPITextureConverter: No rhi or non openGL based RHI"
 # case_formats and case_previewviews open a file with no permission bits on purpose; Qt names it, and this run's fixture path is the whole match.
 unreadable_warning="$fixture_root/formats/shut.jpg"
 unreadable_warning2="$fixture_root/previewviews/shut.jpg"
-if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" "$run_log" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
+while IFS= read -r warning; do
+    count=$(grep -F -c -- "$warning" "$run_log" || true)
+    if [[ "$count" != 1 ]]; then
+        printf 'FAIL expected native warning count=%s: %s\n' "$count" "$warning"
+        failures=$((failures + 1))
+    fi
+done < "$expected_warnings"
+if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" "$run_log" \
+    | grep -F -v -f "$expected_warnings" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
     printf 'FAIL log\n'
     failures=$((failures + 1))
 fi

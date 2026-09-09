@@ -129,28 +129,36 @@ function newFolder(pane) {
     pane.backend.mkdir(pane.path)
 }
 
-// r on a row the client holds opens the editor over that row's name column. Only ui/Row.qml draws
-// one, so a rename started in the grid or the columns would set ui/js/Focus.js's guard with nothing
-// left to ever clear it, and every later key would be swallowed for the life of the window.
+// Every active view uses the same inline editor and keeps its original source until the reply.
 function startRename(pane, menuId) {
-    if (pane.viewMode !== "list") {
-        pane.message("Rename needs the list view.", false)
-        return
-    }
-    if (pane.rowFor(pane.cursorIndex)) {
+    if (pane.renamePending) return
+    var row = pane.rowFor(pane.cursorIndex)
+    if (row) {
+        pane.setCursor(pane.cursorIndex)
+        pane.renameError = ""
+        pane.renameSource = pane.join(pane.path, row.n)
         pane.renameMenuId = menuId || 0
         pane.renamingIndex = pane.cursorIndex
     }
 }
 
-// The row is read before the index is cleared, because clearing it is what closes the editor.
+// Closing before acceptance loses the draft on a refused write; only success or Escape closes it.
 function commitRename(pane, newName) {
+    if (pane.renamePending) return
     var row = pane.rowFor(pane.renamingIndex)
-    var menuId = pane.renameMenuId || 0
-    pane.renamingIndex = -1
-    if (row) {
-        pane.backend.rename(pane.join(pane.path, row.n), newName, menuId)
+    if (!row) {
+        pane.renameError = "Selected item changed; reopen Rename."
+        return
     }
+    if (!newName.length || newName === "." || newName === ".." || newName.indexOf("/") >= 0 || newName.indexOf("\u0000") >= 0) {
+        pane.renameError = "A name cannot be empty, . or .., or contain a separator."
+        return
+    }
+    pane.renameError = ""
+    var source = pane.renameSource || pane.join(pane.path, row.n)
+    // The request survives a hidden/reused editor so a late reply cannot finish another rename.
+    pane.renameRequest = {source: source, destination: source.substring(0, source.lastIndexOf("/") + 1) + newName, folder: pane.path}
+    pane.backend.rename(source, newName, pane.renameMenuId || 0)
 }
 
 // Indices, not paths: trash acts on the listing that is up right now, so the backend resolves them.

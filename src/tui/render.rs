@@ -604,8 +604,10 @@ pub fn menu_rows(m: &Model) -> Vec<String> {
     if m.taildrop.submenu {
         return m.taildrop.peers.iter().skip(m.menu_top).map(|p| p.label.clone()).collect();
     }
-    ["open", if m.hidden { "hide hidden" } else { "show hidden" }, "taildrop  ▶"]
-        .into_iter().skip(m.menu_top).map(str::to_owned).collect()
+    let reason = m.taildrop.reason();
+    let taildrop = if reason.is_empty() { "taildrop  ▶".into() } else { format!("taildrop · {}", reason) };
+    vec!["open".into(), if m.hidden { "hide hidden".into() } else { "show hidden".into() }, taildrop]
+        .into_iter().skip(m.menu_top).collect()
 }
 pub fn panel_rows(m: &Model, map: &Map) -> Vec<String> {
     let rows = m.properties.clone().unwrap_or_else(|| map.sheet(&m.preset));
@@ -706,6 +708,8 @@ mod tests {
         assert!(output.contains("│ show hidden │"));
         model.hidden = true;
         assert_eq!(menu_rows(&model), ["hide hidden", "taildrop  ▶"]);
+        model.taildrop.error = "Tailscale is signed out".into();
+        assert_eq!(menu_rows(&model), ["hide hidden", "taildrop · Tailscale is signed out"]);
     }
     #[test]
     fn confirmation_buttons_stay_visible_and_hit_testable_at_small_sizes() {

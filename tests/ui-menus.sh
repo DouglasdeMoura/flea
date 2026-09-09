@@ -478,12 +478,12 @@ menus_stale_rename_commit() {
     menus_replace "$directory/target.txt" "$retained"
     menus_guard "$directory/renamed.txt"
     key -M ctrl -k a -m ctrl renamed.txt -k Return >/dev/null
-    menus_error 'That file could not be renamed.' 'Rename commit reports refusal of a replaced source'
-    menus_expect renameEditorLive '. == false' 'refused Rename commit closes the editor'
+    menus_expect renameState '.focused and (.pending | not) and .text == "renamed.txt" and (.error | contains("Selected item changed"))' 'Rename commit retains the draft after replaced-source refusal'
     [[ ! -e "$directory/renamed.txt" ]] || fail "menus: stale Rename committed the replacement"
     menus_equal 'Rename refusal preserves replacement' replacement "$(cat "$directory/target.txt")"
     menus_equal 'Rename refusal preserves captured original' originalone "$(cat "$retained")"
-    menus_acknowledge
+    key -k Escape >/dev/null
+    menus_expect renameEditorLive '. == false' 'Escape dismisses retained Rename refusal'
     menus_file_menu target.txt menu-key
     menus_choose rename
     menus_expect renameEditorLive '. == true' 'a fresh Rename recaptures the replacement'

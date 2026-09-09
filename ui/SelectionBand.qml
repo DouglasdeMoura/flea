@@ -31,7 +31,7 @@ MouseArea {
     z: 1
     acceptedButtons: Qt.LeftButton
     preventStealing: true
-    enabled: pane !== null && !pane.listInFlight && pane.listingState === "ready"
+    enabled: pane !== null && !pane.listInFlight && pane.renamingIndex < 0 && pane.listingState === "ready"
     clip: true
 
     function endpoint() {

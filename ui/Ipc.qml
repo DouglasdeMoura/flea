@@ -349,6 +349,23 @@ QtObject {
         function renamingIndex(): int { return root.pane.renamingIndex }
         function renameEditorLive(): bool { return root.pane.renameEditor() !== null }
         function renameEditorText(): string { var e = root.pane.renameEditor(); return e ? e.editorText : "" }
+        function renameState(): string {
+            var row = root.pane.renameEditor()
+            var editor = row ? row.editorField : null
+            var current = root.pane.visibleItemFor(root.pane.cursorIndex)
+            var area = root.pane.viewMode === "columns" ? root.pane.columnsArea.activeColumn() : root.pane.listArea
+            var point = editor ? editor.mapToItem(area, 0, 0) : null
+            return JSON.stringify({index: root.pane.renamingIndex, pending: root.pane.renamePending,
+                error: root.pane.renameError, text: editor ? editor.current : "",
+                cursor: root.pane.cursorIndex, cursorName: root.pane.cursorRow ? root.pane.cursorRow.n : "",
+                loading: root.pane.listInFlight, listingState: root.pane.listingState, currentRowHeight: current ? current.height : 0,
+                focused: !!editor && editor.inputItem.activeFocus,
+                rowHeight: row ? row.height : 0, normalRowHeight: Theme.fileRowHeight,
+                fieldHeight: editor ? editor.fieldHeight : 0, errorHeight: editor ? editor.errorHeight : 0,
+                editorTop: point ? point.y : 0, editorBottom: point ? point.y + editor.height : 0, viewportHeight: area.height,
+                selectedText: editor ? editor.inputItem.selectedText : "",
+                centre: editor ? root.fleaWindow.centreOf(editor.inputItem) : ""})
+        }
         function railRenameEditorLive(): bool { return root.pane.sidebar.renameEditor() !== null }
         function railRenameEditorText(): string { var e = root.pane.sidebar.renameEditor(); return e ? e.editorText : "" }
         function railRenameFieldShown(): bool { var e = root.pane.sidebar.renameEditor(); return e ? e.editorShown : false }

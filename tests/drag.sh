@@ -717,17 +717,19 @@ target_points() {
 }
 
 dual_target_points() {
-  local phase="$1" geometry point x y
+  local phase="$1" geometry footer point
   owned_path "$destination"
   geometry=$(ipc dragPaneGeometry "$dual_destination_side" 0) || die "dual drag geometry observer failed"
+  footer=$(ipc statusFooterState) || die "dual drag footer observer failed"
   if [[ "$phase" == saved-before ]]; then dual_before="$geometry"; else dual_after="$geometry"; fi
   printf 'DRAG_DUAL_GEOMETRY phase=%s state=%s\n' "$phase" "$geometry"
-  point=$(python3 - "$geometry" "$destination" "$dual_destination_side" "$phase" "$WX" "$WY" "$WW" "$WH" "$pointer_tolerance" <<'PY'
+  point=$(python3 - "$geometry" "$destination" "$dual_destination_side" "$phase" "$WX" "$WY" "$WW" "$WH" "$pointer_tolerance" "$footer" <<'PY'
 import json, re, sys
 
 state = json.loads(sys.argv[1])
 destination, side, phase = sys.argv[2:5]
-wx, wy, width, height, tolerance = map(int, sys.argv[5:])
+wx, wy, width, height, tolerance = map(int, sys.argv[5:10])
+footer = json.loads(sys.argv[10])
 def require(condition, message):
     if not condition:
         raise SystemExit("dual drag geometry: " + message)
@@ -755,16 +757,20 @@ for x, y, w, h in [(fx, fy, fw, fh), (lx, ly, lw, lh)]:
     require(x >= ax and y >= ay and x + w <= ax + aw and y + h <= ay + ah, "row is outside the destination listing")
 bottom = ly + lh
 require(ay + ah - bottom > 2 * tolerance, "destination has insufficient empty floor")
-print(wx + fx + (fw + 1) // 2, wy + fy + (fh + 1) // 2, wx + lx + lw // 2, wy + (bottom + ay + ah) // 2)
+# Leave vertically into the informational footer; a diagonal to Sliders can cross the other pane's folder.
+sx, sy, sw, sh = rectangle(footer.get("frame"))
+outside_x, outside_y = lx + lw // 2, sy + sh // 2
+require(ax + tolerance < outside_x < ax + aw - tolerance, "outside route is too close to a pane boundary")
+require(sy >= ay + ah, "footer overlaps the destination listing")
+require(sx + tolerance < outside_x < sx + sw - tolerance and sy + tolerance < outside_y < sy + sh - tolerance,
+        "footer cannot contain the outside waypoint and pointer tolerance")
+print(wx + fx + (fw + 1) // 2, wy + fy + (fh + 1) // 2, wx + outside_x, wy + (bottom + ay + ah) // 2,
+      wx + outside_x, wy + outside_y)
 PY
   ) || { dual_drag_diagnostic; die "dual target geometry refused; state=$geometry"; }
-  read -r folder_x folder_y floor_x floor_y <<< "$point"
-  printf 'DRAG_DUAL_POINTS phase=%s folder=%s,%s floor=%s,%s\n' "$phase" "$folder_x" "$folder_y" "$floor_x" "$floor_y"
-  point=$(ipc chromeButtonCentre sliders) || die "dual neutral chrome target is unavailable"
-  [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "dual neutral chrome target has invalid geometry"
-  read -r x y <<< "$point"
-  (( x > 0 && x < WW && y > 0 && y < WH )) || die "dual neutral chrome target is outside the owned window"
-  neutral_x=$((WX + x)); neutral_y=$((WY + y))
+  read -r folder_x folder_y floor_x floor_y neutral_x neutral_y <<< "$point"
+  printf 'DRAG_DUAL_POINTS phase=%s folder=%s,%s floor=%s,%s outside=%s,%s footer=%s\n' \
+    "$phase" "$folder_x" "$folder_y" "$floor_x" "$floor_y" "$neutral_x" "$neutral_y" "$footer"
 }
 
 dual_drag_diagnostic() {

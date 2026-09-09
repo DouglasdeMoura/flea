@@ -68,6 +68,7 @@ ListView {
         searchQuery: root.pane.searchMode.length > 0 ? root.pane.searchQuery : root.pane.filterQuery
         filtering: root.pane.shown !== null
         renaming: listingIndex === root.pane.renamingIndex
+        renamePane: root.pane
         // -1 is also what Filter.at answers for a stale delegate, so an idle list must never light one.
         dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
         dropCopying: dragSession.dragCopy
@@ -82,6 +83,7 @@ ListView {
 
         TapHandler {
             id: tap
+            enabled: !cell.renaming
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onTapped: function (eventPoint, button) {
                 if (button === Qt.RightButton)
@@ -134,6 +136,11 @@ ListView {
         // The wheel moves the view and not the cursor, so the cursor follows the viewport here.
         var first = Math.floor(root.contentY / Theme.fileRowHeight)
         var last = Math.min(root.pane.shownTotal - 1, first + root.pane.visibleRows - 1)
+        if (root.pane.renamingIndex >= 0) {
+            var range = root.visibleRange()
+            first = range.first
+            last = range.last
+        }
         if (last >= first && root.pane.selectionBand === null) {
             root.cursorClamped(first, last)
         }
@@ -147,28 +154,16 @@ ListView {
         settle.restart()
     }
 
-    // The delegate drawing the editor, or null when the row was released past the cache buffer,
-    // never built, or rebuilt under a listing that no longer holds it. renamingIndex is a listing
-    // row and itemAtIndex wants a view position, and a filter makes those different.
-    function renameEditor() {
-        if (root.pane.renamingIndex < 0)
-            return null
-        var item = root.itemAtIndex(Filter.viewOf(root.pane.shown, root.pane.renamingIndex))
-        return item && item.renaming ? item : null
-    }
-
-    // The row drawing the editor owns its text, so it is asked to commit rather than the pane
-    // guessing a name.
-    function commitOpenRename() {
-        var item = root.renameEditor()
-        if (!item)
-            return
-        // The pointer chose a row of its own, so the rename's reply must reveal nothing over it. Set
-        // before the commit because the backend's reply is what reads it, and taken back when the
-        // editor abandoned instead: a leaked flag made the next rename drop the cursor to the top.
-        root.pane.renameKeepsPointerRow = true
-        if (!item.commitEditor())
-            root.pane.renameKeepsPointerRow = false
+    function visibleRange() {
+        var fallback = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)
+        // The retained error caption expands one row; query actual delegates while it is present.
+        if (root.pane.renamingIndex >= 0) {
+            var first = root.indexAt(0, root.contentY)
+            var last = root.indexAt(0, root.contentY + root.height - 1)
+            first = first < 0 ? fallback.first : first
+            return {first: first, last: last < 0 ? Math.min(root.count - 1, first + root.pane.visibleRows) : last}
+        }
+        return fallback
     }
 
     // Pane's own open() and its Connections.onRows reach these two through the wrapper functions below.
@@ -220,7 +215,7 @@ ListView {
     function requestThumbs() {
         if (!root.visible || root.pane.listInFlight)
             return
-        var view = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)
+        var view = root.visibleRange()
         // A filtered viewport covers a set and not a run, so the run it spans is what the planner
         // gets and Filter.cut takes back every row inside that run the filter is hiding.
         var span = Filter.span(root.pane.shown, view.first, view.last)
@@ -247,7 +242,7 @@ ListView {
         if (!root.visible || root.pane.shownTotal === 0 || root.pane.listInFlight)
             return
         // Thumbs.viewport() is reused: it takes no thumb-specific state, only geometry.
-        var view = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)
+        var view = root.visibleRange()
         var span = Filter.span(root.pane.shown, view.first, view.last)
         var ask = Filter.keep(DirSizes.plan(root.pane.dirSizeState, root.pane.rows, root.pane.held, span.first, span.last, ViewState.thumbnailMode), root.pane.shown)
         if (ask.length > 0) {
@@ -265,6 +260,11 @@ ListView {
             return
         var firstVisible = Math.floor(root.contentY / Theme.fileRowHeight)
         var lastVisible = firstVisible + root.pane.visibleRows
+        if (root.pane.renamingIndex >= 0) {
+            var range = root.visibleRange()
+            firstVisible = range.first
+            lastVisible = range.last + 1
+        }
         if (root.pane.rows.length === 0) {
             root.requestAround(firstVisible)
             return

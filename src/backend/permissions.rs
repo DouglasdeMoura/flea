@@ -102,7 +102,7 @@ impl Permissions {
         }
         let before = path
             .symlink_metadata()
-            .map_err(|e| format!("Could not inspect permissions: {}.", e))?;
+            .map_err(|e| format!("Could not inspect permissions: {}.", crate::error::io_message(&e)))?;
         if !(before.is_file() || before.is_dir()) {
             return Err("Permissions is available for one file or directory; symbolic links are not followed.".into());
         }
@@ -110,8 +110,8 @@ impl Permissions {
             .read(true)
             .custom_flags(O_NOFOLLOW | O_PATH)
             .open(path)
-            .map_err(|e| format!("Could not open selected item for permissions: {}.", e))?;
-        let meta = file.metadata().map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Could not open selected item for permissions: {}.", crate::error::io_message(&e)))?;
+        let meta = file.metadata().map_err(|e| crate::error::io_message(&e))?;
         if meta.dev() != before.dev() || meta.ino() != before.ino() {
             return Err("Selected item changed; reopen Permissions.".into());
         }
@@ -145,7 +145,7 @@ impl Permissions {
             .as_ref()
             .filter(|h| h.id == id)
             .ok_or("Permissions selection expired; reopen the dialog.")?;
-        let meta = held.file.metadata().map_err(|e| e.to_string())?;
+        let meta = held.file.metadata().map_err(|e| crate::error::io_message(&e))?;
         let current = held
             .path
             .symlink_metadata()
@@ -179,7 +179,7 @@ impl Permissions {
         {
             return Err(format!(
                 "Could not change mode: {}. No change was applied.",
-                std::io::Error::last_os_error()
+                crate::error::io_message(&std::io::Error::last_os_error())
             ));
         }
         Ok(format!(
@@ -193,6 +193,25 @@ impl Permissions {
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+    #[test]
+    fn inspect_failures_report_plain_causes() {
+        let d = TestDir::new("permissions-plain-error");
+        let mut permissions = Permissions::default();
+        let missing = permissions.handle(&format!(
+            r#"{{"c":"permissions","op":"inspect","id":1,"path":"{}"}}"#,
+            escape(&d.join("missing").to_string_lossy())
+        ));
+        assert_eq!(field_str(&missing, "error").unwrap(), "Could not inspect permissions: file or folder not found.");
+        let parent = d.dir("locked");
+        let path = d.file("locked/file", "retained contents");
+        d.assert_contains(&parent);
+        std::fs::set_permissions(&parent, Mode::from_mode(0)).unwrap();
+        let refused = permissions.inspect(2, &path);
+        std::fs::set_permissions(&parent, Mode::from_mode(0o700)).unwrap();
+        assert_eq!(refused.unwrap_err(), "Could not inspect permissions: permission denied.");
+        assert_eq!(std::fs::read(path).unwrap(), b"retained contents");
+        assert!(permissions.held.is_none());
+    }
     #[test]
     fn unreadable_owned_file_can_be_repaired() {
         let d = TestDir::new("permissions-unreadable");

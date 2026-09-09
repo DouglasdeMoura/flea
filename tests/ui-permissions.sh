@@ -609,7 +609,7 @@ PY
         permissions_octal "$wanted"
         permissions_wait '.editable and any(.controls[]; .name == "Apply" and .enabled)' 'owned read-only mount reaches normal Apply'
         permissions_control Apply
-        permissions_wait ".opened and (.busy == false) and .editable and .mode == \"$wanted\" and (.displayedError | startswith(\"Could not change mode: Read-only file system\") and endswith(\"No change was applied.\"))" 'real kernel refusal retains editable fields and reports one sentence'
+        permissions_wait ".opened and (.busy == false) and .editable and .mode == \"$wanted\" and .displayedError == \"Could not change mode: filesystem is read-only. No change was applied.\"" 'real kernel refusal retains editable fields and reports one sentence'
         [[ "$(stat -c '%d:%i:%u:%g:%a:%s' "$PERMISSIONS_BIND_FILE")" == "$before" \
             && "$(sha256sum < "$PERMISSIONS_BIND_FILE")" == "$contents" ]] || fail "permissions: refused mode write changed the fixture"
         shot "permissions-$permissions_group-erofs-$wanted"

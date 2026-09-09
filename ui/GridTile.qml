@@ -16,6 +16,14 @@ Item {
     property bool dropTarget: false
     property bool dropCopying: false
     property string thumb: ""
+    property bool renaming: false
+    property var renamePane: null
+    readonly property string editorText: editor.current
+    readonly property Item editorField: editor
+    readonly property real renameExtraHeight: root.renaming ? Math.max(0, editor.implicitHeight - Theme.grid.captionHeight - Theme.spacing.rowPaddingX) : 0
+    signal renameCommitted(string newName)
+    signal renameAbandoned()
+    function commitEditor() { return editor.commit() }
 
     // A lifted tile is the cursor, the pointer or a selection member, the same ladder Row.qml climbs.
     readonly property bool lifted: root.cursor || root.hovered || root.selected
@@ -91,6 +99,7 @@ Item {
     // corner: a filename is arbitrary text, so PlainText, the same rule every name on this surface follows.
     Text {
         id: nameLabel
+        visible: !root.renaming
         anchors.top: markSlot.bottom
         anchors.topMargin: Theme.spacing.gap
         anchors.left: parent.left
@@ -111,6 +120,17 @@ Item {
         elide: Text.ElideRight
     }
 
+    Flea.RenameField {
+        id: editor
+        visible: root.renaming
+        anchors { top: nameLabel.top; left: nameLabel.left; right: nameLabel.right }
+        height: implicitHeight
+        pane: root.renamePane
+        name: root.row ? root.row.n.split("/").pop() : ""
+        onCommitted: function(newName) { root.renameCommitted(newName) }
+        onAbandoned: root.renameAbandoned()
+    }
+
     Text {
         anchors.top: nameLabel.bottom
         anchors.left: nameLabel.left
@@ -127,7 +147,7 @@ Item {
     }
 
     Rectangle {
-        visible: !root.dropTarget && hover.hovered && nameLabel.truncated
+        visible: !root.renaming && !root.dropTarget && hover.hovered && nameLabel.truncated
         z: 1
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: nameLabel.bottom

@@ -49,8 +49,15 @@ Item {
     function primeSettle() { settle.interval = root.pane.firstSettleMs }
 
     function visibleRange() {
-        return Thumbs.viewport(view.contentY - view.originY, Theme.fileRowHeight,
-            Math.max(1, Math.ceil(view.height / Theme.fileRowHeight)), view.count)
+        var visibleRows = Math.max(1, Math.ceil(view.height / Theme.fileRowHeight))
+        var fallback = Thumbs.viewport(view.contentY - view.originY, Theme.fileRowHeight, visibleRows, view.count)
+        if (root.pane && root.pane.renamingIndex >= 0) {
+            var first = view.indexAt(0, view.contentY)
+            var last = view.indexAt(0, view.contentY + view.height - 1)
+            first = first < 0 ? fallback.first : first
+            return {first: first, last: last < 0 ? Math.min(view.count - 1, first + visibleRows) : last}
+        }
+        return fallback
     }
 
     // The active column uses List/Grid's integer model and refills only around its viewport.
@@ -169,6 +176,10 @@ Item {
             cursor: root.selectedIndex >= 0 && listingIndex === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(listingIndex)
+            renaming: root.pane !== null && listingIndex >= 0 && listingIndex === root.pane.renamingIndex
+            renamePane: root.pane
+            onRenameCommitted: function(newName) { root.pane.commitRename(newName) }
+            onRenameAbandoned: if (root.pane) root.pane.renamingIndex = -1
             dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
             dropCopying: dragSession.dragCopy
             // Read off the normalised row above: subscripting rows again hands a shrunk listing's undefined to a bool.
@@ -177,6 +188,7 @@ Item {
 
             TapHandler {
                 id: tap
+                enabled: !cell.renaming
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onTapped: function (eventPoint, button) {
                     if (root.pane !== null) {

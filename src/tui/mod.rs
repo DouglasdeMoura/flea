@@ -102,6 +102,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             preview::request(&mut model, &mut wire)?;
             preview::layout(&mut model);
             model.taildrop.poll();
+            model.advance_taildrop(&mut wire)?;
             if let Some(result) = model.taildrop.sent.take() {
                 match result {
                     Ok(message) => model.say(message),
@@ -113,7 +114,8 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             }
             // Match StatusBar.messageMs while keeping the actionable undo receipt until dismissed.
             const MESSAGE_TIME: std::time::Duration = std::time::Duration::from_millis(4000);
-            if !model.message.contains("Undo available") && model.message_at.elapsed() >= MESSAGE_TIME {
+            if !matches!(model.menu_action.as_str(), "taildropRefresh" | "taildrop")
+                && !model.message.contains("Undo available") && model.message_at.elapsed() >= MESSAGE_TIME {
                 model.message.clear();
             }
             let visible = (model.preview_visible || model.quicklook) && model.selected.len() < 2;

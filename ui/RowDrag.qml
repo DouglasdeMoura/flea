@@ -15,6 +15,7 @@ Item {
 
     DragHandler {
         id: lift
+        enabled: root.pane !== null && !root.pane.renamePending && root.pane.renamingIndex !== root.listingIndex
         target: null
         // Preserve List's grab contract: the Flickable must not take the row drag after its threshold.
         grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfDifferentType | PointerHandler.ApprovesTakeOverByHandlersOfSameType

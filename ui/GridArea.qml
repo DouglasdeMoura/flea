@@ -43,6 +43,12 @@ GridView {
     readonly property int cellHeightPx: ViewState.thumbnailPixels + Theme.spacing.gap
                                         + Math.ceil(Theme.grid.captionHeight)
                                         + 2 * Theme.spacing.rowPaddingX
+                                        + renameExtraHeight
+    readonly property real renameExtraHeight: {
+        if (!root.pane || root.pane.renamingIndex < 0) return 0
+        var cell = root.itemAtIndex(Filter.viewOf(root.pane.shown, root.pane.renamingIndex))
+        return cell ? cell.renameExtraHeight : 0
+    }
     readonly property int visibleTileRows: Math.max(1, Math.ceil(root.height / root.cellHeightPx))
     onColumnsChanged: if (root.visible) settle.restart()
     onVisibleTileRowsChanged: if (root.visible) settle.restart()
@@ -92,6 +98,10 @@ GridView {
         dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
         dropCopying: dragSession.dragCopy
         thumb: Thumbs.allowed(row, ViewState.thumbnailMode) ? Thumbs.fileFor(root.pane.thumbState, listingIndex) : ""
+        renaming: listingIndex >= 0 && listingIndex === root.pane.renamingIndex
+        renamePane: root.pane
+        onRenameCommitted: function(newName) { root.pane.commitRename(newName) }
+        onRenameAbandoned: root.pane.renamingIndex = -1
 
         HoverHandler {
             id: hover
@@ -100,6 +110,7 @@ GridView {
 
         TapHandler {
             id: tap
+            enabled: !cell.renaming
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onTapped: function (eventPoint, button) {
                 if (cell.listingIndex < 0) return

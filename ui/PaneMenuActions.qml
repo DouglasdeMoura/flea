@@ -80,8 +80,9 @@ Loader {
         folder = pane.path
         pane.backend.send({c: "menuaction", op: "snapshot", id: requestId, rows: Ops.targetIndices(pane), cursor: pane.cursorIndex})
     }
-    function open(action) {
+    function open(action, menuId) {
         if (opened) return
+        if (action === "rename" && pane.renamePending) { pane.message("A rename is still finishing.", false); return }
         if (deleting || survivorId) { pane.message("The deletion is still finishing.", false); return }
         if (action === "newFile") {
             requestId++
@@ -89,7 +90,7 @@ Loader {
             show(action)
             return
         }
-        if (!requestId || identity !== pane.menuSelectionIdentity) snapshot()
+        if (!requestId || identity !== pane.menuSelectionIdentity || (action === "rename" && !menuId)) snapshot()
         pendingAction = action
         pendingActivation = false
         if (ready) show(action)
@@ -127,6 +128,7 @@ Loader {
     }
     function show(action) {
         pendingAction = ""
+        if (action === "rename") { Ops.startRename(pane, requestId); return }
         active = true
         item.open(action, requestId, folder, pane.listArea)
     }
