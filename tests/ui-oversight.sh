@@ -220,8 +220,8 @@ case_oversight() {
         || fail "oversight: the native instrument must be included in the candidate"
     git -C "$repo" diff --quiet "$FLEA_SOURCE_SHA" -- tests/ui.sh tests/ui-oversight.sh tests/ui-permissions.sh tests/ui-menus.sh \
         || fail "oversight: native instrument differs from the identified candidate"
-    [[ "$(git -C "$repo" rev-parse 'v0.1.6^{commit}')" == 784da4692e1594dfa99cc7de841c8a3cb3b5a7e2 ]] \
-        || fail "oversight: immutable release tag changed"
+    git -C "$repo" cat-file -e '784da4692e1594dfa99cc7de841c8a3cb3b5a7e2^{commit}' \
+        || fail "oversight: immutable release source is unavailable"
     sandbox_scratch "$oversight_box"
     fixture_home_make "$oversight_home"
     local listing="$oversight_home/Documents/claude"

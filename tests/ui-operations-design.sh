@@ -113,7 +113,8 @@ operations_search_footer() (
     permissions_viewport 880 620
     trap 'permissions_resume_stopped "$operations_stopped"' EXIT
     operations_pause_backend
-    key f c.txt -k Return >/dev/null
+    key f >/dev/null
+    key c.txt -k Return >/dev/null
     menus_expect keyDeliveryState '.searchMode == "results" and .searchQuery == "c.txt" and .searchRunning' "native Search submits while its owned backend is stopped"
     menus_expect statusFooterState '.listingState == "loading" and .left.text == .counts and .left.text == "" and .right.text == "Search: 0 scanned"' "submitted search displays its actual initial scanned count"
     operations_secondary " · esc cancels" "initial Search names its native cancellation key"

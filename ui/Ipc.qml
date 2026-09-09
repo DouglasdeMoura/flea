@@ -132,6 +132,10 @@ QtObject {
                 anchor: {x: band.anchor.x, y: band.anchor.y}, end: {x: band.end.x, y: band.end.y}}
                 : {tracking: false, active: false})
         }
+        function listingWindowState(): string {
+            return JSON.stringify({held: root.pane.held, loaded: root.pane.rows.length,
+                windowSize: root.pane.windowSize, total: root.pane.total, shownTotal: root.pane.shownTotal})
+        }
         function menuState(): string {
             var menu = root.pane.contextMenu()
             return JSON.stringify({opened: menu.visible, entries: menu.entries, cursor: menu.cursor,
