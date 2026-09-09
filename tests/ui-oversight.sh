@@ -109,20 +109,20 @@ oversight_stop() {
 }
 
 oversight_visible_row() {
-    local index="$1" x y width height ax ay aw ah end=$((SECONDS + 20))
+    local index="$1" name="${2:-field-bench-notes.md}" x y width height ax ay aw ah end=$((SECONDS + 20))
     while (( SECONDS < end )); do
         read -r x y width height <<< "$(ipc rowRect "$index")"
         read -r ax ay aw ah <<< "$(ipc listAreaRect)"
         if [[ "$x $y $width $height $ax $ay $aw $ah" =~ ^[0-9]+(\ [0-9]+){7}$ ]] \
             && (( width > 0 && height > 0 && x >= ax && y >= ay && x + width <= ax + aw && y + height <= ay + ah \
                   && x + width <= 880 && y + height <= 620 )); then
-            [[ "$(ipc rowAt "$index")" == field-bench-notes.md\|file\|* ]] \
+            [[ "$(ipc rowAt "$index")" == "$name|file|"* ]] \
                 || fail "oversight: visible row has the wrong file identity"
             return
         fi
         sleep 0.05
     done
-    fail "oversight: notes row never became fully visible: $x $y $width $height in $ax $ay $aw $ah"
+    fail "oversight: $name never became fully visible: $x $y $width $height in $ax $ay $aw $ah"
 }
 
 oversight_park_row() {
@@ -162,7 +162,7 @@ oversight_capture() {
     grep -E 'QRhi.*backend Vulkan' "$flea_log" >/dev/null || fail "oversight: Qt did not confirm its Vulkan renderer"
     (( index < 0 )) || oversight_visible_row "$index"
     palette=$(ipc palette) || fail "oversight: live palette unavailable"
-    local menu_open observed_path observed_view observed_state message transient total selected
+    local menu_open observed_path observed_view observed_state observed_cursor message transient total selected
     menu_open=$(ipc contextMenuVisible) || fail "oversight: menu visibility unavailable"
     [[ "$menu_open" == true || "$menu_open" == false ]] || fail "oversight: invalid menu visibility"
     if [[ "$menu_open" == true ]]; then
@@ -176,13 +176,14 @@ oversight_capture() {
     transient=$(ipc lastMessage) || fail "oversight: specimen transient unavailable"
     total=$(ipc total) || fail "oversight: specimen total unavailable"
     selected=$(ipc selectedIndices) || fail "oversight: specimen selection unavailable"
+    observed_cursor=$(ipc cursor) || fail "oversight: specimen cursor unavailable"
     printf '%s\n' "$identity" > "$prefix.identity.json" || fail "oversight: could not save native identity"
     jq -n --arg tokens "$tokens" --arg palette "$palette" --arg path "$observed_path" \
         --arg view "$observed_view" --arg state "$observed_state" --arg message "$message" \
-        --arg transient "$transient" --arg total "$total" --arg selected "$selected" \
+        --arg transient "$transient" --arg total "$total" --arg selected "$selected" --argjson cursor "$observed_cursor" \
         --arg menu "$entries" --arg hints "$hints" \
         '{tokens:$tokens,palette:$palette,path:$path,view:$view,state:$state,message:$message,transient:$transient,
-          total:$total,selected:$selected,menu:$menu,hints:$hints,visualInspection:"pending"}' > "$prefix.state.json" \
+          total:$total,cursor:$cursor,selected:$selected,menu:$menu,hints:$hints,visualInspection:"pending"}' > "$prefix.state.json" \
         || fail "oversight: could not record live specimen state"
     local address
     address=$(jq -er '.window.address' <<< "$identity") || fail "oversight: owned address unavailable"
@@ -210,7 +211,7 @@ case_oversight() {
     local flea_ui="$candidate_ui" flea_bin="$candidate_bin"
     local oversight_box="$fixture_root/oversight" oversight_home="$fixture_root/oversight/home"
     local oversight_arm oversight_source oversight_binary_sha oversight_theme="" oversight_font="" oversight_monitor="" identity view chord row entries hints
-    local permissions_checks=0 menus_checks=0 path end
+    local permissions_checks=0 menus_checks=0 path end marked marks step index x y width height
     local -x XDG_CONFIG_HOME="$oversight_home/.config" XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
     local -x FLEA_OVERSIGHT_ROOT="$oversight_box" QSG_RHI_BACKEND=vulkan QSG_INFO=1
     [[ "${FLEA_SOURCE_SHA:-}" =~ ^[0-9a-f]{40}$ && "${FLEA_BINARY_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] \
@@ -315,8 +316,55 @@ case_oversight() {
         permissions_expect state ready
         oversight_visible_row "$row"
         oversight_capture recovered "$row"
+        if [[ "$oversight_arm" == candidate ]]; then
+            key -M ctrl -k 3 -m ctrl >/dev/null
+            permissions_expect viewMode grid
+            settings_open_key
+            permissions_expect settingsOpen true
+            settings_section preview
+            settings_focus_row preview.thumbSize
+            ipc settingsModel | jq -e 'any(.[]; .id == "preview.thumbSize" and .selected == "medium")' >/dev/null \
+                || fail "oversight: native Thumbnail size control did not start at Medium"
+            key -k Left >/dev/null
+            settings_wait_value '.preview.thumbSize == "small"'
+            ipc settingsModel | jq -e 'any(.[]; .id == "preview.thumbSize" and .selected == "small" and .caption == "48 px")' >/dev/null \
+                || fail "oversight: native Thumbnail size control did not show Small 48 px"
+            key -k Escape >/dev/null
+            permissions_expect settingsOpen false
+            permissions_expect viewMode grid
+            marked=$(row_index_of README.md)
+            oversight_visible_row "$row"
+            oversight_visible_row "$marked" README.md
+            click_row "$row" left
+            permissions_expect cursor "$row"
+            permissions_expect selectedIndices "$row"
+            click_row "$marked" left --mods ctrl
+            permissions_expect cursor "$marked"
+            marks=$(jq -nr --argjson cursor "$row" --argjson marked "$marked" '[$cursor,$marked] | sort | map(tostring) | join(",")')
+            permissions_expect selectedIndices "$marks"
+            oversight_park_row "$marked"
+            key -k Home >/dev/null
+            permissions_expect cursor 0
+            for (( step = 0; step < row; step++ )); do key j >/dev/null; done
+            permissions_expect cursor "$row"
+            permissions_expect selectedIndices "$marks"
+            oversight_park_row "$row"
+            permissions_expect cursor "$row"
+            permissions_expect selectedIndices "$marks"
+            permissions_expect selectionCount 2
+            for index in "$row" "$marked"; do
+                [[ "$(ipc rowHovered "$index")" == false && -z "$(ipc rowThumb "$index")" ]] \
+                    || fail "oversight: Small specimen has a hovered tile or decoded thumbnail"
+                read -r x y width height <<< "$(ipc rowThumbRect "$index")"
+                [[ "$x $y $width $height" =~ ^[0-9]+(\ [0-9]+){3}$ && "$width $height" == '48 48' ]] \
+                    || fail "oversight: Small glyph slot is not 48x48: $x $y $width $height"
+            done
+            printf 'OVERSIGHT_GRID_SMALL cursor=%s cursor_file=field-bench-notes.md marked=%s marked_file=README.md selected=%s glyph_slot=48x48 visual_inspection=pending\n' \
+                "$row" "$marked" "$marks"
+            oversight_capture grid-small-cursor-marked "$row"
+        fi
         oversight_stop
     done
     trap - EXIT
-    printf 'OVERSIGHT_CAPTURE_GROUP source=%s matched=880x620 base=14 arms=2 specimens_per_arm=9 visual_inspection=pending\n' "$FLEA_SOURCE_SHA"
+    printf 'OVERSIGHT_CAPTURE_GROUP source=%s matched=880x620 base=14 arms=2 shared_specimens_per_arm=9 candidate_extra_specimens=1 visual_inspection=pending\n' "$FLEA_SOURCE_SHA"
 }

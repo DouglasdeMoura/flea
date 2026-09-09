@@ -41,9 +41,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        // The ladder ui/Row.qml climbs, and for its reason: selectionFill is the OEM's fifth rung,
-        // kept visually distinct from the cursor's own selectedFill so a member reads apart from it.
-        color: root.cursor ? Style.selectedFill
+        // Match the active listing's cursor and marked-selection roles.
+        color: root.cursor ? Style.selectedAccentFill
              : root.selected ? Style.selectionFill
              : root.lifted ? Style.hoverFill
              : root.hovered ? Style.hoverFill

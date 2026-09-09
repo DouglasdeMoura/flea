@@ -133,7 +133,7 @@ var PATHS = {
     "columns": "M3 3h18v18H3z M9 3v18 M15 3v18",
     "preview": "M3 3h18v18H3z M15 3v18",
     "dual": "M3 4h8v16H3z M13 4h8v16h-8z",
-    "grid": "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
+    "grid": "M3 3h8v8H3z M13 3h8v8h-8z M3 13h8v8H3z M13 13h8v8h-8z",
     // The preview column's own two, taken from the canvas's icon table rather than recut from lucide.
     "symlink": "M7 17L17 7 M8 7h9v9",
     // The dot is the zero-length-line technique again, which SquareCap draws square.

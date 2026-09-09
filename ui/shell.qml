@@ -93,12 +93,20 @@ ShellRoot {
             function focusPane(side) {
                 if (!dualMode) return
                 focusSide = side
-                ViewState.changeLeaf("dual", {focus: side})
                 currentPane.forceActiveFocus()
+                Qt.callLater(view.rememberDual)
             }
             function rememberPaths() {
                 if (!initialized || !dualMode || !secondPane.item || !primaryPane.path || !secondPane.item.pane.path) return
-                ViewState.changeLeaf("dual", {paths: [primaryPane.path, secondPane.item.pane.path]})
+                Qt.callLater(view.rememberDual)
+            }
+            // The mode binding reads ViewState.state; its handlers must finish before persistence replaces it.
+            function rememberDual() {
+                if (!initialized || !dualMode) return
+                var saved = {focus: focusSide}
+                if (secondPane.item && primaryPane.path && secondPane.item.pane.path)
+                    saved.paths = [primaryPane.path, secondPane.item.pane.path]
+                ViewState.changeLeaf("dual", saved)
             }
             function quitBackends() {
                 if (closing) return

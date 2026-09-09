@@ -9,6 +9,8 @@ operations_copy_to() {
     menus_choose copyTo
     menus_expect menuDialogState '.opened and .action == "copyTo"' "Copy to opens its actual destination field"
     key -M ctrl -k a -m ctrl "$destination" -k Return >/dev/null
+    # The live case observes transfer progress next; an extra dialog round trip could spend that window.
+    [[ "${2:-}" == live ]] && return
     menus_expect menuDialogState '.opened | not' "Copy to submits through the destination field"
 }
 
@@ -485,8 +487,142 @@ operations_cancel() (
     kill_flea
 )
 
+operations_missed_window() {
+    printf 'OPERATIONS_MISSED_WINDOW phase=%q state=%s attempts=1 workload_unchanged=true\n' "$1" "$2"
+    fail "operations: $1 missed the live observation/input window; no retry or workload enlargement"
+}
+
+operations_cancel_live() (
+    local source="$menu_box/cancel-source" destination="$menu_box/cancel-live" permissions_listing="$menu_box/cancel-source"
+    local state observed_bytes source_hash source_identity selected cursor pid deadline path
+    local -a pids
+    menus_guard "$destination"
+    mkdir "$destination" || fail "operations: live cancellation destination creation failed"
+    for path in "$source/a-large.bin" "$source/b-after.txt" "$destination/a-large.bin" "$destination/b-after.txt"; do menus_guard "$path"; done
+    source_hash=$(sha256sum < "$source/a-large.bin") || fail "operations: source checksum failed"
+    source_identity=$(stat -c '%d:%i:%s:%Y' "$source/a-large.bin") || fail "operations: source identity unavailable"
+    launch "$source"
+    trap 'kill_flea' EXIT
+    wait_listing 2
+    permissions_viewport 880 620
+    hotkey --global ctrl a flea >/dev/null
+    menus_expect selectionCount '. == 2' "live cancellation selects both real files"
+    selected=$(ipc selectedIndices) || fail "operations: live selection unavailable"
+    cursor=$(ipc cursor) || fail "operations: live cursor unavailable"
+    mapfile -t pids < <(backend_pids)
+    [[ "${#pids[@]}" == 1 ]] || fail "operations: live cancellation requires one owned backend"
+    pid="${pids[0]}"
+    permissions_backend_owned "$pid" || fail "operations: live backend identity differs"
+    state=$(ps -o stat= -p "$pid") || fail "operations: live backend state unavailable"
+    [[ "$state" != T* ]] || fail "operations: live backend is stopped before the native operation"
+    operations_copy_to "$destination" live
+    deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        state=$(ipc statusActivityState) || fail "operations: live transfer observer failed"
+        jq -e '.errors == 0' <<< "$state" >/dev/null || fail "operations: unpaused transfer failed: $state"
+        if jq -e '.activities[0].running and .activities[0].text == "Copying 1 of 2 · a-large.bin"' <<< "$state" >/dev/null; then break; fi
+        if jq -e '(.activities | length) == 0 and .notice != ""' <<< "$state" >/dev/null; then operations_missed_window transfer-progress "$state"; fi
+        sleep 0.05
+    done
+    jq -e '.activities[0].running and .activities[0].text == "Copying 1 of 2 · a-large.bin" and .transferCard.visible' <<< "$state" >/dev/null \
+        || fail "operations: no filename-bearing live transfer before deadline: $state"
+    observed_bytes=$(stat -c '%s' "$destination/a-large.bin") || fail "operations: live destination byte count unavailable"
+    (( observed_bytes > 0 && observed_bytes < operations_bytes )) || operations_missed_window transfer-before-capture "$state"
+    printf 'OPERATIONS_LIVE_TRANSFER before_capture_bytes=%s state=%s\n' "$observed_bytes" "$state"
+    shot operations-transfer-unpaused-filename
+    state=$(ipc statusActivityState) || fail "operations: live post-capture observer failed"
+    observed_bytes=$(stat -c '%s' "$destination/a-large.bin") || fail "operations: post-capture destination byte count unavailable"
+    if ! jq -e '.activities[0].running and .activities[0].text == "Copying 1 of 2 · a-large.bin"' <<< "$state" >/dev/null \
+            || (( observed_bytes <= 0 || observed_bytes >= operations_bytes )); then
+        operations_missed_window transfer-after-capture "$state"
+    fi
+    printf 'OPERATIONS_LIVE_TRANSFER after_capture_bytes=%s state=%s\n' "$observed_bytes" "$state"
+    key -k Escape >/dev/null
+    menus_expect statusActivityState '(.activities | length) == 0' "unpaused native Escape reaches a terminal transfer state"
+    state=$(ipc statusActivityState) || fail "operations: live cancellation outcome unavailable"
+    menus_equal "unpaused cancellation preserves source identity" "$source_identity" "$(stat -c '%d:%i:%s:%Y' "$source/a-large.bin")"
+    menus_equal "unpaused cancellation preserves all source bytes" "$source_hash" "$(sha256sum < "$source/a-large.bin")"
+    menus_equal "unpaused cancellation preserves later source" 'after cancellation' "$(cat "$source/b-after.txt")"
+    jq -e '.errors == 0' <<< "$state" >/dev/null || fail "operations: live cancellation reported an error: $state"
+    jq -e '.notice | contains("Copied 0 of 2") and contains("2 skipped") and contains("cancelled") and (contains("failed") | not)' <<< "$state" >/dev/null \
+        || operations_missed_window transfer-cancellation "$state"
+    operations_absent "$destination/a-large.bin"
+    operations_absent "$destination/b-after.txt"
+    menus_equal "unpaused Escape preserves listing marks" "$selected" "$(ipc selectedIndices)"
+    menus_equal "unpaused Escape preserves listing cursor" "$cursor" "$(ipc cursor)"
+    shot operations-cancelled-unpaused
+    printf 'OPERATIONS_CANCEL variant=escape unpaused_native=ok filename_capture=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok attempts=1\n'
+)
+
+operations_search_live() (
+    local source="$menu_box/search-live" query=flea-operations-no-match state footer deadline
+    local directory_count=100000
+    menus_guard "$source"
+    mkdir "$source" || fail "operations: nested Search fixture creation failed"
+    # Reuse case_nosweep's established directory count; no larger tree or second attempt follows a miss.
+    python3 - "$menu_box" "$source" "$directory_count" <<'PY' || fail "operations: nested Search fixture could not be populated"
+from pathlib import Path
+import sys
+
+sandbox, root = map(Path, sys.argv[1:3])
+count = int(sys.argv[3])
+if not sandbox.is_absolute() or not root.is_absolute() or not (sandbox / ".flea-test-sandbox").is_file():
+    raise SystemExit("operations: nested Search needs an absolute marked sandbox")
+if sandbox.resolve() != sandbox or root.resolve() != root or sandbox not in root.parents or any(root.iterdir()):
+    raise SystemExit("operations: nested Search root is not an empty canonical child of its sandbox")
+for index in range(1, count + 1):
+    child = root / f"dir_{index}"
+    if not child.is_absolute() or sandbox not in child.parents:
+        raise SystemExit(f"operations: nested Search path escaped its sandbox: {child}")
+    child.mkdir()
+PY
+    printf 'OPERATIONS_SEARCH_WORKLOAD directories=%s source=%q\n' "$directory_count" "$source"
+    launch "$source"
+    trap 'kill_flea' EXIT
+    wait_listing "$directory_count"
+    permissions_viewport 880 620
+    key f >/dev/null
+    menus_expect keyDeliveryState '.searchMode == "typing"' "live Search opens through native input"
+    key "$query" -k Return >/dev/null
+    deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        state=$(ipc keyDeliveryState) || fail "operations: live Search observer failed"
+        if jq -e '.searchMode == "results" and .searchRunning and .searchScanned > 0' <<< "$state" >/dev/null; then break; fi
+        if jq -e '.searchMode == "results" and (.searchRunning | not)' <<< "$state" >/dev/null; then operations_missed_window search-progress "$state"; fi
+        sleep 0.05
+    done
+    jq -e --arg query "$query" --argjson count "$directory_count" '.searchMode == "results" and .searchQuery == $query and .searchRunning and (.searchCancelled | not) and .searchScanned == $count' <<< "$state" >/dev/null \
+        || fail "operations: Search did not expose the real positive scan before deadline: $state"
+    footer=$(ipc statusFooterState) || fail "operations: live Search footer unavailable"
+    if ! jq -e '.right.text == "Search: 100,000 scanned" and .secondary.text == " · esc cancels"' <<< "$footer" >/dev/null; then
+        state=$(ipc keyDeliveryState) || fail "operations: Search state unavailable after footer mismatch"
+        if jq -e '.searchMode == "results" and (.searchRunning | not)' <<< "$state" >/dev/null; then
+            operations_missed_window search-footer "$state footer=$footer"
+        fi
+        fail "operations: running Search footer differs: state=$state footer=$footer"
+    fi
+    printf 'OPERATIONS_LIVE_SEARCH before_capture=%s footer=%s\n' "$state" "$footer"
+    shot operations-search-positive-scanned-live
+    state=$(ipc keyDeliveryState) || fail "operations: live Search post-capture observer failed"
+    jq -e '.searchMode == "results" and .searchRunning and .searchScanned > 0 and (.searchCancelled | not)' <<< "$state" >/dev/null \
+        || operations_missed_window search-after-capture "$state"
+    printf 'OPERATIONS_LIVE_SEARCH after_capture=%s\n' "$state"
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '.searchRunning | not' "native Escape reaches a terminal Search state"
+    state=$(ipc keyDeliveryState) || fail "operations: live Search cancellation outcome unavailable"
+    jq -e '.searchMode == "results" and .searchCancelled and .searchScanned == 100000' <<< "$state" >/dev/null \
+        || operations_missed_window search-cancellation "$state"
+    cardsize_expect total 0
+    shot operations-search-cancelled-live
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '.searchMode == ""' "second Escape closes cancelled live Search"
+    wait_listing "$directory_count"
+    operations_idle_footer "$directory_count" 0 "closing cancelled Search restores its real directory"
+    printf 'OPERATIONS_SEARCH positive_scanned_live=ok filename_matches=0 cancelled_native=ok close=ok attempts=1 state=%s\n' "$state"
+)
+
 case_operationsdesign() (
-    local menu_box menus_checks=0 path
+    local menu_box menus_checks=0 path live_cancel=failed live_search=failed
     local operations_bytes=$((1024 * 1024 * 1024))
     sandbox_require "$fixture_root"
     menu_box=$(mktemp -d "$fixture_root/operations-design.XXXXXXXX") || fail "operations: fixture creation failed"
@@ -506,5 +642,8 @@ case_operationsdesign() (
     printf 'OPERATIONS_WORKLOAD bytes=%s source=%q\n' "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
     operations_cancel pointer || fail "operations: interrupted pointer cancellation proof failed"
     operations_cancel escape || fail "operations: interrupted Escape cancellation proof failed"
-    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok informational_footer=ok long_name_elision=ok search_initial=ok interrupted_pointer_cancel=ok interrupted_escape_cancel=ok unpaused_live=not_run positive_scanned_live=not_run visual_inspection=pending\n'
+    if operations_cancel_live; then live_cancel=ok; fi
+    if operations_search_live; then live_search=ok; fi
+    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok informational_footer=ok long_name_elision=ok search_initial=ok interrupted_pointer_cancel=ok interrupted_escape_cancel=ok unpaused_live=%s positive_scanned_live=%s visual_inspection=pending\n' "$live_cancel" "$live_search"
+    [[ "$live_cancel" == ok && "$live_search" == ok ]] || fail "operations: required unpaused proof remains incomplete"
 )

@@ -66,6 +66,7 @@ QtObject {
         function drawnCount(): int { return root.pane.listArea.count }
         function total(): int { return root.pane.total }
         function selectionCount(): int { return root.pane.selectionCount() }
+        function favouritesSaving(): bool { return Favourites.busy || Favourites.operationActive }
         function selectedIndices(): string { return root.pane.selectedIndices().join(",") }
         function focusView(): string { return root.pane.focusView }
         function keyDeliveryState(): string {
@@ -75,6 +76,7 @@ QtObject {
                 trashArmedAt: pane.trashArmedAt, clipboard: {paths: pane.clipboard.paths, cut: pane.clipboard.moving},
                 searchMode: pane.searchMode, filterTyping: pane.filterTyping, filterQuery: pane.filterQuery,
                 searchRunning: pane.searchRunning, searchQuery: pane.searchQuery,
+                searchScanned: pane.searchScanned, searchCancelled: pane.searchCancelled,
                 paneFocus: pane.activeFocus, listFocus: pane.listArea.activeFocus,
                 activeFocusItem: window ? String(window.activeFocusItem) : "",
                 preview: {index: pane.previewIndex, focused: !!pane.previewColumnItem && pane.previewColumnItem.activeFocus},

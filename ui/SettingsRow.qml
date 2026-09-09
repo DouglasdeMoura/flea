@@ -366,8 +366,9 @@ Item {
 
             Flea.Glyph {
                 anchors.centerIn: parent
-                width: Theme.markSize / 2
+                width: Theme.font.bodySmall * 10 / 13
                 height: width
+                strokeWidth: 3
                 visible: root.boxGlyph.length > 0
                 name: root.boxGlyph
                 color: Theme.color.accent

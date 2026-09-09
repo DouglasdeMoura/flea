@@ -33,12 +33,12 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: Theme.spacing.hairline
-        color: root.cursor ? Style.selectedFill
+        color: root.cursor ? Style.selectedAccentFill
              : root.selected ? Style.selectionFill
              : root.hovered ? Style.hoverFill
              : "transparent"
-        // The canvas outlines the picked tile as well as filling it, because a tile has no row edge to read.
-        border.width: root.selected || root.cursor ? Theme.spacing.hairline : 0
+        // Only the cursor gets a frame; marked tiles retain their separate fill.
+        border.width: root.cursor ? Theme.spacing.hairline : 0
         border.color: Theme.color.accent
     }
 

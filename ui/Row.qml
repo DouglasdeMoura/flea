@@ -88,8 +88,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        // selectionFill is the OEM's fifth rung, kept visually distinct from the cursor's selectedFill.
-        color: root.cursor && root.paneFocused ? (root.dualMode ? Style.selectedAccentFill : Style.selectedFill)
+        // The cursor uses accent ink; marked rows keep the OEM's distinct selection rung.
+        color: root.cursor && root.paneFocused ? Style.selectedAccentFill
              : root.selected && root.paneFocused ? Style.selectionFill
              : root.hovered ? Style.hoverFill
              : "transparent"

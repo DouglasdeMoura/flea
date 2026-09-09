@@ -2654,7 +2654,8 @@ grid_chrome_inventory() {
 }
 
 grid_chrome_controls() {
-    local preset="$1" dir="$2" menus_checks=0 view order first glyph before query
+    local preset="$1" dir="$2" menus_checks=0 view order first glyph before query index
+    local -a search_names=(file-01.txt file-02.txt file-03.txt file-04.txt file-05.txt file-06.txt file-07.txt file-08.txt file-09.txt file-10.txt file-20.txt file-30.txt file-40.txt file-50.txt file-60.txt)
     for view in list columns grid; do
         click_chrome "$view"
         cardsize_expect viewMode "$view"
@@ -2705,8 +2706,11 @@ grid_chrome_controls() {
             menus_expect keyDeliveryState '.searchMode == "results" and .searchQuery == "file-0" and (.searchRunning | not)' \
                 "Grid Search finishes its actual fixture walk"
             cardsize_expect path "$dir"
-            wait_listing 9
-            cardsize_expect drawnCount 9
+            wait_listing "${#search_names[@]}"
+            cardsize_expect drawnCount "${#search_names[@]}"
+            for index in "${!search_names[@]}"; do
+                cardsize_expect visibleRowName "${search_names[$index]}" "$index"
+            done
         fi
     done
     key -k Escape >/dev/null

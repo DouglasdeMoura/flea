@@ -210,6 +210,16 @@ marquee_grid_zoom() {
     printf 'MARQUEE_GRID_ZOOM before=%q enlarged=%q restored=%q\n' "$before" "$after" "$(ipc rowRect 0)"
 }
 
+marquee_filter() {
+    local query="$1"
+    key / >/dev/null || fail "marquee: filter entry delivery failed"
+    marquee_state '.filterTyping and .filterQuery == ""' "filter entry is ready" keyDeliveryState
+    key "$query" >/dev/null || fail "marquee: filter text delivery failed"
+    marquee_state ".filterTyping and .filterQuery == \"$query\"" "filter receives exact text" keyDeliveryState
+    key -k Return >/dev/null || fail "marquee: filter commit delivery failed"
+    marquee_state "(.filterTyping | not) and .filterQuery == \"$query\"" "filter retains committed text" keyDeliveryState
+}
+
 marquee_scroll() {
     local dir="$marquee_box/scroll" i ax ay aw ah cx cy before after
     mkdir "$dir" || fail "marquee: scroll fixture creation failed"
@@ -219,8 +229,9 @@ marquee_scroll() {
     HOME="$marquee_home" launch "$dir"
     wait_listing 41
     permissions_viewport 880 620
-    key / file -k Return -k End >/dev/null || fail "marquee: filter/End delivery failed"
+    marquee_filter file
     marquee_expect drawnCount 40 "scroll fixture filter retains forty rows"
+    key -k End >/dev/null || fail "marquee: End delivery failed"
     read -r cx cy <<< "$(ipc rowCentre 39)"
     marquee_to "$cx" "$cy"
     omarchy-drive scroll down 1 >/dev/null || fail "marquee: footer could not be brought into view"
@@ -341,7 +352,7 @@ marquee_filtered() {
         permissions_viewport 880 620
         click_chrome "$mode"
         marquee_expect viewMode "$mode" "filtered fixture selects native $mode"
-        key / keep -k Return >/dev/null || fail "marquee: native filter delivery failed"
+        marquee_filter keep
         marquee_expect drawnCount 4 "$mode filter leaves four nonconsecutive listing rows"
         cardsize_expect visibleRowName file-6-keep.txt 6
         marquee_begin_below 6
@@ -414,6 +425,7 @@ marquee_targets() {
 }
 
 case_marquee() (
+    local group="${1:-all}"
     local marquee_checks=0 marquee_button_down=false marquee_ctrl_down=false preset mode i state other
     local marquee_box marquee_home dir
     local trash_box trash_checks=0 trash_parent_bus_id="" trash_private_bus_id="" trash_bus_address="" trash_bus_pid="" trash_provider_pid=""
@@ -429,35 +441,42 @@ case_marquee() (
     marquee_guard "$XDG_DATA_HOME"
     HOME="$marquee_home" trash_start_bus
     trap 'marquee_cleanup $?' EXIT
-    for preset in default vim mac windows; do
-        dir="$marquee_box/$preset"
-        mkdir "$dir" || fail "marquee: listing creation failed"
-        for i in 0 1 2 3; do printf 'mouse selection %s\n' "$i" > "$dir/file-$i.txt" || fail "marquee: file creation failed"; done
-        seed_ui_state "$marquee_box/$preset-state" "{\"keys\":\"$preset\",\"view\":\"list\",\"preview\":{\"thumbnails\":\"off\"}}"
-        HOME="$marquee_home" launch "$dir"
-        wait_listing 4
-        permissions_viewport 880 620
-        marquee_expect keymapPreset "$preset" "native preset is identified"
-        for mode in list grid columns; do
-            click_chrome "$mode"
-            marquee_expect viewMode "$mode" "native view button selects $mode"
-            marquee_interactions "$preset-$mode"
-            if [[ "$preset" == default && "$mode" == grid ]]; then marquee_grid_zoom; fi
+    if [[ "$group" != extended ]]; then
+        for preset in default vim mac windows; do
+            dir="$marquee_box/$preset"
+            mkdir "$dir" || fail "marquee: listing creation failed"
+            for i in 0 1 2 3; do printf 'mouse selection %s\n' "$i" > "$dir/file-$i.txt" || fail "marquee: file creation failed"; done
+            seed_ui_state "$marquee_box/$preset-state" "{\"keys\":\"$preset\",\"view\":\"list\",\"preview\":{\"thumbnails\":\"off\"}}"
+            HOME="$marquee_home" launch "$dir"
+            wait_listing 4
+            permissions_viewport 880 620
+            marquee_expect keymapPreset "$preset" "native preset is identified"
+            for mode in list grid columns; do
+                click_chrome "$mode"
+                marquee_expect viewMode "$mode" "native view button selects $mode"
+                marquee_interactions "$preset-$mode"
+                if [[ "$preset" == default && "$mode" == grid ]]; then marquee_grid_zoom; fi
+            done
+            click_chrome dual
+            marquee_interactions "$preset-dual-left"
+            other=$(ipc dualState | jq -c '.panes[0].selected') || fail "marquee: left-pane marks unavailable"
+            key -k Tab >/dev/null || fail "marquee: dual-pane Tab delivery failed"
+            wait_listing 4
+            marquee_interactions "$preset-dual-right"
+            state=$(ipc dualState) || fail "marquee: dual-pane observation failed"
+            jq -e --argjson marks "$other" '.active and .focused == 1 and .panes[0].selected == $marks and .panes[1].selected == [0,3]' <<< "$state" >/dev/null \
+                || fail "marquee: mouse marks leaked between dual panes: $state"
+            kill_flea
         done
-        click_chrome dual
-        marquee_interactions "$preset-dual-left"
-        other=$(ipc dualState | jq -c '.panes[0].selected') || fail "marquee: left-pane marks unavailable"
-        key -k Tab >/dev/null || fail "marquee: dual-pane Tab delivery failed"
-        wait_listing 4
-        marquee_interactions "$preset-dual-right"
-        state=$(ipc dualState) || fail "marquee: dual-pane observation failed"
-        jq -e --argjson marks "$other" '.active and .focused == 1 and .panes[0].selected == $marks and .panes[1].selected == [0,3]' <<< "$state" >/dev/null \
-            || fail "marquee: mouse marks leaked between dual panes: $state"
-        kill_flea
-    done
-    marquee_scroll
-    marquee_columns_boundary
-    marquee_filtered
-    marquee_targets
-    printf 'MARQUEE_NATIVE checks=%s presets=4 views=list,grid,columns,dual-left,dual-right autoscroll=both-directions\n' "$marquee_checks"
+    fi
+    if [[ "$group" != contexts ]]; then
+        marquee_scroll
+        marquee_columns_boundary
+        marquee_filtered
+        marquee_targets
+    fi
+    printf 'MARQUEE_NATIVE checks=%s group=%s\n' "$marquee_checks" "$group"
 )
+
+case_marqueecontexts() { case_marquee contexts; }
+case_marqueeextended() { case_marquee extended; }
