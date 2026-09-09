@@ -1377,6 +1377,26 @@ context = "rail,menu,panel,preview,pdf,media"
 [[preset]]
 name = "all"
 mods = "none"
+key = "Menu"
+keys = "menu"
+action = "menu"
+label = "context menu"
+frontend = "gui"
+context = "listing,rail"
+
+[[preset]]
+name = "all"
+mods = "shift"
+key = "F10"
+keys = "shift-f10"
+action = "menu"
+label = "context menu"
+frontend = "gui"
+context = "listing,rail"
+
+[[preset]]
+name = "all"
+mods = "none"
 key = "Down"
 keys = "down"
 action = "cursorDown"

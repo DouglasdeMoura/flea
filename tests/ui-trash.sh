@@ -213,11 +213,13 @@ trash_rail() {
 
 trash_click() {
     local reader="$1" argument="${2:-}" button="${3:-left}" cx cy wx wy
+    local -a modifiers=()
+    if (( $# > 3 )); then modifiers=("${@:4}"); fi
     if [[ -n "$argument" ]]; then read -r cx cy <<< "$(ipc "$reader" "$argument")"
     else read -r cx cy <<< "$(ipc "$reader")"; fi
     [[ "$cx" =~ ^[0-9]+$ && "$cy" =~ ^[0-9]+$ ]] || fail "trash: missing native control centre"
     read -r wx wy _width _height < <(window_box)
-    omarchy-drive click "$((wx + cx))" "$((wy + cy))" "$button" >/dev/null \
+    omarchy-drive click "$((wx + cx))" "$((wy + cy))" "$button" "${modifiers[@]}" >/dev/null \
         || fail "trash: native pointer activation failed"
 }
 
@@ -240,7 +242,118 @@ trash_empty_strip() {
     trash_wait '.confirmation.opened and (.confirmation.destructiveFocus == false)'
 }
 
+trash_move() {
+    local name="$1" previous_count="$2" remaining="$3" row selected
+    trash_guard "$payload/$name"
+    wait_path "$payload"
+    trash_wait '(.opened == false)' "Move to Trash starts in fixture listing"
+    row=$(row_index_of "$name")
+    click_row "$row" left
+    selected=$(ipc selectedIndices)
+    [[ "$(ipc path)" == "$payload" && "$(ipc focusView)" == list && "$(ipc cursor)" == "$row" \
+        && ( -z "$selected" || "$selected" == "$row" ) && "$(ipc contextMenuVisible)" == false ]] \
+        || fail "trash: refusing Delete outside the intended fixture row"
+    trash_guard_store "$previous_count"
+    key -k Delete >/dev/null
+    wait_listing "$remaining"
+    trash_wait "(.opened == false) and .count == $((previous_count + 1))" "Move to Trash updates private count"
+    trash_guard_store "$((previous_count + 1))"
+}
+
 case_trashbasic() { case_trash basic; }
+case_trashcontrols() { case_trash controls; }
+
+trash_confirmation_controls() {
+    local preset move token
+    for preset in default vim mac windows; do
+        kill_flea
+        trash_guard "$XDG_STATE_HOME"
+        "$flea_bin" --ui-state "{\"keys\":\"$preset\"}" >/dev/null \
+            || fail "trash: could not persist the $preset preset"
+        launch "$payload"
+        wait_listing 1
+        [[ "$(ipc keymapPreset)" == "$preset" ]] || fail "trash: native preset differs from $preset"
+        trash_guard_store 1
+        trash_wait '(.opened == false) and .count == 1 and .rail.countText == "1" and (.rail.current == false)' "$preset persisted count outside Trash"
+        trash_rail
+        trash_wait '.opened and .total == 1 and (.busy == false) and .rail.current and .rail.countText == "1" and .headerLabels == ["Name", "Original location", "Deleted"] and (.upEnabled == false)' "$preset dedicated view controls"
+        trash_click trashControlCentre up
+        trash_wait '.opened and .total == 1 and (.busy == false)' "$preset Up is inert"
+        trash_click trashControlCentre back
+        trash_wait '(.opened == false) and (.rail.current == false)' "$preset pointer Back"
+        wait_path "$payload"
+        for move in Backspace Escape; do
+            trash_rail
+            trash_wait '.opened and .total == 1 and (.busy == false)'
+            key -k "$move" >/dev/null
+            trash_wait '(.opened == false) and (.rail.current == false)' "$preset $move returns to listing"
+            wait_path "$payload"
+        done
+        trash_rail
+        trash_wait '.opened and .total == 1 and (.busy == false)'
+        trash_click trashRowCentre 0 left
+        trash_wait '.selectedCount == 1 and .rows[0].selected' "$preset pointer selection"
+        trash_click trashRowCentre 0 left --mods ctrl
+        trash_wait '.selectedCount == 0 and (.rows[0].selected == false)' "$preset Ctrl-click deselects"
+        hotkey ctrl+a >/dev/null
+        trash_wait '.selectedCount == 1 and .rows[0].selected' "$preset Ctrl+A selects snapshot"
+        for move in Menu F10; do
+            if [[ "$move" == F10 ]]; then key -M shift -k F10 -m shift >/dev/null
+            else key -k Menu >/dev/null; fi
+            ipc contextMenuModel | jq -e '[.[] | select(.separator != true) | .action] == ["restoreTrashSelection", "deletePermanently"]' >/dev/null \
+                || fail "trash: $preset $move did not open the selected Trash menu"
+            key -k Escape >/dev/null
+            trash_wait '.opened and .selectedCount == 1' "$preset context dismissal preserves selection"
+        done
+        key -k Delete >/dev/null
+        trash_wait '.confirmation.opened and (.confirmation.all == false) and .confirmation.count == 1 and (.confirmation.destructiveFocus == false)' "$preset Delete confirms selected identity"
+        token=$(ipc trashState | jq -er '.confirmation.token')
+        key -k Delete >/dev/null
+        trash_wait ".confirmation.opened and .confirmation.token == $token and (.confirmation.destructiveFocus == false)" "$preset repeated Delete does not confirm"
+        key -k Return >/dev/null
+        trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset reflexive Return cancels selected delete"
+
+        trash_empty_strip
+        trash_wait '.confirmation.all and .confirmation.title == "Empty Trash?" and .confirmation.cancel.enabled and .confirmation.danger.enabled' "$preset Empty Trash uses shared strip"
+        token=$(ipc trashState | jq -er '.confirmation.token')
+        key -k Tab >/dev/null
+        trash_wait '.confirmation.destructiveFocus' "$preset Tab reaches danger"
+        key -M shift -k Tab -m shift >/dev/null
+        trash_wait '(.confirmation.destructiveFocus == false)' "$preset Backtab reaches Cancel"
+        key l >/dev/null
+        trash_wait '.confirmation.destructiveFocus' "$preset l reaches danger"
+        key h >/dev/null
+        trash_wait '(.confirmation.destructiveFocus == false)' "$preset h reaches Cancel"
+        key -k Right >/dev/null
+        trash_wait '.confirmation.destructiveFocus' "$preset Right reaches danger"
+        key -k Left >/dev/null
+        trash_wait '(.confirmation.destructiveFocus == false)' "$preset Left reaches Cancel"
+        key -M shift -k Tab -m shift >/dev/null
+        trash_wait '.confirmation.destructiveFocus' "$preset Backtab wraps to danger"
+        key -k Tab >/dev/null
+        trash_wait '(.confirmation.destructiveFocus == false)' "$preset Tab wraps to Cancel"
+        hotkey ctrl+a >/dev/null
+        trash_wait ".confirmation.opened and .confirmation.token == $token and (.confirmation.destructiveFocus == false)" "$preset modified input stays in strip"
+        key -k space >/dev/null
+        trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset Space on Cancel preserves Trash"
+        trash_empty_strip
+        key l >/dev/null
+        key -k Escape >/dev/null
+        trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset Escape from danger cancels"
+        trash_empty_strip
+        trash_shot "trash-confirm-$preset"
+        trash_click trashControlCentre cancel
+        trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset pointer Cancel"
+        trash_guard_store 1
+    done
+    kill_flea
+    trash_guard "$XDG_STATE_HOME"
+    "$flea_bin" --ui-state '{"keys":"default"}' >/dev/null || fail "trash: could not restore fixture preset"
+    launch "$payload"
+    wait_listing 1
+    trash_rail
+    trash_wait '.opened and .total == 1 and (.busy == false)'
+}
 
 case_trash() {
     local trash_box payload token row uri backing root name trash_checks=0
@@ -267,26 +380,27 @@ case_trash() {
     launch "$payload"
     wait_listing 0
     trash_guard_store 0
-    trash_wait '.count == 0'
+    trash_wait '.count == 0 and .rail.countText == "" and (.rail.current == false)'
     trash_rail
-    trash_wait '.opened and .total == 0 and (.busy == false)'
+    trash_wait '.opened and .total == 0 and (.busy == false) and .rail.current and .rail.countText == ""'
     trash_shot trash-empty-current
     trash_rail right
     ipc contextMenuModel | jq -e '[.[] | select(.action == "restoreAll" or .action == "emptyTrash")] | (map(.action) | sort) == ["emptyTrash","restoreAll"] and all(.[]; .disabled == true)' >/dev/null \
         || fail "trash: empty actions must remain present and disabled"
-    key -k Escape >/dev/null
+    row=$(menu_row_index "Empty Trash") || fail "trash: missing Empty Trash row"
+    trash_click contextMenuRowCentre "$row"
+    trash_wait '.total == 0 and (.confirmation.opened == false) and (.operationActive == false)' 'disabled Empty Trash does nothing'
+    if [[ "$(ipc contextMenuVisible)" == true ]]; then key -k Escape >/dev/null; fi
+    trash_wait '.opened and .total == 0 and (.confirmation.opened == false)'
     key -k Backspace >/dev/null
+    trash_wait '(.opened == false)'
+    wait_path "$payload"
 
     printf 'alpha\n' > "$payload/alpha.txt"
     printf 'beta\n' > "$payload/beta.txt"
     wait_listing 2
-    for name in alpha.txt beta.txt; do
-        click_row "$(row_index_of "$name")" left
-        trash_private
-        trash_guard "$payload/$name"
-        key -k Delete >/dev/null
-        [[ "$name" == alpha.txt ]] && wait_listing 1 || wait_listing 0
-    done
+    trash_move alpha.txt 0 1
+    trash_move beta.txt 1 0
     trash_wait '.count == 2'
     trash_guard_store 2
     trash_shot trash-full-not-current
@@ -303,6 +417,10 @@ case_trash() {
     [[ "$(cat "$payload/alpha.txt")" == alpha ]] || fail "trash: native Restore lost file contents"
     trash_guard_store 1
     if [[ "$trash_case_label" == basic ]]; then trash_cleanup 0; fi
+    if [[ "$trash_case_label" == full || "$trash_case_label" == controls ]]; then
+        trash_confirmation_controls
+        if [[ "$trash_case_label" == controls ]]; then trash_cleanup 0; fi
+    fi
 
     trash_empty_strip
     trash_shot trash-empty-confirm-cancel
@@ -333,13 +451,8 @@ case_trash() {
     printf 'survive failed delete\n' > "$payload/locked/child.txt"
     chmod 0555 "$payload/locked"
     wait_listing 3
-    for name in good.txt locked; do
-        click_row "$(row_index_of "$name")" left
-        trash_guard "$payload/$name"
-        trash_private
-        key -k Delete >/dev/null
-        [[ "$name" == good.txt ]] && wait_listing 2 || wait_listing 1
-    done
+    trash_move good.txt 0 2
+    trash_move locked 1 1
     trash_rail
     trash_wait '.total == 2 and (.busy == false)'
     hotkey ctrl+a >/dev/null

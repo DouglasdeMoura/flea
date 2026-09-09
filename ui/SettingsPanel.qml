@@ -30,7 +30,7 @@ Item {
     // The Menus board's work-area clamp: a floating surface never renders taller than its bounds
     // less this margin, and the pane scrolls inside that while the rail stays put.
     readonly property int clampMargin: 8
-    // GM's later ruling sizes every section to the tallest pane, clamped to the window.
+    // GM's compact-card ruling keeps View's measured size across sections, clamped to the window.
     readonly property int chromeAndBorder: Theme.chromeHeight + 2 * Theme.spacing.hairline
     readonly property real groundOpacity: 0.5
     // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
@@ -73,6 +73,7 @@ Item {
         root.focusHolder = holder
         root.cursor = Settings.firstRow(root.rows)
         root.side = "pane"
+        pane.contentY = 0
         root.opened = true
         keys.forceActiveFocus()
     }
@@ -220,6 +221,11 @@ Item {
     }
     function railItemFor(id) { return rail.itemFor(id) }
     function paneScroll() { return Math.round(pane.contentHeight) + "|" + Math.round(pane.height) }
+    function scrollState() {
+        return JSON.stringify({compactHeight: pane.compactHeight,
+            pane: {y: pane.contentY, height: pane.height, contentHeight: pane.contentHeight},
+            rail: {y: rail.contentY, height: rail.height, contentHeight: rail.contentHeight}})
+    }
 
     anchors.fill: parent
     visible: root.opened
@@ -246,8 +252,8 @@ Item {
         width: Math.min(root.panelWidth, Math.max(0, root.width - 2 * root.clampMargin))
         // Settings.html gives the rail and pane separate vertical insets.
         height: Math.min(root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
-                                                          pane.tallest + 2 * Theme.spacing.rowPaddingY),
-                         root.height - 2 * root.clampMargin)
+                                                          pane.compactHeight + 2 * Theme.spacing.rowPaddingY),
+                         Math.max(0, root.height - 2 * root.clampMargin))
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: Theme.color.muted
@@ -359,6 +365,8 @@ Item {
                 anchors.left: parent.left
                 anchors.top: chrome.bottom
                 anchors.topMargin: Theme.settings.railPaddingY
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: Theme.settings.railPaddingY
                 width: root.railWidth
                 section: root.section === "columns" ? "view" : root.section
                 focused: root.side === "rail"
@@ -386,6 +394,7 @@ Item {
                 anchors.top: chrome.bottom
                 anchors.bottom: parent.bottom
                 anchors.topMargin: Theme.spacing.rowPaddingY
+                anchors.bottomMargin: Theme.spacing.rowPaddingY
                 section: root.section
                 values: root.settingsState
                 cursor: root.cursor

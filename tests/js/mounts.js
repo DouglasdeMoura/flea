@@ -93,6 +93,7 @@ function run(check) {
     check("an unmounted volume reads as unmounted", u[0].mounted, false)
     check("an unmounted volume has no path to open yet", u[0].path, "")
     check("an unmounted volume still carries the device node its mount needs", u[0].device, "/dev/sda1")
+    check("an unmounted volume keeps its capacity separate from its label", u[0].size, "116.1G")
 
     // Several at once, and the internal disk row is one whatever the box has.
     var many = '{"blockdevices":['
@@ -106,6 +107,7 @@ function run(check) {
     var m = Mounts.parseDevices(many)
     check("four rows come out of two sticks and two internal disks", m.length, 4)
     check("only one internal disk row is ever emitted", m[0].label, "nvme0n1")
+    check("the machine row carries its device capacity", m[0].size, "238.5G")
     check("both partitions of one stick are rows", m[1].label + "," + m[2].label, "first,second")
     check("an unpartitioned removable disk is a row of its own", m[3].label, "CARD")
     check("an unpartitioned removable disk carries its own device node", m[3].device, "/dev/sdb")
@@ -267,6 +269,8 @@ function run(check) {
     // both shapes: a volume that has just been unplugged differs in path and mounted alike.
     var vol = { path: "/run/media/user/128GB", label: "128GB", group: "device", kind: "volume", device: "/dev/sda1", mounted: true, glyph: "drive" }
     check("a device entry compares on its own fields too", Mounts.sameEntries([vol], [vol]), true)
+    var capacity = Object.assign({}, vol, { size: "116.1G" })
+    check("a capacity-only update reaches the live rail", Mounts.sameEntries([capacity], [Object.assign({}, capacity, { size: "119.2G" })]), false)
     check("and an unplugged volume differs",
           Mounts.sameEntries([vol], [{ path: "", label: "128GB", group: "device", kind: "volume", device: "/dev/sda1", mounted: false, glyph: "drive" }]), false)
     check("a missing side is never equal, so a first poll always assigns", Mounts.sameEntries(null, []), false)

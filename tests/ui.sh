@@ -7264,6 +7264,7 @@ case_previewviews() {
 . "$repo/tests/ui-pdf.sh"
 . "$repo/tests/ui-trash.sh"
 . "$repo/tests/ui-menus.sh"
+. "$repo/tests/ui-settings-layout.sh"
 
 declare -a wanted=("$@")
 [[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)

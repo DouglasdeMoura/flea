@@ -381,7 +381,7 @@ Item {
                 delegate: SidebarRow {
                     cursor: index + root.userFavouriteEntries.length + root.homeEntries.length === root.cursorIndex
                     focused: root.focused || root.trashActive
-                    onActivated: root.activate(index + root.userFavouriteEntries.length + root.homeEntries.length)
+                    onActivated: function (idx) { root.activate(idx + root.userFavouriteEntries.length + root.homeEntries.length) }
                     onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.userFavouriteEntries.length + root.homeEntries.length, pos) }
                 }
             }

@@ -90,8 +90,8 @@ Item {
         visible: !root.renaming
         anchors.left: mark.right
         anchors.leftMargin: Style.spacing.rowGap
-        anchors.right: dot.left
-        anchors.rightMargin: Style.spacing.rowGap
+        anchors.right: detailText.left
+        anchors.rightMargin: root.detail.length > 0 || dot.width > 0 ? Style.spacing.rowGap : 0
         anchors.verticalCenter: parent.verticalCenter
         text: root.modelData.label
         color: root.modelData.error ? Theme.color.error : Theme.color.foreground
@@ -109,8 +109,8 @@ Item {
         visible: root.renaming
         anchors.left: mark.right
         anchors.leftMargin: Style.spacing.rowGap
-        anchors.right: dot.left
-        anchors.rightMargin: Style.spacing.rowGap
+        anchors.right: detailText.left
+        anchors.rightMargin: root.detail.length > 0 || dot.width > 0 ? Style.spacing.rowGap : 0
         anchors.verticalCenter: parent.verticalCenter
         height: Theme.railRowHeight - 2 * Theme.spacing.rowPaddingY
         name: root.modelData.label
@@ -124,34 +124,34 @@ Item {
     // The rail's real trailing indicator slot, so ui/Ipc.qml measures this dot instead of recomputing it.
     readonly property Item indicatorSlot: dot
 
+    Text {
+        id: detailText
+        anchors.right: dot.left
+        anchors.rightMargin: root.detail.length > 0 && dot.width > 0 ? Style.spacing.rowGap : 0
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.detail
+        color: Theme.color.foreground
+        font.family: Theme.font.family
+        font.pixelSize: Theme.font.caption
+        textFormat: Text.PlainText
+    }
+
     // Every right-aligned mark in the rail is centred in a caption-wide slot, so this dot and the
     // NETWORK header's "+" share one centre line whatever their ink does: align by slot, never by ink.
     Item {
         id: dot
-        visible: root.showsDot || root.detail.length > 0
         anchors.right: parent.right
         anchors.rightMargin: Style.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
-        // A row with no badge gives the slot back to its label, which is how the canvas fits "minipc . nvme0n1".
-        width: detailText.implicitWidth + (root.showsDot ? Theme.font.caption + (root.detail.length > 0 ? Style.spacing.rowGap : 0) : 0)
+        // Device capacities share one right edge even when the internal disk has no mount indicator.
+        width: root.showsDot || (root.modelData.group === "device" && root.detail.length > 0) ? Theme.font.caption : 0
         height: Theme.font.caption
 
         // Green once gio mount -l lists it, muted at half strength while it is only a bookmark waiting
         // to be mounted. A square, not a disc: the cut is hard corners, and the canvas draws it square.
-        Text {
-            id: detailText
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.detail
-            color: Theme.color.foreground
-            font.family: Theme.font.family
-            font.pixelSize: Theme.font.caption
-            textFormat: Text.PlainText
-        }
         Rectangle {
             visible: root.showsDot
-            x: (Theme.font.caption - root.dotSize) / 2
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.centerIn: parent
             width: root.dotSize
             height: root.dotSize
             color: root.modelData.mounted ? Theme.color.executable : Theme.color.muted
