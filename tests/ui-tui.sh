@@ -535,6 +535,7 @@ class Native:
         held = guard(self.case, self.case / "charlie-held.txt")
         destination = guard(self.case, self.case / "listing/changed-name.txt")
         contents = original.read_bytes()
+        identity = original.lstat()
         self.key("-k", "Home")
         self.key("-k", "Down")
         self.key("-k", "Down")
@@ -549,9 +550,15 @@ class Native:
         if destination.exists() or held.read_bytes() != contents or original.read_text() != "external replacement fixture\n":
             raise RuntimeError("Rename changed an item after its displayed identity was replaced")
         self.key("-k", "Escape")
-        guard(self.case, original).unlink()
-        guard(self.case, held).rename(guard(self.case, original))
-        self.snapshot("rename-identity-recovered", lambda text: "5 items" in text and "Selected item changed" not in text)
+        guard(self.case, held).replace(guard(self.case, original))
+        restored = original.lstat()
+        if (restored.st_dev, restored.st_ino, restored.st_mode) != (identity.st_dev, identity.st_ino, identity.st_mode) \
+                or original.read_bytes() != contents:
+            raise RuntimeError("Rename fixture did not restore the original item identity and bytes")
+        self.snapshot("rename-identity-recovered", lambda text: "5 items" in text and "Selected item changed" not in text
+                      and self.cursor_is(original.name) and held.name not in text
+                      and any(original.name in middle and middle.rstrip().endswith(f" {len(contents)} B")
+                              for middle in (line.split("\u2502")[1] for line in text.splitlines() if "\u2502" in line)))
 
     def menu_and_panel(self):
         for label, activate in [("letter", lambda: self.key("m")), ("shift-f10", lambda: self.chord("F10", "shift")),

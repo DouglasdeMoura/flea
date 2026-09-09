@@ -383,7 +383,7 @@ mod tests {
         let (tx, rx) = channel();
         let mut o = Ops::new(tx.clone());
         let menu = super::super::menu_actions::MenuActions::new(tx);
-        menu.request(r#"{"op":"snapshot","id":5}"#.into(), vec![first.to_string_lossy().into(), second.to_string_lossy().into()]);
+        menu.request(r#"{"op":"snapshot","id":5}"#.into(), vec![first.to_string_lossy().into(), second.to_string_lossy().into()], None);
         let OpMsg::Meta { line } = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() else { panic!("snapshot reply"); };
         assert!(line.contains(r#""ok":true"#));
         o.menuactions = Some(menu);

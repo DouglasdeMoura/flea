@@ -3656,6 +3656,89 @@ case_network() {
         omarchy-drive click "$((wx + x + width / 2))" "$((wy + y + height / 2))" >/dev/null
         network_wait_panes ".focused == $side"
     }
+    network_wait_tabs() {
+        local count="$1" visible="$2" attempt
+        for attempt in $(seq 1 100); do
+            [[ "$(ipc tabCount)" == "$count" && "$(ipc tabBarVisible)" == "$visible" ]] && return
+            sleep 0.05
+        done
+        fail "network: expected $count tabs with strip visible=$visible, got $(ipc tabCount)/$(ipc tabBarVisible)"
+    }
+    network_share_geometry() {
+        local label="$1" expected="${2:-}" attempt seen
+        for attempt in $(seq 1 100); do
+            seen=$(ipc shareBrowserState) || fail 'network: share geometry observer failed'
+            if jq -e --arg expected "$expected" '.active and .owner == 1 and .baseUri == "smb://shares-second.test/"
+                and .rect == .paneRects[1] and ($expected == "" or .rect == $expected)' <<< "$seen" >/dev/null; then
+                network_geometry_rect=$(jq -r .rect <<< "$seen")
+                network_geometry_checks=$((network_geometry_checks + 1))
+                printf 'NETWORK_SHARE_GEOMETRY %s %s expected=%q observed=%s\n' "$network_geometry_checks" "$label" "$expected" "$seen"
+                return
+            fi
+            sleep 0.05
+        done
+        fail "network: $label geometry expected=$expected observed=$seen panes=$(ipc dualState)"
+    }
+    network_share_reflow() {
+        local hidden_rect tabs_rect x y width height chrome font_before font_after direction stops
+        network_wait_tabs 1 false
+        network_share_geometry 'second-pane shares start without tabs'
+        hidden_rect="$network_geometry_rect"
+        network_click_pane 0
+        network_wait_tabs 1 false
+        network_share_geometry 'pointer focus in the other pane retains owner geometry' "$hidden_rect"
+        key t >/dev/null || fail 'network: native new-tab key failed'
+        network_wait_tabs 2 true
+        read -r x y width height <<< "$hidden_rect"
+        chrome=$(ipc chromeHeight)
+        tabs_rect="$x $((y + chrome)) $width $((height - chrome))"
+        network_share_geometry 'new tab adds exactly the live tab-strip height' "$tabs_rect"
+        [[ "$(ipc focusView)" == list ]] || fail 'network: non-owner pane lacks listing focus before Tab'
+        key -k Tab >/dev/null || fail 'network: native pane focus key failed'
+        network_wait_panes '.focused == 1'
+        network_wait_tabs 1 false
+        network_share_geometry 'keyboard focus to one-tab owner removes the tab strip' "$hidden_rect"
+        network_click_pane 0
+        network_wait_tabs 2 true
+        network_share_geometry 'pointer focus to two-tab pane restores the tab strip' "$tabs_rect"
+        shot network-shares-tabs-reflow
+        key w >/dev/null || fail 'network: native close-tab key failed'
+        network_wait_tabs 1 false
+        network_share_geometry 'closing the other pane tab restores the original rectangle' "$hidden_rect"
+
+        permissions_viewport 880 620
+        network_share_geometry 'shares match the owner at 880x620'
+        hidden_rect="$network_geometry_rect"
+        permissions_viewport 1100 800
+        network_share_geometry 'shares match the owner after native resize to 1100x800'
+        [[ "$network_geometry_rect" != "$hidden_rect" ]] || fail 'network: window resize did not change the owner rectangle'
+        shot network-shares-resized
+
+        settings_wait_value '.display.textSize.mode == "system"'
+        font_before=$(token_of baseSize)
+        # Sample source: var STOPS = [9, 10, 11, 12, 14, 16, 20]
+        stops=$(grep '^var STOPS = ' "$flea_ui/js/TextSize.js" | cut -d= -f2-) || fail 'network: text-size stops are unavailable'
+        font_after=$(jq -r --argjson size "$font_before" 'map(select(. > $size)) | first' <<< "$stops") \
+            || fail 'network: text-size stops could not be read'
+        direction=equal
+        if [[ -z "$font_after" || "$font_after" == null ]]; then
+            font_after=$(jq -er --argjson size "$font_before" 'map(select(. < $size)) | last' <<< "$stops") \
+                || fail 'network: no alternate text-size stop is available'
+            direction=minus
+        fi
+        hidden_rect="$network_geometry_rect"
+        key -M ctrl -M shift -k "$direction" -m shift -m ctrl >/dev/null || fail 'network: text-size chord failed'
+        settings_wait_value ".display.textSize.mode == $font_after"
+        [[ "$(token_of baseSize)" == "$font_after" ]] || fail 'network: persisted text size did not reach the live theme'
+        network_share_geometry 'shares follow the native text-size change'
+        [[ "$network_geometry_rect" != "$hidden_rect" ]] || fail 'network: text-size change did not change owner geometry'
+        shot network-shares-font-reflow
+        key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null || fail 'network: text-size reset chord failed'
+        settings_wait_value '.display.textSize.mode == "system"'
+        [[ "$(token_of baseSize)" == "$font_before" ]] || fail 'network: Follow Omarchy did not restore the original font'
+        network_share_geometry 'font reset restores the original owner rectangle' "$hidden_rect"
+        printf 'NETWORK shares-tab-focus=exact shares-resize=exact shares-font-reflow=exact checks=%s\n' "$network_geometry_checks"
+    }
     network_click_favourite() {
         local label="$1" index
         index=$(ipc railEntries | jq -r --arg label "$label" 'map(.label) | index($label)')
@@ -4255,6 +4338,8 @@ EOS
     jq -e '.active and .baseUri == "smb://shares-second.test/" and .owner == 1 and .rect == .paneRects[1]' <<< "$second_shares" >/dev/null \
         || fail "network: second-pane shares did not retain their owner: $second_shares; panes=$(ipc dualState); result=$(ipc networkResult)"
     shot network-second-pane-shares
+    local network_geometry_rect network_geometry_checks=0
+    network_share_reflow
     local destruction_log_start
     destruction_log_start=$(wc -l < "$flea_log")
     click_chrome list
@@ -5911,155 +5996,84 @@ EOS
     sandbox_remove "$fixture_home"
 }
 
-# Task 20: the Taildrop submenu lists real tailnet peers and self-hides with nothing to send to.
-case_taildrop() {
-    local dir="$fixture_root/taildrop"
-    sandbox_scratch "$dir"
-    mkdir -p "$dir/adir" "$dir/bin"
-    printf 'taildrop test payload\n' > "$dir/send-me.txt"
-    # The third site of a hazard case_open and case_preview each fixed once. Without this the case
-    # reached the real opener on send-me.txt and left an editor running: two were still resident
-    # eighteen hours later. The stub goes in before the FIRST launch, not before the second, because
-    # a stub the earlier half of the case cannot see is not a stub.
-    # The log lives inside bin/, whose contents are not listed, so the row count and every click_row
-    # index in this case stay exactly as they were.
-    local opened="$dir/bin/opened.log"
-    : > "$opened"
-    # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
-    # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
-    # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
-    {
-      printf '#!/bin/sh\n'
-      printf '[ "$1" = open ] || exec /usr/bin/gio "$@"\n'
-      printf 'printf "OPENED %%s\\n" "$2" >> %q\n' "$opened"
-    } > "$dir/bin/$open_handoff"
-    chmod +x "$dir/bin/$open_handoff"
-
-    local first_path="$PATH"
-    export PATH="$dir/bin:$PATH"
-    launch "$dir"
-    export PATH="$first_path"
-    # Directories sort first, alphabetically: adir, bin, send-me.txt.
-    wait_listing 3
-    click_row 0 right
-    settle
-    # The claim is the absence of one row, so that is what is asserted; the rest of the menu is
-    # the operations design's business and grows as its own rows land.
-    [[ "$(ipc contextMenuEntries)" != *"Send with Taildrop"* ]] \
-        || fail "taildrop: a directory offered the entry anyway, got $(ipc contextMenuEntries)"
-    key -k Escape >/dev/null
-    settle
-
-    click_row 2 right
-    settle
-    [[ "$(ipc contextMenuEntries)" == *"Send with Taildrop"* ]] \
-        || fail "taildrop: the real tailnet did not offer the entry on a file, got $(ipc contextMenuEntries)"
-    shot taildrop-menu
-
-    # GM's ruling: both third-party marks are ordinary cut glyphs, so the rows name them like any
-    # other row rather than reaching for a component of their own.
-    menu_glyph_of() {
-        local want="$1" entries glyphs i=0
-        entries=$(ipc contextMenuEntries)
-        glyphs=$(ipc contextMenuGlyphs)
-        local IFS='|'
-        local -a e g
-        read -r -a e <<< "$entries"
-        read -r -a g <<< "$glyphs"
-        for i in "${!e[@]}"; do
-            [[ "${e[$i]}" == "$want" ]] && { printf '%s' "${g[$i]}"; return 0; }
-        done
-        printf 'no such row'
-    }
-    [[ "$(menu_glyph_of "Send with Taildrop")" == "tailscale" ]] \
-        || fail "taildrop: the row draws $(menu_glyph_of "Send with Taildrop"), not the tailscale glyph"
-
-    # The row is found by its label, because the menu grows as the operations design's rows land.
-    # Enter opens the flyout, whose rows are whichever peers this tailnet has: the case reads the
-    # one it lands on rather than naming a machine, so it does not depend on whose network it runs on.
-    menu_seek "Send with Taildrop"
-    key -k Return >/dev/null
-    settle
-    # A peer row names a machine, not the product, so it keeps the cut glyph for a machine.
-    [[ "$(ipc contextMenuSubmenuGlyphs)" == *"server"* ]] \
-        || fail "taildrop: the peer submenu lost the server glyph, got $(ipc contextMenuSubmenuGlyphs)"
-    shot taildrop-flyout
-    # Down moves to the second row, so the expected name is read off the flyout before it closes
-    # rather than written here. A third peer joining or a rename then changes nothing.
-    local peers second_peer
-    peers=$(ipc contextMenuSubmenuEntries)
-    second_peer=$(printf '%s' "$peers" | cut -d'|' -f2)
-    [[ -n "$second_peer" ]] \
-        || fail "taildrop: the flyout has no second peer to choose, entries are $peers"
-    key -k Down >/dev/null
-    key -k Return >/dev/null
-    settle
-    [[ "$(ipc contextMenuVisible)" == "false" ]] || fail "taildrop: choosing a peer left the menu open"
-    [[ "$(ipc lastMessage)" == "Sending send-me.txt to $second_peer." ]] \
-        || fail "taildrop: the dispatch message is wrong, got $(ipc lastMessage)"
-    sleep 2
-    shot taildrop-sent
-    kill_flea
-
-    # A stubbed tailscale, the logged-out shape (BackendState NeedsLogin, no peers at all).
-    cat > "$dir/bin/tailscale" <<'EOS'
-#!/bin/sh
-if [ "$1 $2" = "status --json" ]; then
-  printf '{"BackendState":"NeedsLogin","Peer":{}}\n'
-  exit 0
-fi
-exit 1
+# Taildrop uses guarded provider doubles; directory eligibility and second-peer dispatch remain native checks.
+case_taildrop() (
+    local menu_box="$fixture_root/taildrop" menu_dir="$fixture_root/taildrop/list" menus_checks=0
+    local taildrop_fd dropbox_fd before provider_ready
+    provider_ready=$(jq -cn '{BackendState:"Running",Self:{UserID:1001,Capabilities:["https://tailscale.com/cap/file-sharing"]},Peer:{
+        "first-peer":{HostName:"Alpha",DNSName:"unused.invalid.",Online:true,TaildropTarget:1,UserID:1001},
+        "second-peer":{HostName:"Bravo",DNSName:"fixture.invalid.",Online:true,TaildropTarget:1,UserID:1001}}}') \
+        || fail 'taildrop: cannot construct private peer fixture'
+    providers_fixture
+    trap 'providers_cleanup || exit 1' EXIT
+    menus_guard "$menu_dir/adir"
+    mkdir "$menu_dir/adir" || fail 'taildrop: cannot create directory eligibility fixture'
+    menus_guard "$menu_box/open-bin"
+    mkdir "$menu_box/open-bin" || fail 'taildrop: cannot create private opener directory'
+    [[ "$open_handoff" == gio ]] || fail 'taildrop: opener contract changed; isolate the new handoff before running'
+    menus_guard "$menu_box/open-bin/$open_handoff"
+    cat > "$menu_box/open-bin/$open_handoff" <<'EOS'
+#!/usr/bin/env bash
+set -eu
+[[ "${1:-}" == open ]] || exec /usr/bin/gio "$@"
+box=${FLEA_PROVIDERS_BOX:?}
+[[ "$box" == /* && -f "$box/.flea-test-sandbox" ]] || exit 90
+log=$(realpath -m -- "$box/calls.jsonl")
+[[ "$log" == "$box/"* && "$log" != "$box" ]] || exit 91
+jq -cn --arg helper gio --args '{helper:$helper,args:$ARGS.positional}' -- "$@" >> "$log"
 EOS
-    chmod +x "$dir/bin/tailscale"
-    local saved_path="$PATH"
-    export PATH="$dir/bin:$PATH"
-    launch "$dir"
-    export PATH="$saved_path"
+    chmod 700 "$menu_box/open-bin/$open_handoff" || fail 'taildrop: cannot make the private opener executable'
+    providers_install tailscale yes
+    providers_install omarchy-tailscale-send yes
+    export HOME="$menu_box/home" XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config"
+    export XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
+    export PATH="$menu_box/open-bin:$menu_box/bin" FLEA_PROVIDERS_BOX="$menu_box"
+    "$flea_bin" --ui-state '{"view":"list","keys":"default","menu":{"hidden":[]}}' >/dev/null \
+        || fail 'taildrop: private settings seed failed'
+    launch "$menu_dir"
     wait_listing 3
-    click_row 2 right
-    settle
-    [[ "$(ipc contextMenuEntries)" != *"Send with Taildrop"* ]] \
-        || fail "taildrop: a logged-out tailscale still offered the entry, got $(ipc contextMenuEntries)"
-    shot taildrop-hidden
+    providers_open adir pointer
+    providers_disabled taildrop 'Taildrop sends files only'
+    menus_expect menuState 'any(.entries[]; .action == "taildrop" and .disabled and .submenu == [])' 'directory keeps its installed provider but offers no file targets'
+    providers_close
 
-    # A stub PATH dir symlinking every real binary except tailscale, so hyprctl/gio/wtype/qs still work.
-    local stub_bin="$fixture_root/taildrop-no-tailscale-bin" part f base
-    sandbox_scratch "$stub_bin"
-    IFS=':' read -ra _pp <<< "$PATH"
-    for part in "${_pp[@]}"; do
-        [[ -d "$part" ]] || continue
-        for f in "$part"/*; do
-            [[ -e "$f" ]] || continue
-            base="${f##*/}"
-            [[ "$base" == "tailscale" || -e "$stub_bin/$base" ]] && continue
-            ln -s "$f" "$stub_bin/$base"
-        done
-    done
-    kill_flea
-    cat "$flea_log" >> "$run_log" 2>/dev/null || true
-    : > "$flea_log"
-    # The renderer is stated because src/gui.rs owns that choice and a direct qs launch never runs it.
-    QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" PATH="$stub_bin" FLEA_PATH="$dir" FLEA_BIN="$flea_bin" \
-        setsid nohup qs -p "$flea_ui" >"$flea_log" 2>&1 </dev/null &
-    omarchy-drive wait window flea --timeout 15 >/dev/null
-    omarchy-drive focus flea >/dev/null
-    assert_window
-    wait_listing 3
-    click_row 2 right
-    settle
-    [[ "$(ipc contextMenuEntries)" != *"Send with Taildrop"* ]] \
-        || fail "taildrop: a PATH with no tailscale at all still offered the entry, got $(ipc contextMenuEntries)"
-    shot taildrop-absent
-    grep -q 'Command: QList("tailscale", "status", "--json")' "$flea_log" \
-        || fail "taildrop: no PATH miss was ever logged for tailscale, the absence was not real"
-    # Expected and asserted above: scrubbed so it does not trip the suite's own generic log check.
-    grep -v 'Command: QList("tailscale", "status", "--json")' "$flea_log" > "$flea_log.tmp" \
-        && mv "$flea_log.tmp" "$flea_log"
+    providers_open b-cursor.txt pointer
+    menus_expect menuState 'any(.entries[]; .action == "taildrop" and (.disabled | not) and .mark == "tailscale")' 'file menu uses the Tailscale brand mark'
+    menus_shot taildrop-menu
+    providers_seek taildrop
+    key -k Return >/dev/null || fail 'taildrop: submenu Enter failed'
+    menus_expect menuState '.submenu and .submenuCursor == 0 and (.submenuEntries | map(.label)) == ["Alpha","Bravo"]' 'Enter opens both fixture peers in name order'
+    menus_equal 'each peer retains the machine glyph' 'server|server' "$(ipc contextMenuSubmenuGlyphs)"
+    menus_shot taildrop-flyout
+    key -k Down >/dev/null || fail 'taildrop: second-peer movement failed'
+    menus_expect menuState '.submenu and .submenuCursor == 1 and .submenuEntries[.submenuCursor].id == "second-peer"' 'Down selects the second peer identity'
+    before=$(providers_calls omarchy-tailscale-send)
+    key -k Return >/dev/null || fail 'taildrop: second-peer Enter failed'
+    providers_call omarchy-tailscale-send "$(jq -cn --arg path "$menu_dir/b-cursor.txt" '["fixture.invalid",$path]')" "$before"
+    menus_expect menuState '(.opened | not) and (.submenu | not)' 'dispatch closes both native menus'
+    providers_expect '.listFocus' 'dispatch restores listing focus'
+    menus_message 'Sending b-cursor.txt to Bravo.' 'dispatch names the chosen peer and exact cursor file'
+    menus_equal 'dispatch preserves source bytes' 'list/b-cursor.txt original' "$(cat "$menu_dir/b-cursor.txt")"
+    menus_shot taildrop-sent
 
-    printf 'TAILDROP directory-hides=ok menu=ok real-send=ok logged-out-hides=ok absent-hides=ok\n'
-    kill_flea
-    sandbox_remove "$stub_bin"
-}
+    providers_mode tailscale ready '{"BackendState":"NeedsLogin","Peer":{}}'
+    providers_open b-cursor.txt pointer
+    providers_disabled taildrop 'signed out'
+    menus_expect menuState 'any(.entries[]; .action == "taildrop" and .disabled and .submenu == [])' 'signed-out installation offers no cached peer'
+    menus_shot taildrop-signed-out
+    providers_close
+    providers_install tailscale no
+    before=$(providers_calls tailscale)
+    providers_open b-cursor.txt pointer
+    menus_expect menuState 'all(.entries[]; .action != "taildrop")' 'missing installation removes the provider row'
+    providers_expect '.facts.taildrop.installed == false and (.taildrop.checking | not)' 'private PATH proves the provider is absent'
+    menus_equal 'absence does not attempt a missing status helper' "$before" "$(providers_calls tailscale)"
+    menus_shot taildrop-absent
+    providers_close
+    menus_equal 'native menu input never opens a file' 0 "$(providers_calls gio)"
+    menus_equal 'Taildrop never touches the clipboard recorder' 0 "$(providers_calls wl-copy)"
+    printf 'TAILDROP checks=%s directory-disabled=ok brand=ok submenu=ok second-peer-recorded=ok signed-out-disabled=ok absent=ok isolated=ok\n' "$menus_checks"
+)
 
 # The rename editor's lifetime. renamingIndex used to outlive the editor it armed, and ui/js/Focus.js
 # swallowed every key while it was set, so a view change, a scroll past the cache buffer or a
@@ -7746,6 +7760,7 @@ case_previewviews() {
 . "$repo/tests/ui-pdf.sh"
 . "$repo/tests/ui-trash.sh"
 . "$repo/tests/ui-menus.sh"
+. "$repo/tests/ui-providers.sh"
 . "$repo/tests/ui-settings-layout.sh"
 . "$repo/tests/ui-settings-places.sh"
 . "$repo/tests/ui-card-layout.sh"
@@ -7758,7 +7773,7 @@ case_previewviews() {
 . "$repo/tests/ui-convert-design.sh"
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop providers grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)
 
 : > "$run_log"
 : > "$flea_log"
