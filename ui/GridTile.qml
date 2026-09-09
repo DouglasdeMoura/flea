@@ -22,6 +22,7 @@ Item {
     // The same alias ui/Row.qml carries, so ui/Ipc.qml's rowThumbReady answers for a tile too.
     readonly property alias iconStatus: tileThumb.status
     readonly property Item thumbItem: tileThumb
+    readonly property Item captionItem: nameLabel
 
     Accessible.role: Accessible.ListItem
     Accessible.name: root.row ? root.row.n : ""
@@ -85,6 +86,7 @@ Item {
         anchors.right: parent.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.rightMargin: Theme.spacing.gap
+        height: Theme.grid.captionHeight
         horizontalAlignment: Text.AlignHCenter
         text: root.row ? root.row.n : ""
         color: Theme.color.foreground
@@ -93,6 +95,8 @@ Item {
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
         maximumLineCount: 2
+        lineHeightMode: Text.FixedHeight
+        lineHeight: Theme.grid.captionLineHeight
         elide: Text.ElideRight
     }
 

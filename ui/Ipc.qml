@@ -55,6 +55,14 @@ QtObject {
         function tokens(): string { return Theme.tokens() }
         function cursor(): int { return root.pane.cursorIndex }
         function gridColumns(): int { return root.pane.cursorStride }
+        function gridCaptionState(i: int): string {
+            var item = root.pane.visibleItemFor(i)
+            if (!item || !item.captionItem) return "{}"
+            var caption = item.captionItem
+            return JSON.stringify({name: caption.text, lines: caption.lineCount, truncated: caption.truncated,
+                textHeight: caption.contentHeight, slotHeight: caption.height,
+                bottom: caption.y + caption.height, tileHeight: item.height})
+        }
         function drawnCount(): int { return root.pane.listArea.count }
         function total(): int { return root.pane.total }
         function selectionCount(): int { return root.pane.selectionCount() }
@@ -346,6 +354,14 @@ QtObject {
         // The three below read the view on screen, where rowIcon and rowAt read the list's own delegates whatever the view.
         function rowHovered(i: int): bool { var item = root.pane.visibleItemFor(i); return item ? item.hovered === true : false }
         function rowThumb(i: int): string { var item = root.pane.visibleItemFor(i); return item && item.thumb !== undefined ? item.thumb : "" }
+        function thumbnailPolicyState(): string {
+            var pane = root.pane, column = pane.previewColumnItem
+            return JSON.stringify({view: pane.viewMode, mode: ViewState.thumbnailMode, files: pane.thumbState.file,
+                pending: Object.keys(pane.thumbState.file).filter(function(index) { return pane.thumbState.file[index] === null }).map(Number),
+                contentY: pane.viewMode === "columns" && root.columns ? root.columns.activeContentY() : pane.listArea.contentY,
+                cursor: pane.cursorIndex, previewIndex: pane.previewIndex, previewPath: column ? column.path : "",
+                previewReady: column !== null && column.frameStatus === Image.Ready})
+        }
         function viewContentY(): int { return Math.round(root.pane.viewMode === "columns" && root.columns ? root.columns.activeContentY() : root.pane.listArea.contentY) }
         function listAreaRect(): string { return root.fleaWindow.rectOf(root.pane.listArea) }
         function rowRect(i: int): string { return root.fleaWindow.rectOf(root.pane.visibleItemFor(i)) }
@@ -528,6 +544,17 @@ QtObject {
         function networkTitle(): string { return root.networkDialog ? root.networkDialog.dialogTitle : "" }
         function networkFields(): string { return root.networkDialog ? root.networkDialog.formFields() : "" }
         function networkFocus(): string { return root.networkDialog ? root.networkDialog.formFocus() : "" }
+        function networkFocusState(): string {
+            var dialog = root.networkDialog
+            var window = dialog ? dialog.Window.window : null
+            var item = window ? window.activeFocusItem : null
+            var inside = false
+            for (var parent = item; parent; parent = parent.parent) {
+                if (parent === dialog) { inside = true; break }
+            }
+            return JSON.stringify({inside: inside, busy: !!dialog && dialog.busy,
+                activeItem: item ? String(item) : "", field: dialog ? dialog.formFocus() : ""})
+        }
         function networkHostPortWidths(): string { return root.networkDialog ? root.networkDialog.formHostPortWidths() : "" }
         // Mask state and presence only: the seam never returns password content.
         function networkPasswordState(): string { return root.networkDialog ? root.networkDialog.formPasswordState() : "" }
@@ -557,6 +584,15 @@ QtObject {
         function shareBrowserEntries(): string { return root.shareBrowser ? root.shareBrowser.shares.join("\n") : "" }
         function shareBrowserCursor(): int { return root.shareBrowser ? root.shareBrowser.cursorIndex : -1 }
         function shareBrowserRect(): string { return root.shareBrowser ? root.fleaWindow.rectOf(root.shareBrowser) : "" }
+        function shareBrowserState(): string {
+            var browser = root.panes[0] ? root.panes[0].shareBrowser : null
+            return JSON.stringify({active: !!browser && browser.active,
+                owner: browser && browser.owner ? root.panes.indexOf(browser.owner) : -1,
+                rect: browser ? root.fleaWindow.rectOf(browser) : "",
+                baseUri: root.shareBrowser ? root.shareBrowser.baseUri : "",
+                cursor: root.shareBrowser ? root.shareBrowser.cursorIndex : -1,
+                paneRects: root.panes.map(function(pane) { return pane ? root.fleaWindow.rectOf(pane.listSlot) : "" })})
+        }
         // One line per entry, "label|group|kind|mounted", so a test can assert count and shape without a screenshot.
         function networkEntries(): string {
             var out = []

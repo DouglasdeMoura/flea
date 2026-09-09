@@ -2582,9 +2582,10 @@ case_grid() {
 
 case_gridnavigation() {
     local dir="$fixture_root/grid-navigation" preset i columns next_columns edge selected_name
-    local start_x start_y target_x target_y
+    local start_x start_y target_x target_y caption
     sandbox_scratch "$dir"
-    for i in $(seq -w 1 61); do printf 'grid navigation %s\n' "$i" > "$dir/file-$i.txt"; done
+    for i in $(seq -w 1 60); do printf 'grid navigation %s\n' "$i" > "$dir/file-$i.txt"; done
+    printf 'grid caption\n' > "$dir/long-grid-caption-with-enough-words-to-wrap-and-truncate-after-two-complete-lines.txt"
     for preset in default vim mac windows; do
         seed_ui_state "$fixture_root/grid-state" "{\"keys\":\"$preset\",\"view\":\"list\",\"wrapAtEnds\":true,\"preview\":{\"thumbnails\":\"off\"}}"
         launch "$dir"
@@ -2614,6 +2615,10 @@ case_gridnavigation() {
         cardsize_expect cursor 0
         key -k End -k Down -k Right >/dev/null
         cardsize_expect cursor 60
+        caption=$(ipc gridCaptionState 60)
+        jq -e '.lines == 2 and .truncated and .textHeight <= .slotHeight and .bottom <= .tileHeight' <<< "$caption" >/dev/null \
+            || fail "grid: two-line caption leaves its reserved tile slot: $caption"
+        shot "grid-navigation-$preset-two-line-caption"
         # Prime fixture count guarantees an incomplete row at every admitted column count.
         (( 61 % columns != 0 )) || fail "grid: fixture did not produce an incomplete row"
         edge=$((61 - columns))
@@ -2645,6 +2650,7 @@ case_gridnavigation() {
         cardsize_expect cursor "$next_columns"
         cardsize_expect selectionCount "$((next_columns + 1))"
         key -k Escape / file-0 -k Return -k Home >/dev/null
+        printf 'GRID_FILTER state=%s\n' "$(ipc keyDeliveryState)"
         cardsize_expect drawnCount 9
         cardsize_expect cursor 0
         cardsize_expect visibleRowName file-01.txt 0
@@ -3420,6 +3426,19 @@ case_network() {
     : > "$mount_log"
     : > "$mount_calls"
     mkfifo "$fake_root/mount-release"
+    local races="$fixture_root/network-races" race_state="$fixture_root/network-race-state" name
+    sandbox_scratch "$races"
+    mkdir -p "$races/left" "$races/right/child" "$races/mounted" "$races/share-mounted"
+    for name in a b c; do
+        : > "$races/left/$name.txt"
+        : > "$races/right/$name.txt"
+    done
+    for name in a b; do
+        : > "$races/right/child/$name.txt"
+        : > "$races/mounted/$name.txt"
+        : > "$races/share-mounted/$name.txt"
+    done
+    for name in late origin shares child; do mkfifo "$fake_root/$name-release"; done
 
     network_wait_favourites() {
         settings_wait_value "$1"
@@ -3435,6 +3454,33 @@ case_network() {
             sleep 0.05
         done
         fail "network: successful persistence did not close the form: $(ipc networkStatus)"
+    }
+    network_wait_panes() {
+        local filter="$1" attempt seen
+        for attempt in $(seq 1 100); do
+            seen=$(ipc dualState)
+            jq -e "$filter" <<< "$seen" >/dev/null && return
+            sleep 0.05
+        done
+        fail "network: pane transition did not satisfy $filter: $seen"
+    }
+    network_click_pane() {
+        local side="$1" x y width height wx wy
+        read -r x y width height <<< "$(ipc shareBrowserState | jq -r --argjson side "$side" '.paneRects[$side]')"
+        [[ "$width" -gt 0 && "$height" -gt 0 ]] || fail "network: pane $side has no clickable listing"
+        read -r wx wy _ww _wh < <(window_box)
+        omarchy-drive click "$((wx + x + width / 2))" "$((wy + y + height / 2))" >/dev/null
+        network_wait_panes ".focused == $side"
+    }
+    network_click_favourite() {
+        local label="$1" index
+        index=$(ipc railEntries | jq -r --arg label "$label" 'map(.label) | index($label)')
+        [[ "$index" != null ]] || fail "network: missing fixture favourite $label"
+        click_rail_row "$index" left
+    }
+    network_release() {
+        timeout 2 sh -c 'printf "release\n" > "$1"' sh "$fake_root/$1-release" \
+            || fail "network: $1 fixture was no longer waiting at its release barrier"
     }
 
     local live_mounts
@@ -3452,14 +3498,37 @@ case "\$1 \${2:-}" in
     : > "$fake_root/cancel-started"
     read release < "$fake_root/mount-release"
     ;;
+"mount nfs://late-retry.test/export")
+    : > "$fake_root/late-started"
+    read release < "$fake_root/late-release"
+    exit 2
+    ;;
+"mount nfs://origin.test/export")
+    : > "$fake_root/origin-started"
+    read release < "$fake_root/origin-release"
+    ;;
 "mount nfs://stale-one.test/export") printf 'Location is already mounted\n' >&2; exit 2 ;;
 "mount nfs://stale-two.test/export") exit 2 ;;
 "mount "*) printf '%s\n' "\$*" > "$mount_log"; printf '%s\n' "\$*" >> "$mount_calls" ;;
 "info nfs://stale-two.test/export") exit 1 ;;
+"info nfs://late-retry.test/export") exit 1 ;;
+"info nfs://origin.test/export") printf 'local path: %s\n' "$races/mounted" ;;
+"info smb://shares-origin.test/alpha/")
+    : > "$fake_root/child-started"
+    read release < "$fake_root/child-release"
+    printf 'local path: %s\n' "$races/share-mounted"
+    ;;
 "info smb://shares-one.test/"|"info smb://shares-two.test/") exit 1 ;;
+"info smb://shares-origin.test/"|"info smb://shares-second.test/") exit 1 ;;
 "info "*) printf 'local path: %s\n' "$dir" ;;
 "list smb://shares-one.test/") printf 'old-share\n' ;;
 "list smb://shares-two.test/") exit 0 ;;
+"list smb://shares-origin.test/")
+    : > "$fake_root/shares-started"
+    read release < "$fake_root/shares-release"
+    printf 'alpha\nbeta\n'
+    ;;
+"list smb://shares-second.test/") printf 'second-alpha\nsecond-beta\n' ;;
 *) exit 0 ;;
 esac
 EOS
@@ -3727,12 +3796,30 @@ EOS
     [[ -e "$fake_root/cancel-started" && "$(ipc dialogOpen)" == true ]] \
         || fail "network: cancellable mount did not remain in the open form"
     [[ "$(cat "$stored")" == "$before" ]] || fail "network: favourite was saved before mount completion"
+    local pending_state pending_key
+    pending_state=$(ipc dualState)
+    ipc networkFocusState | jq -e '.inside and .busy' >/dev/null \
+        || fail "network: pending mount did not own keyboard focus"
+    for pending_key in Tab Backtab ShiftTab; do
+        if [[ "$pending_key" == ShiftTab ]]; then
+            key -M shift -k Tab -m shift >/dev/null
+        elif [[ "$pending_key" == Backtab ]]; then
+            key -k ISO_Left_Tab >/dev/null
+        else
+            key -k "$pending_key" >/dev/null
+        fi
+        settle
+        ipc networkFocusState | jq -e '.inside and .busy' >/dev/null \
+            || fail "network: pending $pending_key escaped the dialog: $(ipc networkFocusState)"
+        [[ "$(ipc dualState)" == "$pending_state" ]] \
+            || fail "network: pending $pending_key changed the listing, selection or pane focus"
+    done
     shot network-mount-pending
     key -k Escape >/dev/null
     wait_network_result cancelled 5
     [[ "$(ipc dialogOpen)" == false && "$(cat "$stored")" == "$before" ]] \
         || fail "network: Cancel reopened the form or saved an unfinished mount"
-    printf 'NETWORK mount-first=ok cancel=inflight no-place=ok\n'
+    printf 'NETWORK mount-first=ok pending-Tab=contained pending-Backtab=contained pending-ShiftTab=contained cancel=inflight no-place=ok\n'
 
     # Plain WebDAV is port 80, so the tick that picks the scheme has to pick the number with it, or
     # the dialog offers a port that scheme does not use while the rail dedups against the one it
@@ -3857,6 +3944,125 @@ EOS
     key -k Escape >/dev/null
     settle
     printf 'NETWORK empty=ok a-scoped=ok dialog=ok submit-path=ok keyboard-after=ok guest-smb=anonymous nfs=plain caches=isolated\n'
+
+    # Separate persisted fixtures keep the mount-origin races independent of the save inventory above.
+    kill_flea
+    seed_ui_state "$race_state" "$(jq -n --arg left "$races/left" --arg right "$races/right" \
+        '{view:"list",keys:"default",dual:{paths:[$left,$right],focus:0},places:{favourites:[
+            {label:"Late retry",path:"nfs://late-retry.test/export"},
+            {label:"Origin mount",path:"nfs://origin.test/export"},
+            {label:"Origin shares",path:"smb://shares-origin.test/"},
+            {label:"Second shares",path:"smb://shares-second.test/"}]}}')"
+    HOME="$fixture_home" launch "$races/left"
+    wait_listing 3
+    network_wait_favourites '.places.favourites | length == 4'
+
+    network_click_favourite "Late retry"
+    wait_marker "$fake_root/late-started" "network: late retry did not reach its mount barrier"
+    key -M ctrl -k k -m ctrl >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == true ]] || fail "network: Ctrl+K did not open a newer draft during the direct mount"
+    click_chip NFS
+    key "newer-draft.test" >/dev/null
+    key -k Tab -k Tab >/dev/null
+    key "/kept" >/dev/null
+    local draft_uri draft_title draft_action draft_focus
+    draft_uri=$(ipc networkUri)
+    draft_title=$(ipc networkTitle)
+    draft_action=$(ipc networkAction)
+    draft_focus=$(ipc networkFocusState)
+    [[ "$draft_uri" == 'nfs://newer-draft.test/kept' ]] || fail "network: newer draft did not receive native typing"
+    network_release late
+    wait_network_result failed 5
+    [[ "$(ipc dialogOpen)" == true && "$(ipc networkUri)" == "$draft_uri" \
+        && "$(ipc networkTitle)" == "$draft_title" && "$(ipc networkAction)" == "$draft_action" \
+        && "$(ipc networkFocusState)" == "$draft_focus" && -z "$(ipc networkStatus)" ]] \
+        || fail "network: late failure replaced or refocused the newer draft"
+    [[ "$(ipc statusError)" == true && "$(ipc lastMessage)" == 'Connect failed: network location was refused' ]] \
+        || fail "network: preserving the newer draft hid the older mount failure"
+    network_wait_favourites '.places.favourites | length == 4'
+    shot network-late-retry-newer-draft
+    key -k Escape >/dev/null
+    settle
+    printf 'NETWORK late-retry=newer-draft-retained focus=retained failure=visible\n'
+
+    click_chrome dual
+    network_wait_panes '.active and .focused == 0 and .panes[1].total == 4 and (.panes[1].loading | not)'
+    network_click_favourite "Origin mount"
+    wait_marker "$fake_root/origin-started" "network: origin mount did not reach its barrier"
+    network_click_pane 1
+    key j >/dev/null
+    settle
+    local other_before
+    other_before=$(ipc dualState | jq -c '.panes[1]')
+    network_release origin
+    wait_network_result mounted 5
+    network_wait_panes ".focused == 1 and .panes[0].path == \"$races/mounted\" and .panes[0].total == 2 and (.panes[0].loading | not)"
+    [[ "$(ipc dualState | jq -c '.panes[1]')" == "$other_before" ]] \
+        || fail "network: completing the first pane's mount changed the second pane"
+    shot network-dual-origin-mount
+
+    network_click_pane 0
+    network_click_favourite "Origin shares"
+    wait_marker "$fake_root/shares-started" "network: share listing did not reach its barrier"
+    network_click_pane 1
+    other_before=$(ipc dualState | jq -c '.panes[1]')
+    network_release shares
+    wait_network_result mounted 5
+    ipc shareBrowserState | jq -e '.active and .owner == 0 and .rect == .paneRects[0] and .baseUri == "smb://shares-origin.test/"' >/dev/null \
+        || fail "network: completed shares did not cover only their originating pane: $(ipc shareBrowserState)"
+    [[ "$(ipc dualState | jq -c '.panes[1]')" == "$other_before" ]] \
+        || fail "network: completed shares changed the other pane"
+    local other_cursor
+    other_cursor=$(ipc cursor)
+    key j >/dev/null
+    settle
+    [[ "$(ipc cursor)" -eq $((other_cursor + 1)) && "$(ipc shareBrowserCursor)" == 0 ]] \
+        || fail "network: keys in the other pane moved the share cursor"
+    goto_row 0
+    key l >/dev/null
+    network_wait_panes ".focused == 1 and .panes[1].path == \"$races/right/child\" and .panes[1].total == 2 and (.panes[1].loading | not)"
+    [[ "$(ipc shareBrowserOpen)" == true ]] || fail "network: other-pane navigation dismissed the originating pane's shares"
+    shot network-dual-origin-shares
+
+    local sx sy sw sh wx wy row_height
+    read -r sx sy sw sh <<< "$(ipc shareBrowserRect)"
+    read -r _body _caption _padding row_height <<< "$(ipc metrics)"
+    read -r wx wy _ww _wh < <(window_box)
+    omarchy-drive click "$((wx + sx + sw / 2))" "$((wy + sy + row_height / 2))" >/dev/null
+    wait_marker "$fake_root/child-started" "network: share row pointer activation did not mount its child"
+    network_wait_panes '.focused == 0'
+    network_click_pane 1
+    other_before=$(ipc dualState | jq -c '.panes[1]')
+    network_release child
+    wait_network_result mounted 5
+    network_wait_panes ".focused == 1 and .panes[0].path == \"$races/share-mounted\" and .panes[0].total == 2 and (.panes[0].loading | not)"
+    [[ "$(ipc shareBrowserOpen)" == false && "$(ipc dualState | jq -c '.panes[1]')" == "$other_before" ]] \
+        || fail "network: child mount lost its origin, stole focus or left its shares visible"
+    shot network-dual-origin-child
+    printf 'NETWORK dual-mount=origin-preserved shares=origin-preserved other-pane-keys=independent other-pane-navigation=independent child-mount=origin-preserved\n'
+
+    network_click_favourite "Second shares"
+    wait_network_result mounted 5
+    ipc shareBrowserState | jq -e '.active and .owner == 1 and .rect == .paneRects[1]' >/dev/null \
+        || fail "network: second-pane shares did not retain their owner"
+    shot network-second-pane-shares
+    local destruction_log_start
+    destruction_log_start=$(wc -l < "$flea_log")
+    click_chrome list
+    network_wait_panes '(.active | not) and .focused == 0 and .panes[1] == null'
+    ipc shareBrowserState | jq -e '(.active | not) and .owner == -1' >/dev/null \
+        || fail "network: destroying the second pane left its shares active: $(ipc shareBrowserState)"
+    key j >/dev/null
+    settle
+    [[ "$(ipc cursor)" == 1 ]] || fail "network: closing second-pane shares did not restore primary-list keys"
+    tail -n "+$((destruction_log_start + 1))" "$flea_log" > "$fake_root/second-pane-destruction.log"
+    if grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot' "$fake_root/second-pane-destruction.log"; then
+        fail "network: second-pane destruction produced native QML errors"
+    fi
+    shot network-shares-owner-destroyed
+    [[ "$(cat "$bookmarks")" == "$legacy_before" ]] || fail "network: origin races changed GTK bookmarks"
+    printf 'NETWORK second-pane-destruction=closed focus=restored qml-log=clean\n'
     export PATH="$saved_path"
     if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
     if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
@@ -7328,6 +7534,7 @@ case_previewviews() {
 . "$repo/tests/ui-card-layout.sh"
 . "$repo/tests/ui-preview-visibility.sh"
 . "$repo/tests/ui-permissions.sh"
+. "$repo/tests/ui-preview-policy.sh"
 . "$repo/tests/ui-operations-design.sh"
 . "$repo/tests/ui-convert-design.sh"
 

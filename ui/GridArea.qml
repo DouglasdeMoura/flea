@@ -39,9 +39,9 @@ GridView {
     // How many tiles fit across, which is what a cursor step down has to move by.
     readonly property int columns: Math.max(1, Math.floor(root.width / Math.max(Theme.grid.minCellWidth, ViewState.thumbnailPixels + 2 * Theme.spacing.rowPaddingX)))
     readonly property int tileRows: Math.max(1, Math.ceil(root.pane.shownTotal / root.columns))
-    // Mark, one gap, one line of caption, and the padding above and below.
+    // Mark, one gap, two caption lines, and the padding above and below.
     readonly property int cellHeightPx: ViewState.thumbnailPixels + Theme.spacing.gap
-                                        + Math.round(Theme.font.caption * 1.6)
+                                        + Math.ceil(Theme.grid.captionHeight)
                                         + 2 * Theme.spacing.rowPaddingX
     readonly property int visibleTileRows: Math.max(1, Math.ceil(root.height / root.cellHeightPx))
     onColumnsChanged: if (root.visible) settle.restart()

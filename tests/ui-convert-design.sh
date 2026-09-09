@@ -108,8 +108,14 @@ case_convertdesign() (
     read -r cx cy < <(ipc convertState | jq -er '.formats[] | select(.name == "webp") | .centre')
     read -r wx wy ww wh < <(window_box)
     (( cx > 1 && cy > 0 && cx < ww && cy < wh )) || fail "convert: hover target is outside the owned viewport"
+    assert_focus
     omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null || fail "convert: hover entry failed"
-    omarchy-drive move "$((wx + cx - 1))" "$((wy + cy))" >/dev/null || fail "convert: actual pointer movement failed"
+    # A compositor warp sends no Qt pointer frame; two real moves arm entry, then select the row.
+    YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1 \
+        || fail "convert: native hover entry failed"
+    settle
+    YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1 \
+        || fail "convert: actual pointer movement failed"
     menus_expect convertState ".requestId == $request and .format == \"jpg\" and .collision and any(.formats[]; .name == \"webp\" and .current and (.selected | not))" 'actual pointer motion highlights a format without changing the draft or probing'
     key -k Up >/dev/null
     menus_expect convertState '.format == "png" and (.checking | not) and any(.formats[]; .name == "png" and .focused and .current)' 'keyboard chooses from the moved cursor without a resting pointer stealing selection'

@@ -169,6 +169,9 @@ Singleton {
     // slot is 46 at base-size 14, and the token wins over the mock, see the icon-language spec.
     readonly property QtObject grid: QtObject {
         readonly property int iconSize: root.iconSize * 2
+        // GridView.html reserves two caption lines, each 15px at the 11px caption token.
+        readonly property real captionLineHeight: root.font.caption * 15 / 11
+        readonly property real captionHeight: 2 * captionLineHeight
         // GridView.dc.html's own five-column reference viewport: 880 body less 2x40 board padding,
         // 2x1 window hairline, 2x18 grid padding and 4x8 gap, over five tiles, is 146 at base-size 14.
         readonly property int minCellWidth: root.space(125)
