@@ -108,6 +108,7 @@ Item {
     // The context menu's own gate for the two Dropbox rows, read through here rather than reaching
     // into the rail's internals from the pane.
     readonly property bool dropboxReady: mounts.dropboxReady
+    readonly property alias providerService: mounts
 
     DeviceMounts {
         id: devices

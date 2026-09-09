@@ -441,7 +441,7 @@ ShellRoot {
                 onOwnerChanged: if (!owner) close()
                 visible: owner !== null && (owner === primaryPane || view.dualMode)
                 x: owner ? owner.mapToItem(view, owner.listSlot.x, 0).x : 0
-                y: owner ? owner.y + owner.listSlot.y : 0
+                y: owner ? tabBar.y + tabBar.height + owner.listSlot.y : 0
                 width: owner ? owner.listSlot.width : 0
                 height: owner ? owner.listSlot.height : 0
                 readonly property bool active: shareLoader.item !== null && shareLoader.item.active

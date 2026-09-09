@@ -36,6 +36,7 @@ Item {
     signal permissionsResult(var message)
     signal pickerResult(var message)
     signal menuResult(var message)
+    signal formatsResult(var message)
     signal redone(string op, bool ok)
     signal redoStarted(int id, int n, string op)
     signal metaResult(var message)
@@ -56,11 +57,13 @@ Item {
     // The shell's exit gate: the backend has drained and this process can end.
     signal quitReady()
 
-    // What this box actually offers, probed by the backend at startup and asked for once at launch.
+    // Capabilities arrive at launch and refresh at explicit menu and provider-action entry.
     // The compress submenu is exactly this list, so a box with no 7zip never shows .7z.
     property var archiveFormats: []
     property bool canConvert: false
     property var extraction: ({archive: false, sevenZip: false})
+    property var providers: ({})
+    property int formatsToken: 0
 
     readonly property bool running: child.running
 
@@ -212,7 +215,8 @@ Item {
     }
 
     function askFormats() {
-        root.send({ c: "formats" })
+        root.send({ c: "formats", id: ++root.formatsToken })
+        return root.formatsToken
     }
 
     // paths are absolute and share a parent, which is what a selection from one listing is.
@@ -363,6 +367,8 @@ Item {
             root.archiveFormats = message.archive || []
             root.canConvert = message.convert === true
             root.extraction = message.extract || ({archive: false, sevenZip: false})
+            root.providers = message.providers || ({})
+            root.formatsResult(message)
         } else if (message.t === "archivestarted") {
             root.archiveStarted(message.id)
         } else if (message.t === "archivedone") {

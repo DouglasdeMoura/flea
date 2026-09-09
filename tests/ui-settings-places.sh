@@ -610,7 +610,16 @@ case_settingsplaces() {
         || fail "places: invalid path activation did not explain its refusal"
     settings_focus_row favourite:4
     key -k Return >/dev/null; settle
-    [[ "$(ipc lastMessage)" == *'invalid favorite record'* ]] || fail "places: legacy record activation hid its error"
+    ipc statusActivityState | jq -e '.errors == 2' >/dev/null \
+        || fail "places: invalid record did not queue its error: $(ipc statusActivityState); message=$(ipc lastMessage)"
+    [[ "$(ipc lastMessage)" == *'path must be absolute'* ]] || fail "places: a new error displaced the unacknowledged error"
+    key -k Escape >/dev/null; settle
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc lastMessage)" == *'invalid favorite record'* ]] || fail "places: acknowledging the first error did not reveal the invalid record error: $(ipc lastMessage)"
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc statusError)" == false ]] || fail "places: acknowledging both errors left an unexplained failure"
+    settings_open_key; settle
+    settings_section places
     places_wait_records "$records"
     shot places-invalid-originals
     settings_focus_row favourite:0

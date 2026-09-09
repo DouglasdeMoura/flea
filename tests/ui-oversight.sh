@@ -368,9 +368,47 @@ case_oversight() {
     trap - EXIT
     printf 'OVERSIGHT_CAPTURE_GROUP source=%s matched=880x620 base=14 arms=2 shared_specimens_per_arm=9 candidate_extra_specimens=1 visual_inspection=pending\n' "$FLEA_SOURCE_SHA"
 }
+empty_hero_capture() {
+    local label="$1" before after lit x y width height attempt=0 deadline=$((SECONDS + 15)) target="$evidence_dir/$1.png"
+    [[ "$label" =~ ^[a-z0-9-]+$ && "$target" == /* && "$target" == "$run_root/"* \
+        && -f "$run_root/.flea-test-sandbox" && ! -e "$target" && ! -L "$target" ]] \
+        || fail "empty hero: evidence target is not fresh inside this run"
+    while (( SECONDS < deadline )); do
+        before=$(ipc emptyHeroState) || fail "empty hero: paint state unavailable"
+        if ! jq -e '.visible and .settled and .captionOpacity == 1' <<< "$before" >/dev/null; then
+            sleep 0.05
+            continue
+        fi
+        jq -e '.captionColor == .foreground and .markColor == .muted' <<< "$before" >/dev/null \
+            || fail "empty hero: caption or GM's retained v0.1.6 spiral ink differs: $before"
+        attempt=$((attempt + 1))
+        shot "$label-phase-$attempt"
+        after=$(ipc emptyHeroState) || fail "empty hero: post-capture paint state unavailable"
+        if ! jq -e --arg caption "$(jq -r .caption <<< "$before")" \
+            '.visible and .settled and .captionOpacity == 1 and .caption == $caption' <<< "$after" >/dev/null; then
+            printf 'EMPTY_HERO_CAPTURE_REJECTED label=%s phase=%s state=%s\n' "$label" "$attempt" "$after"
+            continue
+        fi
+        cp -- "$evidence_dir/$label-phase-$attempt.png" "$target" || fail "empty hero: could not retain its settled frame"
+        read -r x y width height <<< "$(ipc emptyMarkRect)"
+        if [[ ! "$x $y $width $height" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || (( width <= 0 || height <= 0 )); then
+            fail "empty hero: invalid painted-mark rectangle"
+        fi
+        lit=$(lit_in_rect "$target" "$x" "$y" "$width" "$height")
+        (( lit > 0 )) || fail "empty hero: settled mark painted no visible pixels"
+        menus_checks=$((menus_checks + 1))
+        printf 'EMPTY_HERO_CAPTURE check=%s label=%s state=%s mark=%s hero=%s lit=%s\n' \
+            "$menus_checks" "$label" "$after" "$x $y $width $height" "$(ipc emptyStateRect)" "$lit"
+        return
+    done
+    fail "empty hero: no capture stayed settled across its observation window: $before"
+}
+
 case_emptystate() (
     local directory="$fixture_root/empty-state" permissions_listing="$fixture_root/empty-state" menus_checks=0 mode chord
+    local reduced_directory="$directory/reduced" observed before visit deadline started elapsed rotate_ms
     sandbox_scratch "$directory"
+    export FLEA_REDUCED_MOTION=0
     launch "$directory"
     wait_listing 0
     permissions_viewport 880 620
@@ -380,7 +418,8 @@ case_emptystate() (
         cardsize_expect viewMode "$mode"
         menus_expect stateLayers '.empty and (.message | not)' "$mode empty hero excludes the ordinary state sentence"
         menus_expect previewSelectionState '(.inlineVisible | not)' "$mode empty listing has no file preview"
-        shot "empty-state-$mode"
+        menus_expect emptyHeroState '.visible and (.reducedMotion | not) and (.settled | not)' "$mode normal motion draws the spiral"
+        empty_hero_capture "empty-state-$mode"
     done
     sandbox_require "$directory"
     printf 'visible row\n' > "$directory/visible.txt"
@@ -398,5 +437,61 @@ case_emptystate() (
     wait_listing 1
     menus_expect stateLayers '(.empty | not) and (.message | not)' "recovered listing hides the error sentence"
     kill_flea
-    printf 'EMPTY_STATE views=3 populated=ok missing=ok recovery=ok\n'
+    sandbox_require "$directory"
+    mkdir "$reduced_directory" || fail "empty hero: could not create the reduced-motion fixture"
+    export FLEA_REDUCED_MOTION=1
+    launch "$directory"
+    wait_listing 2
+    permissions_viewport 880 620
+    hotkey --global ctrl 1 flea >/dev/null
+    cardsize_expect viewMode list
+    for visit in opening reopening; do
+        if [[ "$visit" == reopening ]]; then
+            key -k Backspace >/dev/null
+            wait_listing 2
+        fi
+        key -k Home >/dev/null
+        menus_equal "reduced-motion entry targets its empty folder" 'reduced|dir' "$(ipc rowAt 0 | cut -d '|' -f 1,2)"
+        started=$(date +%s%3N)
+        key -k Return >/dev/null
+        deadline=$((SECONDS + 15))
+        observed='{}'
+        while (( SECONDS < deadline )); do
+            observed=$(ipc emptyHeroState) || fail "empty hero: first-visible observation failed"
+            if jq -e '.visible' <<< "$observed" >/dev/null; then break; fi
+            sleep 0.05
+        done
+        elapsed=$(( $(date +%s%3N) - started ))
+        jq -e '.visible and .settled and .reducedMotion and .captionOpacity == 1' <<< "$observed" >/dev/null \
+            || fail "empty hero: reduced motion was not full on its first visible observation: $observed"
+        menus_equal "reduced-motion navigation enters only its fixture" "$reduced_directory" "$(ipc path)"
+        printf 'EMPTY_HERO_FIRST_VISIBLE visit=%s elapsed_ms=%s state=%s\n' "$visit" "$elapsed" "$observed"
+        empty_hero_capture "empty-state-reduced-$visit"
+        [[ "$visit" == opening ]] || continue
+        before=$(ipc emptyHeroState)
+        rotate_ms=$(jq -er .rotateMs <<< "$before") || fail "empty hero: caption cadence unavailable"
+        menus_equal "released caption cadence remains 2800ms" 2800 "$rotate_ms"
+        # One complete production cadence must leave both the caption and the full mark unchanged.
+        sleep "$(LC_NUMERIC=C printf '%s.%03d' "$((rotate_ms / 1000))" "$((rotate_ms % 1000))")"
+        observed=$(ipc emptyHeroState)
+        menus_equal "reduced motion stays static across a caption cadence" "$before" "$observed"
+        empty_hero_capture empty-state-reduced-held
+        if ! python3 - "$evidence_dir/empty-state-reduced-opening.png" "$evidence_dir/empty-state-reduced-held.png" \
+            "$(ipc emptyStateRect)" <<'PY'
+from PIL import Image, ImageChops
+import sys
+
+first, held = (Image.open(path).convert("RGB") for path in sys.argv[1:3])
+x, y, width, height = map(int, sys.argv[3].split())
+if first.size != held.size or min(x, y) < 0 or min(width, height) <= 0 or x + width > first.width or y + height > first.height:
+    raise SystemExit("empty hero: invalid native comparison rectangle")
+box = (x, y, x + width, y + height)
+if ImageChops.difference(first.crop(box), held.crop(box)).getbbox() is not None:
+    raise SystemExit("empty hero: reduced-motion hero pixels changed across the caption cadence")
+print("EMPTY_HERO_STATIC_PIXELS changed=0")
+PY
+        then fail "empty hero: static native pixel comparison failed"; fi
+    done
+    kill_flea
+    printf 'EMPTY_STATE checks=%s views=3 populated=ok missing=ok recovery=ok reduced=first-visible-static-reopening\n' "$menus_checks"
 )

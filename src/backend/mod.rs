@@ -31,6 +31,7 @@ pub mod metasort;
 pub mod owner;
 pub mod peek;
 pub mod proto;
+mod providers;
 pub mod permissions;
 pub mod picker;
 pub mod menu_actions;

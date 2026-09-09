@@ -14,6 +14,7 @@ Item {
     property string hint: ""
     // The hero mark alone, for ui/Ipc.qml's painted-pixel count: the hint would light the wider rectangle.
     readonly property alias markItem: heroMark
+    readonly property alias captionItem: caption
     // Sentence case, matching the OEM's activePhrases; caption.text below uppercases at render, like PanelHero, not in the source.
     readonly property var messages: [
         "Nothing here yet",
@@ -74,7 +75,7 @@ Item {
             id: caption
             anchors.horizontalCenter: parent.horizontalCenter
             text: (root.caption.length > 0 ? root.caption : root.messages[root.messageIndex]).toUpperCase()
-            color: root.dim
+            color: root.caption.length > 0 ? root.dim : Theme.color.foreground
             font.family: Theme.font.family
             font.pixelSize: Theme.font.caption
             font.bold: true
@@ -108,5 +109,11 @@ Item {
         PropertyAnimation { target: caption; property: "opacity"; to: 0.0; duration: 180; easing.type: Easing.OutQuad }
         ScriptAction { script: root.messageIndex = (root.messageIndex + 1) % root.messages.length }
         PropertyAnimation { target: caption; property: "opacity"; to: 1.0; duration: 260; easing.type: Easing.InQuad }
+    }
+    Connections {
+        target: Theme
+        function onReducedMotionChanged() {
+            if (Theme.reducedMotion) { fade.stop(); caption.opacity = 1 }
+        }
     }
 }

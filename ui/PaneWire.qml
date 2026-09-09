@@ -78,10 +78,6 @@ Item {
 
     Flea.Taildrop {
         id: taildrop
-        // Fetched once per session start, not per right click: peers change on the scale of
-        // minutes, not the scale of opening a context menu, and refreshing on open would make
-        // the menu's own height (and the clamp openAt applies) depend on an async reply.
-        Component.onCompleted: refresh()
     }
 
     // The owed re-read, run when nothing is holding the rows. A refusal keeps the debt rather than

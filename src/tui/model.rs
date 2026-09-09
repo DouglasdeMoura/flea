@@ -17,6 +17,13 @@ pub struct Row {
     pub icon: String,
 }
 impl Row {
+    pub fn is_pdf(&self) -> bool {
+        !self.directory && self.link.is_empty()
+            && std::path::Path::new(&self.name).extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+    }
+
     pub fn parse(row: &Json, kinds: &[Json]) -> Self {
         Self {
             name: text(row, "n").into(),
@@ -1034,6 +1041,25 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pdf_preview_uses_filename_not_generic_icon_or_localized_kind() {
+        let mut row = Row::parse(&Json::Obj(vec![
+            ("n".into(), word("pages.PDF")),
+            ("i".into(), word("x-office-document")),
+        ]), &[word("Document")]);
+        assert!(row.is_pdf());
+        row.directory = true;
+        assert!(!row.is_pdf());
+        row.directory = false;
+        row.link = "original.pdf".into();
+        assert!(!row.is_pdf());
+        row.link.clear();
+        for name in [".pdf", "pages.pdf.txt", "report.doc", "no-extension"] {
+            row.name = name.into();
+            assert!(!row.is_pdf(), "{name}");
+        }
+    }
 
     #[test]
     fn survivor_restore_requires_current_reply_and_original_membership() {

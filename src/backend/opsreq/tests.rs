@@ -24,6 +24,42 @@ fn a_successful_item_line_carries_no_err_field_at_all() {
 }
 
 #[test]
+fn a_dropbox_destination_replaced_before_worker_start_never_receives_the_source() {
+    use crate::backend::menu_actions::Selected;
+    let sandbox = TestDir::new("dropbox-worker-identity");
+    let source = sandbox.file("source", "keep");
+    let source_identity = ItemIdentity::record(&source.symlink_metadata().unwrap());
+    let selected_source = Selected::inspect(source.to_str().unwrap()).unwrap();
+    let destination = sandbox.dir("Dropbox");
+    let captured = Selected::inspect(destination.to_str().unwrap()).unwrap();
+    sandbox.assert_contains(&destination);
+    std::fs::rename(&destination, sandbox.join("original-dropbox")).unwrap();
+    sandbox.dir("Dropbox");
+    let (tx, rx) = channel();
+    sandbox.assert_contains(&source);
+    sandbox.assert_contains(&destination);
+    run_transfer_checked(1, true, vec![source.to_string_lossy().into()], destination.clone(),
+        Arc::new(AtomicBool::new(false)), tx, Some(vec![selected_source.clone()]), Some(captured.clone()));
+    let results: Vec<_> = rx.iter().collect();
+    assert!(results.iter().any(|message| matches!(message, OpMsg::Item {ok: false, err, ..} if err.contains("Dropbox account folder changed"))));
+    assert!(results.iter().any(|message| matches!(message, OpMsg::TransferDone {ok: 0, failed: 1, entry, retry, ..}
+        if entry.steps.is_empty() && retry == &vec![(source.clone(), source_identity.clone())])));
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "keep");
+    assert!(!destination.join("source").exists());
+    sandbox.assert_contains(&source);
+    std::fs::rename(&source, sandbox.join("original-source")).unwrap();
+    sandbox.file("source", "replacement");
+    let (tx, rx) = channel();
+    sandbox.assert_contains(&source);
+    sandbox.assert_contains(&destination);
+    run_transfer_checked(2, true, vec![source.to_string_lossy().into()], destination.clone(),
+        Arc::new(AtomicBool::new(false)), tx, Some(vec![selected_source]), Some(captured));
+    assert!(rx.iter().any(|message| matches!(message, OpMsg::TransferDone {ok: 0, failed: 1, retry, ..} if retry.is_empty())));
+    assert_eq!(std::fs::read_to_string(source).unwrap(), "replacement");
+    assert!(!destination.join("source").exists());
+}
+
+#[test]
 fn menu_workers_refuse_replacement_sources_before_helpers_or_mutations() {
     use crate::backend::menu_actions::{validate_sources, Selected};
     let d = TestDir::new("menu-workers-identity");

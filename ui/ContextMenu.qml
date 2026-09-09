@@ -19,10 +19,11 @@ Item {
     // Driven from ui/Pane.qml's own state, so this file owns no hidden-file logic itself.
     property bool showHidden: false
     // The application name ui/Opener.qml resolved for the cursor row, shown muted beside "Open".
-    // [{id, label}], the reachable Taildrop targets; empty self-hides the whole row, see ui/Taildrop.qml.
+    // [{id, label}], the reachable Taildrop targets; installed providers keep their disabled reason.
     property var taildropPeers: []
     property bool taildropInstalled: false
     property string taildropReason: ""
+    property bool providersRefreshing: false
     // The archive formats this box actually probed, and whether a converter is installed at all.
     property var archiveFormats: []
     property bool canConvert: false
@@ -33,11 +34,11 @@ Item {
     property bool rowIsImage: false
     property int rowMode: 0
     property int selectionCount: 0
-    // Empty until the stock Dropbox service is installed and authenticated, which is what gates the row.
+    // The actual account directory is available only after a fresh provider status and identity check.
     property string dropboxPath: ""
     property bool dropboxInstalled: false
     property string dropboxReason: ""
-    // True when the cursor row already lives under ~/Dropbox, where a share link is the useful action.
+    // A row already inside the account directory offers a share link instead of another move.
     property bool rowInDropbox: false
     // False on a listing's empty space, where Menus.html's background column is what opens instead.
     // openBackground() is its only writer and openAt() puts it back, because one instance serves both.
@@ -116,6 +117,7 @@ Item {
             taildropPeers: root.taildropPeers,
             taildropInstalled: root.taildropInstalled,
             taildropReason: root.taildropReason,
+            providersRefreshing: root.providersRefreshing,
             archiveFormats: root.archiveFormats,
             rowIsArchive: root.rowIsArchive,
             rowIsImage: root.rowIsImage,
@@ -264,6 +266,18 @@ Item {
         root.openSubmenuRow = index
         root.submenuCursor = 0
         subScroll.contentY = 0
+    }
+
+    // Fresh capabilities use the normal inventory; selection stays on its action and placement uses the existing clamp.
+    function refreshProviderRows() {
+        if (!root.opened || root.forRail || root.forHeader) return
+        var next = root.buildEntries()
+        var selection = Menu.refreshedCursor(root.entries, next, root.cursor, root.openSubmenuRow, root.submenuCursor)
+        root.entries = next
+        root.cursor = selection.cursor
+        root.openSubmenuRow = selection.submenuRow
+        root.submenuCursor = selection.submenuCursor
+        Qt.callLater(function() { if (root.opened) scroll.reveal(menuRows.itemAt(root.cursor)) })
     }
 
     // Rebuild only to validate; rows stay fixed while the menu is open under the pointer.

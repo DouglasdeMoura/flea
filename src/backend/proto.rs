@@ -41,7 +41,7 @@ pub enum Request {
     Archive { op: String, paths: Vec<String>, path: String, dest: String, format: String, menu_id: usize },
     Convert { path: String, dest: String, strip: bool, menu_id: usize, request_id: usize, check: bool },
     // Which archive formats this box actually offers, and whether a converter is installed at all.
-    Formats,
+    Formats { id: usize },
     Permissions { line: String },
     Picker { line: String },
     MenuAction { line: String, rows: Vec<usize> },
@@ -139,7 +139,7 @@ pub fn parse_request(line: &str) -> Request {
             dest: field_str(line, "dest").unwrap_or_default(),
             strip: field_bool(line, "strip"),
         },
-        Some("formats") => Request::Formats,
+        Some("formats") => Request::Formats { id: field_usize(line, "id").unwrap_or(0) },
         Some("peek") => Request::Peek {
             path: field_str(line, "path").unwrap_or_default(),
             first: field_usize(line, "first").unwrap_or(0),

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct MenuActions {
-    requests: SyncSender<(String, Vec<String>, Cancellation)>,
+    requests: SyncSender<(String, Vec<String>, Option<String>, Cancellation)>,
     replies: Sender<OpMsg>,
     snapshot: Arc<Mutex<Snapshot>>,
     cancellation: Mutex<Cancellation>,
@@ -23,7 +23,7 @@ pub struct MenuActions {
 impl MenuActions {
     pub fn new(replies: Sender<OpMsg>) -> Self {
         // One pending request bounds repeated activation while an application registry query runs.
-        let (requests, receiver) = sync_channel::<(String, Vec<String>, Cancellation)>(1);
+        let (requests, receiver) = sync_channel::<(String, Vec<String>, Option<String>, Cancellation)>(1);
         let output = replies.clone();
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
         let published = Arc::clone(&snapshot);
@@ -32,10 +32,10 @@ impl MenuActions {
         let restoration = Arc::new(Mutex::new((0, Vec::new())));
         let completed = Arc::clone(&restoration);
         std::thread::spawn(move || {
-            while let Ok((line, paths, cancel)) = receiver.recv() {
+            while let Ok((line, paths, cursor, cancel)) = receiver.recv() {
                 let mut state = published.lock().unwrap().clone();
                 let mut reply = if cancel.check().is_ok() {
-                    state.handle_request(&line, paths, &queries, &cancel)
+                    state.handle_request(&line, paths, cursor.as_deref(), &queries, &cancel)
                 } else { response(&line, Err("Menu request cancelled.".into())) };
                 if cancel.check().is_err() && field_str(&line, "op").as_deref() != Some("delete") {
                     reply.insert_str(reply.len() - 1, r#", "cancelled":true"#);
@@ -44,7 +44,7 @@ impl MenuActions {
                     // Close expires mutation immediately; the completed operation still identifies survivors for reselection.
                     *completed.lock().unwrap() = (state.id, state.items.clone());
                 }
-                if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close" | "prepareDelete" | "refreshDelete" | "delete")) {
+                if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close" | "prepareDelete" | "refreshDelete" | "delete" | "providerDestination" | "activate")) {
                     publish_snapshot(published.lock().unwrap(), state, &cancel);
                 }
                 let message = if field_str(&line, "op").as_deref() == Some("delete") {
@@ -69,13 +69,22 @@ impl MenuActions {
         }
         Ok(snapshot.items.clone())
     }
+    pub(crate) fn provider_destination(&self, id: usize, dest: &Path) -> Result<Option<Selected>, String> {
+        let snapshot = self.snapshot.lock().map_err(|_| "The menu service stopped; reopen this window.")?;
+        if snapshot.id != id { return Err("Menu selection expired; reopen the menu.".into()); }
+        if snapshot.provider_transfer {
+            snapshot.check_provider_destination(dest)?;
+            return Ok(snapshot.provider_destination.clone());
+        }
+        Ok(None)
+    }
     pub(crate) fn selected_path(&self, id: usize, path: &Path) -> Result<Selected, String> {
         let snapshot = self.snapshot.lock().map_err(|_| "The menu service stopped; reopen this window.")?;
         if id == 0 || snapshot.id != id { return Err("Menu selection expired; reopen the menu.".into()); }
         snapshot.items.iter().find(|item| item.path == path).cloned()
             .ok_or_else(|| "This path was not in the menu selection; reopen the menu.".into())
     }
-    pub fn request(&self, line: String, paths: Vec<String>) -> bool {
+    pub fn request(&self, line: String, paths: Vec<String>, cursor: Option<String>) -> bool {
         let op = field_str(&line, "op").unwrap_or_default();
         let mut cancellation = self.cancellation.lock().unwrap();
         if op == "snapshot" || op == "close" {
@@ -96,7 +105,7 @@ impl MenuActions {
                 return false;
             }
         }
-        if let Err(error) = self.requests.try_send((line, paths, cancellation.clone())) {
+        if let Err(error) = self.requests.try_send((line, paths, cursor, cancellation.clone())) {
             let (request, reason) = match error {
                 TrySendError::Full(request) => (request, "A menu request is still running; try again when it finishes."),
                 TrySendError::Disconnected(request) => (request, "The menu service stopped; reopen this window."),
@@ -120,7 +129,10 @@ impl Drop for MenuActions {
 struct Snapshot {
     id: usize,
     items: Vec<Selected>,
+    cursor: Option<Selected>,
     deletion: Option<Arc<super::menudelete::Review>>,
+    provider_destination: Option<Selected>,
+    provider_transfer: bool,
 }
 
 // The lock must already be held when cancellation is checked, or close can be followed by a stale publication.
@@ -162,20 +174,24 @@ pub(crate) fn validate_sources(items: Option<&[Selected]>, paths: &[PathBuf]) ->
 }
 impl Snapshot {
     // Sample input: {"c":"menuaction","op":"snapshot","id":3}; paths are resolved from the active listing by run.rs.
-    fn handle_request(&mut self, line: &str, paths: Vec<String>, registry: &Registry, cancel: &Cancellation) -> String {
+    fn handle_request(&mut self, line: &str, paths: Vec<String>, cursor: Option<&str>, registry: &Registry, cancel: &Cancellation) -> String {
         let id = field_usize(line, "id").unwrap_or(0);
         let op = field_str(line, "op").unwrap_or_default();
         let result = if op == "snapshot" {
             self.id = 0;
             self.items.clear();
+            self.cursor = None;
             self.deletion = None;
+            self.provider_destination = None;
+            self.provider_transfer = false;
             if id == 0 || paths.is_empty() {
                 Err("There are no selected items to inspect.".into())
             } else {
-                paths.iter().map(|path| Selected::inspect(path)).collect::<Result<Vec<_>, _>>().map(|items| {
+                paths.iter().map(|path| Selected::inspect(path)).collect::<Result<Vec<_>, _>>().and_then(|items| {
+                    self.cursor = cursor.map(Selected::inspect).transpose()?;
                     self.items = items;
                     self.id = id;
-                    format!(r#""count":{}"#, self.items.len())
+                    Ok(format!(r#""count":{}"#, self.items.len()))
                 })
             }
         } else if op == "close" {
@@ -219,6 +235,13 @@ impl Snapshot {
         }
         if op == "prepareDelete" { self.deletion = None; }
         for item in &self.items { item.current()?; }
+        if op == "providerDestination" {
+            let dest = field_str(line, "dest").unwrap_or_default();
+            let selected = Selected::inspect(&dest)?;
+            if !selected.current()?.is_dir() { return Err("Dropbox account folder is not a directory.".into()); }
+            self.provider_destination = Some(selected);
+            return Ok(String::new());
+        }
         if op == "prepareDelete" || op == "refreshDelete" {
             let review = super::menudelete::Review::prepare(&self.items, &std::env::temp_dir(), cancel)?;
             let reply = format!(r#""token":{},"count":{},"bytes":{}"#, review.token, review.count, review.bytes);
@@ -227,6 +250,15 @@ impl Snapshot {
         }
         if op == "validate" || op == "activate" {
             let action = field_str(line, "action").unwrap_or_default();
+            if action == "dropbox" || action == "sharelink" {
+                self.check_provider_destination(Path::new(&field_str(line, "dest").unwrap_or_default()))?;
+            }
+            if op == "activate" { self.provider_transfer = action == "dropbox"; }
+            if action.starts_with("taildrop:") || action == "sharelink" {
+                let cursor = self.cursor.as_ref().ok_or("Cursor source was not captured; reopen the menu.")?;
+                cursor.current()?;
+                return Ok(format!(r#""action":"{}","paths":["{}"]"#, escape(&action), escape(&cursor.path.to_string_lossy())));
+            }
             let needs_paths = op == "validate" || matches!(action.as_str(), "copy" | "cut" | "copypath" | "addFavourite") || action.starts_with("compress:");
             let paths: Vec<String> = if needs_paths { self.items.iter().map(|i| format!(r#""{}""#, escape(&i.path.to_string_lossy()))).collect() } else { Vec::new() };
             return Ok(format!(r#""action":"{}","paths":[{}],"dest":"{}""#,
@@ -267,9 +299,15 @@ impl Snapshot {
         self.deletion.take().filter(|review| token > 0 && review.token == token)
             .ok_or_else(|| "Deletion confirmation expired; review a fresh confirmation.".into())
     }
+    fn check_provider_destination(&self, dest: &Path) -> Result<(), String> {
+        let selected = self.provider_destination.as_ref().filter(|selected| selected.path == dest)
+            .ok_or("Dropbox account folder changed; reopen the menu.")?;
+        selected.current().map_err(|_| "Dropbox account folder changed or disappeared; reopen the menu.")?;
+        Ok(())
+    }
     #[cfg(test)]
     fn handle(&mut self, line: &str, paths: Vec<String>) -> String {
-        self.handle_request(line, paths, &Registry::default(), &Cancellation::default())
+        self.handle_request(line, paths, None, &Registry::default(), &Cancellation::default())
     }
 }
 
@@ -326,7 +364,7 @@ mod tests {
         let old = prepare();
         let current = prepare();
         assert_ne!(old.token, current.token);
-        let mut snapshot = Snapshot { id: 4, items: vec![item.clone()], deletion: Some(current.clone()) };
+        let mut snapshot = Snapshot { id: 4, items: vec![item.clone()], deletion: Some(current.clone()), ..Snapshot::default() };
         assert!(snapshot.take_deletion(old.token).is_err());
         assert!(snapshot.deletion.is_none(), "a refused confirmation cannot be retried as a different token");
         snapshot.deletion = Some(current.clone());
@@ -376,7 +414,7 @@ mod tests {
         assert!(path.is_absolute() && path.starts_with(d.path()) && d.path().join(".flea-test-sandbox").is_file());
         std::fs::rename(&path, d.join("moved")).unwrap();
         d.file("item", "replacement");
-        menu.request(r#"{"op":"close","id":8}"#.into(), vec![]);
+        menu.request(r#"{"op":"close","id":8}"#.into(), vec![], None);
         let mut matches = vec![(path.to_str().unwrap(), 0), (kept.to_str().unwrap(), 1)];
         menu.retain_survivors(8, &mut matches).unwrap();
         assert_eq!(matches, vec![(kept.to_str().unwrap(), 1)]);
@@ -414,6 +452,60 @@ mod tests {
         symlink(sandbox.join("absent"), sandbox.join("link")).unwrap();
         assert!(create_file(sandbox.path(), "link").is_err());
         assert!(!sandbox.join("absent").exists());
+    }
+    #[test]
+    fn cursor_provider_actions_validate_the_cursor_outside_the_marked_selection() {
+        let sandbox = TestDir::new("menu-provider-cursor");
+        let destination = sandbox.dir("Dropbox");
+        let marked = sandbox.file("Dropbox/marked", "marked");
+        let cursor = sandbox.file("Dropbox/cursor", "original");
+        let mut snapshot = Snapshot::default();
+        let reply = snapshot.handle_request(r#"{"op":"snapshot","id":11}"#, vec![marked.to_string_lossy().into()],
+            cursor.to_str(), &Registry::default(), &Cancellation::default());
+        assert!(crate::json::field_bool(&reply, "ok"));
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].path, marked);
+        let capture = format!(r#"{{"op":"providerDestination","id":11,"dest":"{}"}}"#, escape(destination.to_str().unwrap()));
+        assert!(crate::json::field_bool(&snapshot.handle(&capture, vec![]), "ok"));
+        for action in ["taildrop:peer", "sharelink"] {
+            let activate = format!(r#"{{"op":"activate","id":11,"action":"{}","dest":"{}"}}"#, action, escape(destination.to_str().unwrap()));
+            let reply = snapshot.handle(&activate, vec![]);
+            assert!(crate::json::field_bool(&reply, "ok"), "{}", reply);
+            assert_eq!(crate::json::field_str_array(&reply, "paths"), vec![cursor.to_string_lossy().into_owned()]);
+        }
+        sandbox.assert_contains(&cursor);
+        std::fs::rename(&cursor, sandbox.join("original-cursor")).unwrap();
+        sandbox.file("Dropbox/cursor", "replacement");
+        for action in ["taildrop:peer", "sharelink"] {
+            let activate = format!(r#"{{"op":"activate","id":11,"action":"{}","dest":"{}"}}"#, action, escape(destination.to_str().unwrap()));
+            let reply = snapshot.handle(&activate, vec![]);
+            assert!(!crate::json::field_bool(&reply, "ok"));
+            assert!(reply.contains("Selected item changed"));
+            assert!(crate::json::field_str_array(&reply, "paths").is_empty());
+        }
+        snapshot.handle(r#"{"op":"snapshot","id":12}"#, vec![marked.to_string_lossy().into()]);
+        assert!(snapshot.handle(r#"{"op":"activate","id":12,"action":"taildrop:peer"}"#, vec![]).contains("Cursor source was not captured"));
+        assert_eq!(std::fs::read_to_string(marked).unwrap(), "marked");
+        assert_eq!(std::fs::read_to_string(cursor).unwrap(), "replacement");
+    }
+    #[test]
+    fn provider_activation_refuses_a_replaced_account_directory() {
+        let sandbox = TestDir::new("menu-provider-destination");
+        let source = sandbox.file("source", "keep");
+        let destination = sandbox.dir("Dropbox");
+        let mut snapshot = Snapshot::default();
+        snapshot.handle(r#"{"op":"snapshot","id":10}"#, vec![source.to_string_lossy().into()]);
+        let capture = format!(r#"{{"op":"providerDestination","id":10,"dest":"{}"}}"#, escape(destination.to_str().unwrap()));
+        assert!(crate::json::field_bool(&snapshot.handle(&capture, vec![]), "ok"));
+        let activate = format!(r#"{{"op":"activate","id":10,"action":"dropbox","dest":"{}"}}"#, escape(destination.to_str().unwrap()));
+        assert!(crate::json::field_bool(&snapshot.handle(&activate, vec![]), "ok"));
+        assert!(snapshot.provider_transfer);
+        sandbox.assert_contains(&destination);
+        std::fs::rename(&destination, sandbox.join("original-dropbox")).unwrap();
+        sandbox.dir("Dropbox");
+        assert!(snapshot.handle(&activate, vec![]).contains("Dropbox account folder changed"));
+        assert_eq!(std::fs::read_to_string(source).unwrap(), "keep");
+        assert!(!destination.join("source").exists());
     }
     #[test]
     fn properties_describe_the_link_itself_and_close_expires_selection() {

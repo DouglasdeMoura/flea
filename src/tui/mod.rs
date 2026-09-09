@@ -127,8 +127,9 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             let preview_allowed =
                 model.preview_loaded && current.as_ref() == Some(&model.preview_path);
             const PREVIEW_RESERVED_ROWS: usize = 5;
+            let is_pdf = model.rows.get(&model.cursor).is_some_and(model::Row::is_pdf);
             let reserved = PREVIEW_RESERVED_ROWS + model.preview_metadata.len().min(3)
-                + usize::from(model.rows.get(&model.cursor).is_some_and(|row| row.icon.contains("pdf")));
+                + usize::from(is_pdf);
             let (preview_start, preview_width) = render::preview_area(size.0, model.quicklook);
             let geometry = (preview_width, model.height.saturating_sub(reserved), preview_start + 1, render::BODY_ROW + 2);
             let cell_pixels = terminal::cell_pixels();
@@ -143,7 +144,6 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 .map(|r| r.icon.to_lowercase())
                 .unwrap_or_default();
             let is_media = kind.contains("audio") || kind.contains("video");
-            let is_pdf = kind.contains("pdf");
             if !visible
                 || !preview_allowed
                 || !is_media

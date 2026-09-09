@@ -52,6 +52,26 @@ function listingEntries(p) { return buildEntries(p.hasRow ? "F" : "B", p) }
 function backgroundEntries(p) { return buildEntries("B", p) }
 function trashEntries(total, busy) { return buildEntries("T", { trashTotal: total, busy: busy }) }
 
+// Preserve action and peer identity when refreshed capabilities change the inventory beneath the keyboard cursor.
+function refreshedCursor(previous, next, cursor, submenuRow, submenuCursor) {
+    var action = previous[cursor] ? previous[cursor].action : ""
+    var selected = action ? next.findIndex(function(entry) { return entry.action === action }) : -1
+    if (selected < 0) {
+        selected = Math.min(Math.max(0, cursor), next.length - 1)
+        while (selected < next.length && selected >= 0 && (next[selected].separator || next[selected].disabled)) selected++
+        if (selected === next.length) {
+            selected--
+            while (selected >= 0 && (next[selected].separator || next[selected].disabled)) selected--
+        }
+    }
+    var oldSubmenu = previous[submenuRow]
+    var subRow = oldSubmenu ? next.findIndex(function(entry) { return entry.action === oldSubmenu.action }) : -1
+    var sub = subRow >= 0 ? next[subRow] : null
+    var oldTarget = oldSubmenu && oldSubmenu.submenu ? oldSubmenu.submenu[submenuCursor] : null
+    var target = sub && !sub.disabled && oldTarget ? (sub.submenu || []).findIndex(function(entry) { return entry.id === oldTarget.id && !entry.disabled }) : -1
+    return { cursor: selected, submenuRow: target >= 0 ? subRow : -1, submenuCursor: Math.max(0, target) }
+}
+
 function buildEntries(kind, p) {
     var out = [], group = ""
     for (var i = 0; i < INVENTORY.length; i++) {
@@ -89,14 +109,14 @@ function availableEntry(e, p, kind) {
         e.mark = "tailscale"
         delete e.glyph
         e.submenu = p.taildropPeers || []
-        e.disabled = !e.submenu.length
-        if (e.disabled) e.hint = p.taildropReason || "No peers reachable"
+        e.disabled = p.providersRefreshing === true || !e.submenu.length
+        if (e.disabled) e.hint = p.providersRefreshing ? "Checking Tailscale" : p.taildropReason || "No peers reachable"
     }
     if (e.action === "dropbox" || e.action === "sharelink") {
         if (!p.dropboxInstalled || (e.action === "dropbox" ? p.rowInDropbox : !p.rowInDropbox)) return false
-        e.disabled = !p.dropboxPath
+        e.disabled = p.providersRefreshing === true || !p.dropboxPath
         if (e.action === "dropbox") { e.mark = "dropbox"; delete e.glyph }
-        if (e.disabled) e.hint = p.dropboxReason || "Dropbox unavailable"
+        if (e.disabled) e.hint = p.providersRefreshing ? "Checking Dropbox" : p.dropboxReason || "Dropbox unavailable"
     }
     if (e.action === "sort") e.submenu = sortEntries()
     if (e.action === "toggleHidden") {

@@ -127,7 +127,7 @@ Item {
 
         Text {
             id: dropLabel
-            anchors.fill: parent
+            anchors.centerIn: parent
             visible: root.dropTarget
             text: DragOps.label(root.dropCopying)
             color: Theme.color.accent

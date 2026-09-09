@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "js/Errors.js" as Errors
 import "js/Mounts.js" as Mounts
+import "js/Dropbox.js" as Dropbox
 
 // OEM-shaped Network service: nothing but this file and its two children touches gio or the saved
 // places file, and Sidebar only renders its entries. The five second listing is ui/MountListing.qml's
@@ -62,8 +63,55 @@ Item {
 
     onBookmarksTextChanged: root.rebuild()
 
-    // The Dropbox row and Move action share this existence watch for the stock service directory.
-    readonly property bool dropboxReady: dropboxFile.loaded
+    property string dropboxPath: ""
+    property string dropboxReason: "Checking Dropbox"
+    property bool dropboxChecking: false
+    property bool _dropboxAwaitingStart: false
+    property string _dropboxOutput: ""
+    property string _dropboxError: ""
+    // OEM dropbox/status.py uses a four-second daemon status deadline.
+    readonly property int dropboxStatusTimeoutSeconds: 4
+    signal dropboxRefreshed()
+    readonly property bool dropboxReady: dropboxPath.length > 0 && dropboxReason.length === 0 && !dropboxChecking
+
+    function refreshDropbox(facts) {
+        if (dropboxChecking) return false
+        var provider = facts.dropbox || {}
+        var account = Dropbox.account(facts.dropboxInfo, facts.dropboxError)
+        dropboxPath = account.path
+        dropboxReason = provider.reason || account.reason || "Checking Dropbox"
+        if (!provider.command || account.reason) return true
+        dropboxChecking = true
+        _dropboxAwaitingStart = true
+        _dropboxOutput = ""
+        _dropboxError = ""
+        dropboxStatus.command = ["timeout", "--signal=KILL", String(dropboxStatusTimeoutSeconds), provider.command, "status"]
+        dropboxStatus.running = true
+        return true
+    }
+
+    Process {
+        id: dropboxStatus
+        environment: root.gioEnvironment
+        stdout: StdioCollector { id: dropboxOut; waitForEnd: true; onStreamFinished: root._dropboxOutput = text }
+        stderr: StdioCollector { id: dropboxErr; waitForEnd: true; onStreamFinished: root._dropboxError = text }
+        onStarted: root._dropboxAwaitingStart = false
+        onRunningChanged: {
+            if (root._dropboxAwaitingStart && !running) {
+                root._dropboxAwaitingStart = false
+                root.dropboxChecking = false
+                root.dropboxReason = "Dropbox status helper could not start"
+                root.dropboxRefreshed()
+            }
+        }
+        onExited: function(exitCode) {
+            root._dropboxAwaitingStart = false
+            root.dropboxReason = exitCode === 137 || exitCode === 9 ? "Dropbox status was interrupted or timed out"
+                : Dropbox.status(dropboxOut.text || root._dropboxOutput, exitCode, dropboxErr.text || root._dropboxError)
+            root.dropboxChecking = false
+            root.dropboxRefreshed()
+        }
+    }
 
     FileView {
         id: dropboxFile

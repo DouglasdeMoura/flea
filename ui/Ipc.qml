@@ -148,6 +148,22 @@ QtObject {
                 workArea: menu.workArea, forHeader: menu.forHeader, forRail: menu.forRail, hasRow: menu.hasRow})
         }
         function contextMenuModel(): string { return JSON.stringify(root.pane.contextMenu().entries) }
+        function providerState(): string {
+            var pane = root.pane, actions = pane.menuActions, taildrop = pane.taildropService, dropbox = pane.dropboxService
+            return JSON.stringify({facts: pane.backend.providers, refreshing: actions.providersRefreshing,
+                pendingActivation: actions.pendingActivation, menuFocus: pane.contextMenu().keyboardFocused,
+                listFocus: pane.listArea.activeFocus, path: pane.path, cursor: pane.cursorIndex,
+                cursorPath: pane.cursorRow ? pane.join(pane.path, pane.cursorRow.n) : "",
+                selected: pane.selectedIndices(), selectedPaths: pane.selectedIndices().map(function(index) {
+                    var row = pane.rowFor(index)
+                    return row ? pane.join(pane.path, row.n) : null
+                }),
+                taildrop: {checking: taildrop.checking, reason: taildrop.reason, peers: taildrop.peers,
+                    timeoutSeconds: taildrop.statusTimeoutSeconds},
+                dropbox: dropbox ? {checking: dropbox.dropboxChecking, ready: dropbox.dropboxReady,
+                    reason: dropbox.dropboxReason, path: dropbox.dropboxPath,
+                    timeoutSeconds: dropbox.dropboxStatusTimeoutSeconds} : null})
+        }
         function contextMenuSubmenuRowCentre(index: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().submenuItemFor(index)) }
         function menuDialogState(): string {
             var dialog = root.pane.menuActions.item
@@ -468,6 +484,15 @@ QtObject {
         // "x y width height" of the empty mark in window pixels, for a painted-pixel count: the state
         // flag above cannot see a mark drawn under its own parent's paint.
         function emptyMarkRect(): string { return root.emptyState ? root.fleaWindow.rectOf(root.emptyState.markItem) : "" }
+        function emptyHeroState(): string {
+            var empty = root.emptyState
+            if (!empty) return "{}"
+            return JSON.stringify({visible: empty.visible, settled: empty.markItem.settled && empty.opacity === 1,
+                caption: empty.captionItem.text, captionOpacity: empty.captionItem.opacity,
+                captionColor: String(empty.captionItem.color), markColor: String(empty.markItem.color),
+                foreground: String(Theme.color.foreground), muted: String(Theme.color.muted),
+                reducedMotion: Theme.reducedMotion, rotateMs: empty.rotateMs})
+        }
         // The whole hero box, so a test can hold it to the listing slot exactly rather than merely inside it.
         function emptyStateRect(): string { return root.emptyState ? root.fleaWindow.rectOf(root.emptyState) : "" }
         function rowAt(i: int): string {

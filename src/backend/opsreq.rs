@@ -127,12 +127,13 @@ pub fn run_transfer(
     cancel: Arc<AtomicBool>,
     tx: Sender<OpMsg>,
 ) {
-    run_transfer_checked(id, moving, paths, dest, cancel, tx, None)
+    run_transfer_checked(id, moving, paths, dest, cancel, tx, None, None)
 }
 
 pub(crate) fn run_transfer_checked(
     id: usize, moving: bool, paths: Vec<String>, dest: PathBuf,
     cancel: Arc<AtomicBool>, tx: Sender<OpMsg>, selection: Option<Vec<super::menu_actions::Selected>>,
+    destination: Option<super::menu_actions::Selected>,
 ) {
     let mut steps: Vec<Step> = Vec::new();
     let mut retry = Vec::new();
@@ -166,6 +167,15 @@ pub(crate) fn run_transfer_checked(
             }
         };
         let source = ItemIdentity::record(&metadata);
+        if let Some(destination) = &destination {
+            if destination.path != dest || destination.current().is_err() {
+                failed += 1;
+                retry.push((src, source));
+                let _ = tx.send(OpMsg::Item { id, index, name, ok: false,
+                    err: "Dropbox account folder changed or disappeared; this item was not moved.".into() });
+                continue;
+            }
+        }
         // A symlink is copied or moved as the link itself (copy_any, move_any), so it holds nothing and its target's tree is not its own; only a real directory can contain the destination.
         let src_is_link = metadata.file_type().is_symlink();
         let src_real = if src_is_link { src.clone() } else { src.canonicalize().unwrap_or_else(|_| src.clone()) };

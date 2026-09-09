@@ -215,15 +215,22 @@ function undo(pane) {
 
 // Sending the cursor row alone rather than the whole selection is Task 9's own scope; row.d is
 // defensive, because the menu already empties its peer list for a directory cursor.
-function sendTaildrop(pane, taildrop, peerId) {
+function sendTaildrop(pane, taildrop, peerId, path) {
+    if (typeof path !== "string" || path.charAt(0) !== "/") {
+        pane.message("Cursor source was not validated; reopen the menu.", true)
+        return
+    }
     var row = pane.rowFor(pane.cursorIndex)
     if (!row || row.d) {
         return
     }
-    taildrop.send(peerId, [pane.join(pane.path, row.n)])
+    if (taildrop.send(peerId, [path]) === false) {
+        pane.message(taildrop.reason || "That Taildrop peer is no longer available.", true)
+        return
+    }
     // The dispatch is the only result Flea itself ever knows; success or failure is the OEM script's
     // own desktop notification, see the operations design section 4.1.
-    pane.message("Sending " + row.n + " to " + taildrop.labelFor(peerId) + ".", false)
+    pane.message("Sending " + leaf(path) + " to " + taildrop.labelFor(peerId) + ".", false)
 }
 
 // ---- archives and convert, whose menu rows are only offered when a tool for them exists ----

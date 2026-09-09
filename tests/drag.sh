@@ -60,7 +60,14 @@ def owned_processes(pid=None):
             # /proc/stat follows "pid (comm) state ..."; a zombie cannot receive input or write fixtures.
             if (process / "stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
                 continue
-            if marker not in (process / "environ").read_bytes().split(b"\0"):
+            try:
+                environment = (process / "environ").read_bytes()
+            except PermissionError as error:
+                # Exit can revoke environ access after the live-state check; only a confirmed zombie is safe to skip.
+                if (process / "stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                    continue
+                raise RuntimeError(f"drag cleanup: live session process {number} has unreadable environ; fixtures kept") from error
+            if marker not in environment.split(b"\0"):
                 raise RuntimeError(f"drag cleanup: session process {number} lacks this run's marker")
             owned.append(number)
         except (FileNotFoundError, ProcessLookupError):
@@ -277,23 +284,42 @@ native_tab() {
   expect_ipc listInFlight false
 }
 
+floor_refused() {
+  local reader value status
+  printf 'DRAG_FLOOR_REFUSED stage=%q window_snapshot=%q area=%q last_row=%q total=%q\n' \
+    "$1" "$WX $WY $WW $WH" "$2" "$3" "$4"
+  for reader in path viewMode listInFlight viewContentY dualState; do
+    status=0
+    value=$(ipc "$reader") || status=$?
+    printf 'DRAG_FLOOR_STATE reader=%s status=%s value=%q\n' "$reader" "$status" "$value"
+  done
+  return 1
+} >&2
+
 # The active listing's empty tail, including Columns' narrower floor, measured before any release.
 floor_centre() {
-  local x y width height rx ry rw rh total bottom
-  read -r x y width height <<< "$(ipc listAreaRect)"
-  [[ "$x $y $width $height" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || return 1
-  (( width > 0 && height > 0 && x + width <= WW && y + height <= WH )) || return 1
+  local x y width height rx ry rw rh bottom area="" last="" total=""
+  area=$(ipc listAreaRect) || { floor_refused "listing observer failed" "$area" "$last" "$total"; return 1; }
+  read -r x y width height <<< "$area"
+  [[ "$x $y $width $height" =~ ^[0-9]+(\ [0-9]+){3}$ ]] \
+    || { floor_refused "invalid listing rectangle" "$area" "$last" "$total"; return 1; }
+  (( width > 0 && height > 0 && x + width <= WW && y + height <= WH )) \
+    || { floor_refused "listing outside window" "$area" "$last" "$total"; return 1; }
   bottom=$y
-  total=$(ipc total)
-  [[ "$total" =~ ^[0-9]+$ ]] || return 1
+  total=$(ipc total) || { floor_refused "total observer failed" "$area" "$last" "$total"; return 1; }
+  [[ "$total" =~ ^[0-9]+$ ]] || { floor_refused "invalid total" "$area" "$last" "$total"; return 1; }
   if (( total > 0 )); then
-    read -r rx ry rw rh <<< "$(ipc rowRect "$((total - 1))")"
-    [[ "$rx $ry $rw $rh" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || return 1
-    (( rw > 0 && rh > 0 && rx >= x && ry >= y && rx + rw <= x + width )) || return 1
+    last=$(ipc rowRect "$((total - 1))") || { floor_refused "row observer failed" "$area" "$last" "$total"; return 1; }
+    read -r rx ry rw rh <<< "$last"
+    [[ "$rx $ry $rw $rh" =~ ^[0-9]+(\ [0-9]+){3}$ ]] \
+      || { floor_refused "invalid row rectangle" "$area" "$last" "$total"; return 1; }
+    (( rw > 0 && rh > 0 && rx >= x && ry >= y && rx + rw <= x + width )) \
+      || { floor_refused "row outside listing" "$area" "$last" "$total"; return 1; }
     bottom=$((ry + rh))
     x=$rx; width=$rw
   fi
-  (( y + height - bottom > 2 * pointer_tolerance )) || return 1
+  (( y + height - bottom > 2 * pointer_tolerance )) \
+    || { floor_refused "insufficient empty floor" "$area" "$last" "$total"; return 1; }
   printf '%s %s\n' "$((WX + x + width / 2))" "$((WY + (bottom + y + height) / 2))"
 }
 
@@ -306,7 +332,7 @@ owned_path() {
   die "file operation path escaped this run: $target"
 }
 
-echo "== fixture $SB, instance $MYID, window at $WX,$WY, $(ipc total) rows =="
+echo "== fixture $SB, instance $MYID, window at $WX,$WY size $WW,$WH, $(ipc total) rows =="
 
 # wait_for <path> <present|absent>
 wait_for() {

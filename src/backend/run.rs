@@ -164,7 +164,9 @@ fn handle_line(
         }
         Request::MenuAction { line, rows } => {
             let paths = resolve_rows(Vec::new(), &rows, &st.base, &st.listing);
-            super::opsdispatch::request_menu_action(out, ops, line, paths);
+            let cursor = crate::json::field_usize(&line, "cursor").map(|index|
+                resolve_rows(Vec::new(), &[index], &st.base, &st.listing).into_iter().next().unwrap_or_default());
+            super::opsdispatch::request_menu_action(out, ops, line, paths, cursor);
         }
         Request::TrashBrowse { line } => {
             let replies = ops.tx.clone();
@@ -312,7 +314,11 @@ fn handle_line(
             paths, format, PathBuf::from(&path), PathBuf::from(&dest), menu_id),
         Request::Convert { path, dest, strip, menu_id, request_id, check } =>
             start_convert(out, ops, PathBuf::from(&path), PathBuf::from(&dest), strip, menu_id, request_id, check),
-        Request::Formats => say(out, &formats_line(&tb.formats, convert::available())),
+        Request::Formats { id } => {
+            let mut line = formats_line(&tb.formats, convert::available());
+            line.insert_str(line.len() - 1, &format!(r#", "id":{},"providers":{}"#, id, super::providers::facts()));
+            say(out, &line);
+        }
         Request::FsInfo => say(out, &fsinfo_line(&read_fsinfo(&st.base))),
         // One row, only when a client asked: the same no-sweep rule thumb and dirsize already follow.
         Request::Meta { row, text, media, archive, token } => {

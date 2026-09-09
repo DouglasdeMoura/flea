@@ -75,10 +75,10 @@ pub(crate) fn resolve_rows(paths: Vec<String>, rows: &[usize], base: &Path, list
 }
 
 pub(crate) fn start_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, paths: Vec<String>, dest: &str) {
-    start_transfer_checked(out, ops, op, paths, dest, None)
+    start_transfer_checked(out, ops, op, paths, dest, None, None)
 }
 
-pub(crate) fn request_menu_action(out: &mut impl Write, ops: &mut Ops, line: String, paths: Vec<String>) {
+pub(crate) fn request_menu_action(out: &mut impl Write, ops: &mut Ops, line: String, paths: Vec<String>, cursor: Option<String>) {
     let deleting = crate::json::field_str(&line, "op").as_deref() == Some("delete");
     if deleting && ops.running.is_some() {
         writeln!(out, "{}", super::menu_actions::response(&line, Err("An operation is already running.".into()))).ok();
@@ -86,17 +86,17 @@ pub(crate) fn request_menu_action(out: &mut impl Write, ops: &mut Ops, line: Str
         return;
     }
     let replies = ops.tx.clone();
-    let accepted = ops.menuactions.get_or_insert_with(|| super::menu_actions::MenuActions::new(replies)).request(line, paths);
+    let accepted = ops.menuactions.get_or_insert_with(|| super::menu_actions::MenuActions::new(replies)).request(line, paths, cursor);
     if deleting && accepted { ops.claim(); }
 }
 
 pub(crate) fn start_menu_transfer(out: &mut impl Write, ops: &mut Ops, op: &str, id: usize, dest: &str) {
     let result = ops.menuactions.as_ref().ok_or_else(|| "Menu selection expired; reopen the menu.".to_string())
-        .and_then(|menu| menu.selection(id));
+        .and_then(|menu| Ok((menu.selection(id)?, menu.provider_destination(id, Path::new(dest))?)));
     match result {
-        Ok(items) => {
+        Ok((items, destination)) => {
             let paths = items.iter().map(|item| item.path.to_string_lossy().into()).collect();
-            start_transfer_checked(out, ops, op, paths, dest, Some(items));
+            start_transfer_checked(out, ops, op, paths, dest, Some(items), destination);
         }
         Err(message) => {
             writeln!(out, "{}", error_line(&op_err("transfer", "", &message))).ok();
@@ -106,7 +106,7 @@ pub(crate) fn start_menu_transfer(out: &mut impl Write, ops: &mut Ops, op: &str,
 }
 
 fn start_transfer_checked(out: &mut impl Write, ops: &mut Ops, op: &str, paths: Vec<String>, dest: &str,
-                          selection: Option<Vec<super::menu_actions::Selected>>) {
+                          selection: Option<Vec<super::menu_actions::Selected>>, destination: Option<super::menu_actions::Selected>) {
     if ops.running.is_some() {
         busy(out, "transfer");
         return;
@@ -127,7 +127,7 @@ fn start_transfer_checked(out: &mut impl Write, ops: &mut Ops, op: &str, paths: 
     writeln!(out, "{}", transferstarted_line(id, n, moving)).ok();
     out.flush().ok();
     let tx = ops.tx.clone();
-    thread::spawn(move || run_transfer_checked(id, moving, paths, dest, cancel, tx, selection));
+    thread::spawn(move || run_transfer_checked(id, moving, paths, dest, cancel, tx, selection, destination));
 }
 
 // No response line of its own: the running operation answers with its own terminal transferdone.
@@ -359,13 +359,13 @@ mod tests {
         let mut o = Ops::new(tx);
         let mut buf = out();
         o.claim();
-        request_menu_action(&mut buf, &mut o, r#"{"op":"delete","id":5,"token":1}"#.into(), vec![]);
+        request_menu_action(&mut buf, &mut o, r#"{"op":"delete","id":5,"token":1}"#.into(), vec![], None);
         assert!(text(&buf).contains(r#""op":"delete","ok":false"#));
         assert!(text(&buf).contains("already running"));
         assert!(o.menuactions.is_none(), "busy refusal must not start a competing service");
         o.running = None;
         buf.clear();
-        request_menu_action(&mut buf, &mut o, r#"{"op":"delete","id":5,"token":1}"#.into(), vec![]);
+        request_menu_action(&mut buf, &mut o, r#"{"op":"delete","id":5,"token":1}"#.into(), vec![], None);
         assert!(o.running.is_some());
         let message = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         assert!(matches!(&message, OpMsg::MenuDeleteDone { .. }));

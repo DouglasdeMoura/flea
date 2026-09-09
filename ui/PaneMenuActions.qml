@@ -23,6 +23,51 @@ Loader {
     property string survivorFolder: ""
     property string survivorListing: ""
     property string backgroundFolder: ""
+    property bool providersRefreshing: false
+    property int providerFormatsId: 0
+    property bool providerQueriesStarted: false
+    property bool providerDestinationPending: false
+    property bool providerValidated: false
+    property var providerFacts: ({})
+    property bool taildropRefreshWaiting: false
+    property bool dropboxRefreshWaiting: false
+    property bool refreshingTaildrop: false
+    property bool refreshingDropbox: false
+
+    function providerAction(action) {
+        return action.indexOf("taildrop:") === 0 || action === "dropbox" || action === "sharelink"
+    }
+    function refreshProviders(action) {
+        providersRefreshing = true
+        refreshingTaildrop = !action || action.indexOf("taildrop:") === 0
+        refreshingDropbox = !action || action === "dropbox" || action === "sharelink"
+        providerQueriesStarted = false
+        providerDestinationPending = false
+        taildropRefreshWaiting = false
+        dropboxRefreshWaiting = false
+        providerFormatsId = pane.backend.askFormats()
+        pane.contextMenu().refreshProviderRows()
+    }
+    function finishProviders() {
+        if (!providersRefreshing || !providerQueriesStarted || providerDestinationPending || !ready
+                || taildropRefreshWaiting || dropboxRefreshWaiting
+                || (refreshingTaildrop && pane.taildropService.checking)
+                || (refreshingDropbox && pane.dropboxService && pane.dropboxService.dropboxChecking)) return
+        if (!pendingActivation && pane.dropboxService && pane.dropboxService.dropboxReady) {
+            providerDestinationPending = true
+            pane.backend.send({c: "menuaction", op: "providerDestination", id: requestId, dest: pane.dropboxService.dropboxPath})
+            return
+        }
+        providersFinished()
+    }
+    function providersFinished() {
+        providersRefreshing = false
+        pane.contextMenu().refreshProviderRows()
+        if (pendingActivation && providerAction(pendingAction)) {
+            providerValidated = true
+            validateActivation()
+        }
+    }
 
     function snapshot() {
         if (deleting || survivorId) return
@@ -33,7 +78,7 @@ Loader {
         activationUsed = false
         identity = pane.menuSelectionIdentity
         folder = pane.path
-        pane.backend.send({c: "menuaction", op: "snapshot", id: requestId, rows: Ops.targetIndices(pane)})
+        pane.backend.send({c: "menuaction", op: "snapshot", id: requestId, rows: Ops.targetIndices(pane), cursor: pane.cursorIndex})
     }
     function open(action) {
         if (opened) return
@@ -64,15 +109,21 @@ Loader {
             return
         }
         activationUsed = true
+        providerValidated = false
         pendingAction = action
         pendingActivation = true
         if (ready) validateActivation()
     }
     function validateActivation() {
+        if (providerAction(pendingAction) && !providerValidated) { refreshProviders(pendingAction); return }
         var action = pendingAction
         pendingAction = ""
         pendingActivation = false
-        pane.backend.send({c: "menuaction", op: "activate", id: requestId, action: action})
+        var split = action.indexOf(":")
+        if (providerAction(action) && !pane.contextMenu().validateChoice(split < 0 ? action : action.substring(0, split),
+                split < 0 ? "" : action.substring(split + 1))) return
+        pane.backend.send({c: "menuaction", op: "activate", id: requestId, action: action,
+            dest: pane.dropboxService ? pane.dropboxService.dropboxPath : ""})
     }
     function show(action) {
         pendingAction = ""
@@ -94,6 +145,21 @@ Loader {
             var menu = root.pane.contextMenu()
             if (menu.opened && !menu.hasRow && !menu.forRail && !menu.forHeader)
                 root.backgroundFolder = root.pane.path
+            if (menu.opened && menu.hasRow && !menu.forRail && !menu.forHeader) root.refreshProviders()
+        }
+    }
+    Connections {
+        target: root.pane.taildropService
+        function onRefreshed() {
+            if (root.providersRefreshing && root.taildropRefreshWaiting) root.taildropRefreshWaiting = !root.pane.taildropService.refresh(root.providerFacts)
+            root.finishProviders()
+        }
+    }
+    Connections {
+        target: root.pane.dropboxService
+        function onDropboxRefreshed() {
+            if (root.providersRefreshing && root.dropboxRefreshWaiting) root.dropboxRefreshWaiting = !root.pane.dropboxService.refreshDropbox(root.providerFacts)
+            root.finishProviders()
         }
     }
     Connections {
@@ -102,6 +168,15 @@ Loader {
     }
     Connections {
         target: root.pane.backend
+        function onFormatsResult(message) {
+            if (!root.providersRefreshing || message.id !== root.providerFormatsId) return
+            root.providerFacts = message.providers || {}
+            root.taildropRefreshWaiting = root.refreshingTaildrop && !root.pane.taildropService.refresh(root.providerFacts)
+            root.dropboxRefreshWaiting = root.refreshingDropbox && root.pane.dropboxService
+                ? !root.pane.dropboxService.refreshDropbox(root.providerFacts) : false
+            root.providerQueriesStarted = true
+            root.finishProviders()
+        }
         function onChanged(path) { if (path === root.folder && root.item) root.item.sourceChanged() }
         function onLocated(message) {
             if (!root.survivorId || message.id !== root.survivorId) return
@@ -125,16 +200,25 @@ Loader {
                 }
             }
             if (message.id !== root.requestId) return
+            if (message.op === "providerDestination") {
+                root.providerDestinationPending = false
+                if (!message.ok && root.pane.dropboxService) root.pane.dropboxService.dropboxReason = message.error
+                root.providersFinished()
+                return
+            }
             if (message.op === "snapshot") {
                 root.ready = message.ok === true && root.identity === root.pane.menuSelectionIdentity
                 if (!root.ready) {
                     root.pendingAction = ""
+                    root.pendingActivation = false
+                    root.providersRefreshing = false
                     root.identity = ""
                     root.pane.message(message.error || "Selected items changed; reopen the menu.", true)
                 } else if (root.pendingAction) {
                     if (root.pendingActivation) root.validateActivation()
                     else root.show(root.pendingAction)
                 }
+                root.finishProviders()
                 return
             }
             if (message.op === "activate") {
@@ -162,6 +246,8 @@ Loader {
             root.ready = false
             root.identity = ""
             root.pendingAction = ""
+            root.pendingActivation = false
+            root.providersRefreshing = false
             if (root.opened || root.deleting) root.item.receive({id: root.requestId, op: root.deleting ? "delete" : "", ok: false, error: message})
         }
     }

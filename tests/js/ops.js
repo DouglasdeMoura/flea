@@ -2,6 +2,21 @@
 .import "../../ui/js/Transfer.js" as Transfer
 
 function run(check) {
+    var sent = [], messages = []
+    var sender = {reason: "Peer went offline", send: function(id, paths) { return false }, labelFor: function() { return "Laptop" }}
+    var pane = {cursorIndex: 2, path: "/fixture", rowFor: function() { return {n: "source", d: false} },
+        join: function(base, name) { return base + "/" + name }, message: function(text, failed) { messages.push([text, failed]) }}
+    Ops.sendTaildrop(pane, sender, "peer", "/captured/source")
+    check("a refused Taildrop dispatch reports its cause", JSON.stringify(messages), JSON.stringify([["Peer went offline", true]]))
+    messages = []
+    sender.send = function(id, paths) { sent.push([id, paths]); return true }
+    Ops.sendTaildrop(pane, sender, "peer", "/captured/source")
+    check("Taildrop uses the backend-validated cursor path", JSON.stringify(sent), JSON.stringify([["peer", ["/captured/source"]]]))
+    check("accepted Taildrop dispatch is identified as sending", JSON.stringify(messages), JSON.stringify([["Sending source to Laptop.", false]]))
+    messages = []
+    Ops.sendTaildrop(pane, sender, "peer")
+    check("an absent validated cursor path is refused", JSON.stringify(messages), JSON.stringify([["Cursor source was not validated; reopen the menu.", true]]))
+    check("missing validation cannot fall back to a live cursor file", sent.length, 1)
     // Two kinds of success, and the operator has to be able to tell them apart.
     check("a verified extract says so plainly", Ops.archiveDoneLine(true), "Archive written.")
     check("and an unverified one says what was not checked",

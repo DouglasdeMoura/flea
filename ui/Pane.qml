@@ -286,7 +286,8 @@ FocusScope {
         Focus.act(action, root, menuId, paths)
     }
     function performMenu(action, menuId, paths) {
-        if (action.indexOf("taildrop:") === 0) { root.sendTaildrop(action.substring("taildrop:".length)); return }
+        if (action.indexOf("taildrop:") === 0) { root.sendTaildrop(action.substring("taildrop:".length), paths && paths.length === 1 ? paths[0] : ""); return }
+        if (action === "sharelink") { root.copyShareLink(paths && paths.length === 1 ? paths[0] : ""); return }
         if (action === "copypath") { wire.opener.copyText(paths && paths.length ? paths[0] : root.join(root.path, root.cursorRow.n)); return }
         if (action.indexOf("col:") === 0) { ViewState.toggleColumn(action.substring("col:".length)); return }
         root.act(action, menuId, paths)
@@ -519,16 +520,20 @@ FocusScope {
         anchors { top: parent.top; left: railLoader.right; right: parent.right; bottom: parent.bottom }
     }
 
-    // A directory has nothing Taildrop can send today, so the entry hides for one rather than
-    // opening a submenu that always no-ops; reactive on both the cursor and the held window.
+    // Directory cursors retain the installed provider with its explicit file-only reason.
     readonly property var cursorRow: root.rowFor(root.cursorIndex)
+    readonly property alias taildropService: wire.taildrop
+    readonly property var dropboxService: root.sidebar ? root.sidebar.providerService : null
 
     Flea.ContextMenu {
         id: menu
         parent: root.overlayParent || root
         focusOwner: root.listArea
         showHidden: root.showHidden
+        providersRefreshing: menuActions.providersRefreshing
         taildropPeers: (root.cursorRow && !root.cursorRow.d) ? wire.taildrop.peers : []
+        taildropInstalled: !root.backend.providers.taildrop || root.backend.providers.taildrop.installed !== false
+        taildropReason: root.cursorRow && root.cursorRow.d ? "Taildrop sends files only" : wire.taildrop.reason
         archiveFormats: root.backend.archiveFormats
         canConvert: root.backend.canConvert
         canExtract: root.cursorRow && /\.7z$/i.test(root.cursorRow.n)
@@ -541,9 +546,11 @@ FocusScope {
         onRefused: function(reason) { root.message(reason, true) }
         rowIsArchive: root.cursorRow !== null && !root.cursorRow.d && Archive.isArchive(root.cursorRow.n)
         rowIsImage: root.cursorRow !== null && root.cursorRow.i === "image-x-generic"
-        dropboxPath: root.sidebar && root.sidebar.dropboxReady ? root.home + "/Dropbox" : ""
-        // The separator is part of the test, or /home/gm/DropboxBackup would count as inside Dropbox.
-        rowInDropbox: root.path === root.home + "/Dropbox" || root.path.indexOf(root.home + "/Dropbox/") === 0
+        dropboxInstalled: !root.backend.providers.dropbox || root.backend.providers.dropbox.installed !== false
+        dropboxPath: root.dropboxService && root.dropboxService.dropboxReady ? root.dropboxService.dropboxPath : ""
+        dropboxReason: root.dropboxService ? root.dropboxService.dropboxReason : "Dropbox service unavailable"
+        rowInDropbox: root.dropboxService && root.dropboxService.dropboxPath.length > 0
+            && (root.path === root.dropboxService.dropboxPath || root.path.indexOf(root.dropboxService.dropboxPath + "/") === 0)
         onChosen: function (action) {
             menuActions.activate(action, menu.hasRow && !menu.forHeader)
         }
@@ -577,10 +584,13 @@ FocusScope {
     }
 
     function openConvert(menuId) { Ops.openConvert(root, menuId) }
-    function moveToDropbox(menuId) { Ops.moveToDropbox(root, root.sidebar && root.sidebar.dropboxReady ? root.home + "/Dropbox" : "", menuId) }
+    function moveToDropbox(menuId) { Ops.moveToDropbox(root, root.dropboxService && root.dropboxService.dropboxReady ? root.dropboxService.dropboxPath : "", menuId) }
     // The three foreign programs live in ui/PaneWire.qml with the backend's replies; these only name the row.
-    function copyShareLink() { wire.shareLink.copy(root.join(root.path, root.cursorRow ? root.cursorRow.n : "")) }
-    function sendTaildrop(peerId) { Ops.sendTaildrop(root, wire.taildrop, peerId) }
+    function copyShareLink(path) {
+        if (!path) { root.message("Cursor source was not validated; reopen the menu.", true); return }
+        wire.shareLink.copy(path)
+    }
+    function sendTaildrop(peerId, path) { Ops.sendTaildrop(root, wire.taildrop, peerId, path) }
 
     // The keyboard's own entrance to the row menu; the placement itself is ui/js/Menu.js's.
     function openCursorMenu() { return Menu.openAtCursor(root, menu, Theme.spacing.rowPaddingX) }
