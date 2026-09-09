@@ -542,9 +542,14 @@ case_menuscoverage() (
         menus_file_menu link
         menus_expect menuState 'any(.entries[]; .action == "permissions" and .disabled and .hint == "Symlink target not changed")' "symlink permissions stays disabled"
         key -k Escape >/dev/null
-        click_row "$(row_index_of a.txt)" left --mods ctrl
-        click_row "$(row_index_of b.txt)" left --mods ctrl
+        local first_index second_index
+        first_index=$(row_index_of a.txt)
+        second_index=$(row_index_of b.txt)
+        click_row "$first_index" left
+        menus_expect dualState ".panes[.focused].selected == [$first_index]" "plain click selects a.txt alone"
+        click_row "$second_index" left --mods ctrl
         menus_expect selectionCount '. == 2' "Ctrl-click creates two selected items before menu eligibility"
+        menus_expect dualState ".panes[.focused].selected == [$first_index,$second_index]" "selected identities are a.txt and b.txt"
         click_row "$(row_index_of a.txt)" right
         menus_expect menuState '.entries as $entries | ["rename","duplicate","openWith","properties","permissions"] | all(.[]; . as $action | any($entries[]; .action == $action and .disabled))' "multi-selection eligibility"
         key -k Escape >/dev/null

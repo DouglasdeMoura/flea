@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import "." as Flea
+import "js/Filter.js" as Filter
 import "js/Tap.js" as Tap
 import "js/Thumbs.js" as Thumbs
 
@@ -11,8 +12,6 @@ Item {
 
     // [{n, d, i}], from a peek or from the pane's own held window.
     property var rows: []
-    // The pane's held offset, so a listing window's row index maps back to a real cursor index.
-    property int offset: 0
     // The row this column's cursor is on, as an absolute index; -1 when this column has no cursor.
     property int selectedIndex: -1
     // The row named here is the one the trail passes through: lifted like a hover, never accented.
@@ -46,20 +45,41 @@ Item {
     function itemAtIndex(index) { return view.itemAtIndex(index) }
     function contentY() { return view.contentY }
     function restartSettle() { settle.restart() }
+    function restartCoalesce() { coalesce.restart() }
+    function primeSettle() { settle.interval = root.pane.firstSettleMs }
+
+    function visibleRange() {
+        return Thumbs.viewport(view.contentY - view.originY, Theme.fileRowHeight,
+            Math.max(1, Math.ceil(view.height / Theme.fileRowHeight)), view.count)
+    }
+
+    // The active column uses List/Grid's integer model and refills only around its viewport.
+    function requestIfDrifted() {
+        if (root.pane === null || !root.visible || root.pane.listInFlight
+                || root.pane.total === 0 || root.pane.shown !== null)
+            return
+        var range = root.visibleRange()
+        var heldEnd = root.pane.held + root.pane.rows.length
+        if (root.pane.rows.length === 0
+                || (range.first - root.pane.held < root.pane.refetchMargin && root.pane.held > 0)
+                || (heldEnd - range.last < root.pane.refetchMargin && heldEnd < root.pane.total))
+            root.pane.backend.window(Math.max(0, range.first - root.pane.buffer), root.pane.windowSize)
+    }
 
     // The viewport's rows and no more, rule 1: the same plan the list and the grid run, over this column's own scroll position.
     function requestThumbs() {
         // visible is effective visibility, so the column kept alive under another view plans nothing against the shared state.
         if (root.pane === null || !root.visible || root.pane.total === 0 || root.pane.listInFlight)
             return
-        var span = Thumbs.viewport(view.contentY, Theme.fileRowHeight, Math.max(1, Math.ceil(view.height / Theme.fileRowHeight)), root.rows.length)
-        var first = root.offset + span.first
-        var last = root.offset + span.last
-        var work = Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, first, last, ViewState.thumbnailMode)
+        var range = root.visibleRange()
+        var span = Filter.span(root.pane.shown, range.first, range.last)
+        var work = Filter.cut(Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held,
+            span.first, span.last, ViewState.thumbnailMode), root.pane.shown, root.pane.thumbState)
         // Only the loaded preview owns an off-viewport request; manual cursor movement asks nothing extra.
         work.drop = work.drop.filter(function (index) { return index !== root.pane.previewIndex })
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
+        if (work.ask.length > 0) settle.interval = root.pane.settleMs
         root.thumbsApplied(work)
     }
 
@@ -69,23 +89,51 @@ Item {
     }
 
     Timer {
+        id: coalesce
+        interval: root.pane ? root.pane.coalesceMs : 0
+        repeat: false
+        onTriggered: root.requestIfDrifted()
+    }
+
+    Timer {
         id: settle
         interval: root.pane ? root.pane.settleMs : 120
         repeat: false
         onTriggered: root.requestThumbs()
     }
     onRowsChanged: if (root.pane !== null) settle.restart()
-    onVisibleChanged: if (root.visible && root.pane !== null) settle.restart()
+    onVisibleChanged: if (root.visible && root.pane !== null) { coalesce.restart(); settle.restart() }
+    onHeightChanged: if (root.visible && root.pane !== null) { coalesce.restart(); settle.restart() }
+
+    Flea.FileDrag {
+        id: dragSession
+        pane: root.pane
+    }
+
+    // Only the active column owns this directory; neighboring peek floors cannot target its listing.
+    Flea.DropInto {
+        anchors.fill: parent
+        enabled: root.pane !== null && !root.pane.trash.opened && root.pane.searchMode === ""
+        pane: root.pane
+        dest: root.pane ? root.pane.path : ""
+        destDev: root.pane && root.pane.backend && !root.pane.listInFlight ? root.pane.backend.dirDev : 0
+    }
 
     ListView {
         id: view
         anchors.fill: parent
 
-        model: root.rows.length
+        model: root.pane ? root.pane.shownTotal : root.rows.length
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        onContentYChanged: if (root.pane !== null) settle.restart()
+        onContentYChanged: if (root.pane !== null) { coalesce.restart(); settle.restart() }
         reuseItems: true
+
+        // G7 needs an empty press target below the final row even when a long column fills the viewport.
+        footer: Item {
+            width: view.width
+            height: root.pane ? Theme.spacing.rowPaddingY : 0
+        }
 
         Flea.FastScrollHandler {
             parent: view
@@ -96,8 +144,6 @@ Item {
             parent: view
             pane: root.pane
             flickable: view
-            shown: null
-            offset: root.offset
         }
 
         // Empty space below the last row, the same rule ui/List.qml carries; pane is what says this
@@ -112,15 +158,19 @@ Item {
         }
 
         delegate: Flea.ColumnRow {
+            id: cell
             required property int index
+            readonly property int listingIndex: root.pane ? Filter.at(root.pane.shown, index) : index
             width: view.width
             // A shrunk listing subscripts out of range under a delegate not yet released, and QML
             // hands that back as undefined; every row reader in the tree tests against a real null.
-            row: root.rows[index] !== undefined ? root.rows[index] : null
-            thumb: root.pane !== null && Thumbs.allowed(row, ViewState.thumbnailMode) ? root.pane.thumbFor(root.offset + index) : ""
-            cursor: root.selectedIndex >= 0 && root.offset + index === root.selectedIndex
+            row: root.pane ? root.pane.rowFor(listingIndex) : root.rows[index] !== undefined ? root.rows[index] : null
+            thumb: root.pane !== null && Thumbs.allowed(row, ViewState.thumbnailMode) ? root.pane.thumbFor(listingIndex) : ""
+            cursor: root.selectedIndex >= 0 && listingIndex === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
-            selected: root.pane !== null && root.pane.isSelected(root.offset + index)
+            selected: root.pane !== null && root.pane.isSelected(listingIndex)
+            dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
+            dropCopying: dragSession.dragCopy
             // Read off the normalised row above: subscripting rows again hands a shrunk listing's undefined to a bool.
             lifted: root.liftedName.length > 0 && row !== null && row.n === root.liftedName
             dim: root.dim && !lifted
@@ -129,13 +179,12 @@ Item {
                 id: tap
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onTapped: function (eventPoint, button) {
-                    // selectedIndex is given to the pane's own column and to no other, so it is what
-                    // says this column takes the listing's click contract rather than a peek's.
-                    if (root.selectedIndex >= 0) {
+                    if (root.pane !== null) {
+                        if (cell.listingIndex < 0 || !cell.row) return
                         if (button === Qt.RightButton)
-                            root.menuRequested(root.offset + index, eventPoint)
+                            root.menuRequested(cell.listingIndex, eventPoint)
                         else
-                            root.picked(root.offset + index, tap.tapCount, tap.point.modifiers)
+                            root.picked(cell.listingIndex, tap.tapCount, tap.point.modifiers)
                         return
                     }
                     if (button === Qt.RightButton && root.rows[index]) {
@@ -146,6 +195,12 @@ Item {
                     if (verb.length > 0)
                         root.activated(root.rows[index].n, verb === "reveal")
                 }
+            }
+
+            Flea.RowDrag {
+                session: dragSession
+                listingIndex: cell.listingIndex
+                row: cell.row
             }
         }
     }
@@ -170,6 +225,6 @@ Item {
     // The cursor can move off screen through the keyboard, so the column follows it.
     onSelectedIndexChanged: {
         if (root.selectedIndex >= 0)
-            view.positionViewAtIndex(root.selectedIndex - root.offset, ListView.Contain)
+            view.positionViewAtIndex(root.pane ? Filter.viewOf(root.pane.shown, root.selectedIndex) : root.selectedIndex, ListView.Contain)
     }
 }

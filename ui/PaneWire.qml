@@ -19,14 +19,14 @@ Item {
 
     // The listing's floor as a drop target, under the rows: a drop past the last row, or one a file
     // row refused, lands in the directory being shown. Declared first in ui/Pane.qml, so it sits below.
-    // corner: the list view only. Grid tiles and columns have no row targets yet, so a folder tile
-    // would land its drop beside itself, and a search listing's path is the walk scope, not a row's home.
+    // Columns owns its narrower active floor; a search listing's path is the walk scope, not a row's home.
     Flea.DropInto {
         x: root.pane ? root.pane.listSlot.x : 0
         y: root.pane ? root.pane.listSlot.y : 0
         width: root.pane ? root.pane.listSlot.width : 0
         height: root.pane ? root.pane.listSlot.height : 0
-        enabled: root.pane !== null && !root.pane.trash.opened && root.pane.viewMode === "list" && root.pane.searchMode === ""
+        enabled: root.pane !== null && !root.pane.trash.opened && root.pane.searchMode === ""
+                 && (root.pane.viewMode === "list" || root.pane.viewMode === "grid")
         pane: root.pane
         dest: root.pane ? root.pane.path : ""
         // Unknown until the listed reply lands, because dirDev is still the directory being left.

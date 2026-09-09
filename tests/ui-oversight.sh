@@ -222,7 +222,7 @@ case_oversight() {
         || fail "oversight: native instrument differs from the identified candidate"
     git -C "$repo" cat-file -e '784da4692e1594dfa99cc7de841c8a3cb3b5a7e2^{commit}' \
         || fail "oversight: immutable release source is unavailable"
-    sandbox_scratch "$oversight_box"
+    sandbox_make "$oversight_box"
     fixture_home_make "$oversight_home"
     local listing="$oversight_home/Documents/claude"
     sandbox_require "$listing"

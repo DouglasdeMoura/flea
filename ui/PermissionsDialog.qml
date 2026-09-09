@@ -20,10 +20,10 @@ FocusScope {
     readonly property bool editable: facts.ok === true && !facts.reason && !busy && !transportFailed
     readonly property int modeValue: Permissions.parse(modeText)
     readonly property bool applying: busy && facts.ok === true
-    readonly property color focusFill: Qt.rgba(Theme.color.accent.r, Theme.color.accent.g, Theme.color.accent.b, 0.14)
     readonly property real labelWidth: Math.round(96 * Theme.font.bodySmall / 13)
     readonly property int controlHeight: Math.max(Theme.rowHeight, Math.ceil(Theme.font.body * Theme.lineBoxRatio) + 2 * Theme.spacing.rowPaddingY)
-    readonly property int headingHeight: Math.max(Theme.hitMin, Math.ceil(Theme.font.caption * Theme.lineBoxRatio) + 2 * Theme.spacing.rowPaddingY)
+    readonly property real bodyInset: 16 * Theme.font.bodySmall / 13 + Theme.spacing.hairline
+    readonly property int headingHeight: Math.round(26 * Theme.font.bodySmall / 13)
     readonly property var cardItem: card
     readonly property var bodyItem: body
     readonly property string displayedError: errorLabel.text
@@ -133,7 +133,7 @@ FocusScope {
         anchors.centerIn: parent
         // The board's 420 content width shares the Settings board's 560 scale.
         width: Math.max(0, Math.min(Theme.settings.panelWidth * 3 / 4 + 2 * Theme.spacing.hairline, root.width - 2 * Theme.spacing.gap))
-        height: Math.max(0, Math.min(chrome.height + body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * Theme.spacing.gap))
+        height: Math.max(0, Math.min(chrome.height + body.wanted + Theme.spacing.rowPaddingX + root.bodyInset, root.height - 2 * Theme.spacing.gap))
         color: Theme.color.surface
         border.color: Theme.color.muted
         border.width: Theme.spacing.hairline
@@ -150,7 +150,7 @@ FocusScope {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: root.controlHeight
+            height: Theme.chromeHeight
             Row {
                 anchors.left: parent.left
                 anchors.leftMargin: Theme.spacing.rowPaddingX
@@ -161,7 +161,7 @@ FocusScope {
                     id: title
                     text: "Permissions"
                     color: Theme.color.foreground
-                    font { family: Theme.font.family; pixelSize: Theme.font.body; bold: true }
+                    font { family: Theme.font.family; pixelSize: Theme.font.caption; bold: true }
                     textFormat: Text.PlainText
                 }
             }
@@ -171,8 +171,6 @@ FocusScope {
                 anchors.rightMargin: Theme.spacing.rowPaddingX
                 anchors.verticalCenter: parent.verticalCenter
                 glyph: "x"
-                glyphSize: Theme.font.bodySmall
-                restingColor: Theme.color.foreground
                 enabled: !root.applying
                 accessName: "Close permissions"
                 activeFocusOnTab: true
@@ -191,7 +189,10 @@ FocusScope {
             anchors.right: parent.right
             anchors.top: chrome.bottom
             anchors.bottom: parent.bottom
-            anchors.margins: Theme.spacing.rowPaddingX
+            anchors.leftMargin: root.bodyInset
+            anchors.rightMargin: root.bodyInset
+            anchors.topMargin: Theme.spacing.rowPaddingX
+            anchors.bottomMargin: root.bodyInset
             Column {
                 width: body.width
                 spacing: 0
@@ -199,7 +200,7 @@ FocusScope {
                     width: parent.width
                     height: root.controlHeight
                     spacing: Theme.spacing.gap
-                    Flea.Glyph { width: Theme.markSize; height: nameLabel.height; anchors.verticalCenter: parent.verticalCenter; name: root.facts.directory ? "folder" : "file"; color: Theme.color.foreground }
+                    Flea.Glyph { width: Theme.markSize; height: nameLabel.height; anchors.verticalCenter: parent.verticalCenter; name: root.facts.directory ? "folder" : "file"; color: Theme.color.muted }
                     Text { id: nameLabel; width: parent.width - Theme.markSize - kindLabel.width - 2 * parent.spacing; anchors.verticalCenter: parent.verticalCenter; text: root.path.split("/").pop(); elide: Text.ElideMiddle; textFormat: Text.PlainText; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
                     Text { id: kindLabel; anchors.verticalCenter: parent.verticalCenter; text: root.facts.ok ? (root.facts.directory ? "directory" : "file") : ""; textFormat: Text.PlainText; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
                 }
@@ -248,12 +249,12 @@ FocusScope {
                                 Keys.onBacktabPressed: root.stepFocus(true)
                                 Rectangle {
                                     anchors.centerIn: parent
-                                    width: Theme.font.bodySmall * 16 / 13 + 4 * Theme.spacing.hairline
+                                    width: Theme.font.bodySmall * 16 / 13
                                     height: width
                                     color: "transparent"
                                     border.width: Theme.spacing.hairline * 2
                                     border.color: checkbox.checked || checkbox.activeFocus ? Theme.color.accent : Theme.color.muted
-                                    Flea.Glyph { anchors.centerIn: parent; width: Theme.font.bodySmall * 9 / 13; height: width; name: "check"; visible: checkbox.checked; color: Theme.color.accent }
+                                    Flea.Glyph { anchors.centerIn: parent; width: Theme.font.bodySmall * 10 / 13; height: width; strokeWidth: 3; name: "check"; visible: checkbox.checked; color: Theme.color.accent }
                                 }
                                 TapHandler { onTapped: checkbox.toggle() }
                             }
@@ -364,7 +365,7 @@ FocusScope {
                         + (root.facts.reason ? "\nCurrent mode " + root.facts.mode : "")
                     textFormat: Text.PlainText
                     wrapMode: Text.WordWrap
-                    color: root.facts.ok && !root.facts.reason ? Theme.color.accent : Theme.color.foreground
+                    color: Theme.color.accent
                     font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 }
                 Text {
@@ -389,7 +390,15 @@ FocusScope {
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
-                        Flea.DialogButton { id: cancelButton; implicitHeight: root.controlHeight; label: "Cancel"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: !root.applying; onActivated: root.close() }
+                        Flea.DialogButton {
+                            id: cancelButton
+                            label: "Cancel"
+                            primary: parent.activeFocus
+                            horizontalPadding: Theme.spacing.rowPaddingX
+                            verticalPadding: 6 * Theme.font.bodySmall / 13
+                            available: !root.applying
+                            onActivated: root.close()
+                        }
                     }
                     FocusScope {
                         id: applyFocus
@@ -400,7 +409,15 @@ FocusScope {
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.apply()
                         Keys.onSpacePressed: root.apply()
-                        Flea.DialogButton { id: applyButton; implicitHeight: root.controlHeight; label: "Apply"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: root.editable && root.modeValue >= 0; onActivated: root.apply() }
+                        Flea.DialogButton {
+                            id: applyButton
+                            label: "Apply"
+                            primary: parent.activeFocus
+                            horizontalPadding: Theme.spacing.rowPaddingX
+                            verticalPadding: 6 * Theme.font.bodySmall / 13
+                            available: root.editable && root.modeValue >= 0
+                            onActivated: root.apply()
+                        }
                     }
                 }
             }

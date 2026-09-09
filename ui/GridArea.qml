@@ -73,6 +73,11 @@ GridView {
         cellHeight: root.cellHeight
     }
 
+    Flea.FileDrag {
+        id: dragSession
+        pane: root.pane
+    }
+
     delegate: Flea.GridTile {
         id: cell
         required property int index
@@ -84,6 +89,8 @@ GridView {
         cursor: listingIndex === root.pane.cursorIndex
         hovered: hover.hovered
         selected: root.pane.isSelected(listingIndex)
+        dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
+        dropCopying: dragSession.dragCopy
         thumb: Thumbs.allowed(row, ViewState.thumbnailMode) ? Thumbs.fileFor(root.pane.thumbState, listingIndex) : ""
 
         HoverHandler {
@@ -101,6 +108,12 @@ GridView {
                 else
                     Tap.tapped(cell.listingIndex, tap.tapCount, tap.point.modifiers, root.pane)
             }
+        }
+
+        Flea.RowDrag {
+            session: dragSession
+            listingIndex: cell.listingIndex
+            row: cell.row
         }
     }
 

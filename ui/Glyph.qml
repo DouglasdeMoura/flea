@@ -18,7 +18,7 @@ Item {
     readonly property real markSize: Math.min(root.maxSize, root.width, root.height)
     // Its own name: "scale" would shadow Item.scale, which qmllint flagged.
     readonly property real gridScale: root.markSize / root.grid
-    readonly property real strokeWidth: Theme.strokeWidth
+    property real strokeWidth: Theme.strokeWidth
 
     // The Shape is sized in grid units pre-transform; Scale's origin defaults to (0,0), so this
     // offset is what re-centers the scaled-down box in root's slot instead of pinning it top-left.

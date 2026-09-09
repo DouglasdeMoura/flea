@@ -73,16 +73,15 @@ Item {
     function askMeta() { preview.followSelection() }
 
     // The listArea contract every caller of the pane's own navigation uses: the listing's column plans its own viewport's thumbnails, the way the list and the grid do.
-    function primeSettle() {}
-    function restartCoalesce() {}
+    function primeSettle() { active.primeSettle() }
+    function restartCoalesce() { active.restartCoalesce() }
     function restartSettle() { active.restartSettle() }
-    function positionViewAtIndex(index, mode) { active.positionViewAtIndex(index - root.pane.held, mode) }
+    function positionViewAtIndex(index, mode) { active.positionViewAtIndex(index, mode) }
     // The one column whose rows are the pane's own, for ui/Ipc.qml: the two beside it are peeks and
     // answer for another directory, so neither is where a background right click belongs.
     function activeColumn() { return active }
-    // The middle column's model is held-relative, unlike the list's and the grid's, so a caller
-    // holding an absolute cursor index reaches a delegate through here rather than directly.
-    function itemAtIndex(index) { return active.itemAtIndex(index - root.pane.held) }
+    // All active views accept a view position; the pane maps filtered listing indices before calling.
+    function itemAtIndex(index) { return active.itemAtIndex(index) }
     function activeContentY() { return active.contentY() }
 
     // A neighbour column's row, which the pane has no cursor on: a directory becomes the pane's own
@@ -229,7 +228,6 @@ Item {
             width: root.columnWidth
             height: parent.height
             rows: root.pane.rows
-            offset: root.pane.held
             selectedIndex: root.pane.cursorIndex
             // Only this column's rows are the pane's own, so only it can paint the pane's selection.
             pane: root.pane

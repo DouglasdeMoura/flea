@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import "." as Flea
+import "js/Drag.js" as DragOps
 import "js/Format.js" as Format
 import "js/Icons.js" as Icons
 
@@ -12,6 +13,8 @@ Item {
     property bool cursor: false
     property bool hovered: false
     property bool selected: false
+    property bool dropTarget: false
+    property bool dropCopying: false
     property string thumb: ""
 
     // A lifted tile is the cursor, the pointer or a selection member, the same ladder Row.qml climbs.
@@ -36,6 +39,14 @@ Item {
              : "transparent"
         // The canvas outlines the picked tile as well as filling it, because a tile has no row edge to read.
         border.width: root.selected || root.cursor ? Theme.spacing.hairline : 0
+        border.color: Theme.color.accent
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.dropTarget
+        color: Util.alpha(Theme.color.accent, Style.hoverFillAlpha)
+        border.width: Theme.spacing.hairline
         border.color: Theme.color.accent
     }
 
@@ -86,7 +97,7 @@ Item {
         anchors.right: parent.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.rightMargin: Theme.spacing.gap
-        height: Theme.grid.captionHeight
+        height: root.dropTarget ? Theme.grid.captionLineHeight : Theme.grid.captionHeight
         horizontalAlignment: Text.AlignHCenter
         text: root.row ? root.row.n : ""
         color: Theme.color.foreground
@@ -94,14 +105,29 @@ Item {
         font.pixelSize: Theme.font.caption
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
-        maximumLineCount: 2
+        maximumLineCount: root.dropTarget ? 1 : 2
         lineHeightMode: Text.FixedHeight
         lineHeight: Theme.grid.captionLineHeight
         elide: Text.ElideRight
     }
 
+    Text {
+        anchors.top: nameLabel.bottom
+        anchors.left: nameLabel.left
+        anchors.right: nameLabel.right
+        visible: root.dropTarget
+        height: Theme.grid.captionLineHeight
+        horizontalAlignment: Text.AlignHCenter
+        text: DragOps.label(root.dropCopying)
+        color: Theme.color.accent
+        font.family: Theme.font.family
+        font.pixelSize: Theme.font.caption
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+    }
+
     Rectangle {
-        visible: hover.hovered && nameLabel.truncated
+        visible: !root.dropTarget && hover.hovered && nameLabel.truncated
         z: 1
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: nameLabel.bottom

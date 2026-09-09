@@ -92,9 +92,32 @@ rail_details_native() {
     printf 'RAIL native-toggle-on/off empty/populated restart-on/off=ok; pixels require separate inspection.\n'
 }
 
+places_records_diagnostic() {
+    local phase="$1" cursor
+    cursor=$(ipc settingsCursor)
+    printf 'PLACES_STATE phase=%s section=%s side=%s cursor=%s preset=%s\n' \
+        "$phase" "$(ipc settingsSection)" "$(ipc settingsSide)" "$cursor" "$(ipc keymapPreset)"
+    printf 'PLACES_SESSION %s\n' "$(ipc uiSettings | jq -c '.places.favourites')"
+    printf 'PLACES_PERSISTED %s\n' "$(jq -c '.places.favourites' "$XDG_STATE_HOME/flea/ui.json")"
+    printf 'PLACES_FOCUSED_ROW %s\n' "$(ipc settingsModel | jq -c --argjson cursor "$cursor" '.[$cursor]')"
+    printf 'PLACES_KEY_FOCUS %s\n' "$(ipc keyDeliveryState)"
+    printf 'PLACES_STATUS error=%s message=%s\n' "$(ipc statusError)" "$(ipc lastMessage | jq -Rs .)"
+}
+
 places_wait_records() {
-    local expected="$1"
-    settings_wait_value ".places.favourites == $expected"
+    local expected="$1" attempt matched=false
+    for attempt in $(seq 1 30); do
+        if ipc uiSettings | jq -e --argjson expected "$expected" '.places.favourites == $expected' >/dev/null \
+            && jq -e --argjson expected "$expected" '.places.favourites == $expected' "$XDG_STATE_HOME/flea/ui.json" >/dev/null; then
+            matched=true
+            break
+        fi
+        sleep 0.1
+    done
+    if [[ "$matched" != true ]]; then
+        places_records_diagnostic records-timeout
+        fail "places: session and persisted records never agreed on $expected"
+    fi
     ipc railEntries | jq -e --argjson expected "$expected" '[.[] | select(.kind == "favourite") | .original] == $expected' >/dev/null \
         || fail "places: rail records differ from saved originals"
 }
@@ -479,10 +502,12 @@ case_settingsplaces() {
     settings_open_key; settle
     settings_section places
     settings_focus_row favourite:2
+    places_records_diagnostic before-Shift+K
     key -M shift -k k -m shift >/dev/null; settle
     expected=$(jq -c '.[1:3] |= reverse' <<< "$expected")
     places_wait_records "$expected"
     [[ "$(ipc settingsCursor)" == 2 ]] || fail "places: Shift+K lost the moved row's cursor"
+    places_records_diagnostic before-Shift+J
     key -M shift -k j -m shift >/dev/null; settle
     expected=$(jq -c '.[1:3] |= reverse' <<< "$expected")
     places_wait_records "$expected"

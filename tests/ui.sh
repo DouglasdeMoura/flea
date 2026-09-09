@@ -1469,7 +1469,7 @@ case_click() {
     : > "$opened"
     click_row 4 left --mods ctrl
     settle
-    [[ "$(ipc selectedIndices)" == "4" ]] || fail "click: ctrl+click selected '$(ipc selectedIndices)', not row 4"
+    [[ "$(ipc selectedIndices)" == "2,4" ]] || fail "click: ctrl+click selected '$(ipc selectedIndices)', not rows 2,4"
     click_row 2 left --mods shift
     settle
     printf 'CLICK modifiers indices=%s opened=%q\n' "$(ipc selectedIndices)" "$(cat "$opened")"
@@ -1487,8 +1487,8 @@ case_click() {
     # is visibly on and a write operation cannot reach rows the user thinks they dropped.
     click_row 4 left
     settle
-    [[ "$(ipc selectionCount)" == "0" ]] \
-        || fail "click: a plain click left $(ipc selectionCount) rows selected, so the selection is stale"
+    [[ "$(ipc selectedIndices)" == "4" ]] \
+        || fail "click: a plain click selected '$(ipc selectedIndices)', not row 4 alone"
 
     # Right click keeps its own contract in every view: the cursor moves and the menu opens.
     click_row 3 right
@@ -2675,7 +2675,6 @@ grid_chrome_controls() {
     cardsize_expect drawnCount 61
     cardsize_expect sortMark name:asc
     click_row 3 left
-    key v >/dev/null
     cardsize_expect selectedIndices 3
     for order in size mtime kind name; do
         case "$order" in size|kind) first=file-59.json ;; mtime) first=file-60.txt ;; name) first=file-01.txt ;; esac
@@ -2779,6 +2778,8 @@ case_gridnavigation() {
         cardsize_expect cursor "$edge"
         key -k Down >/dev/null
         cardsize_expect cursor "$edge"
+        key -k Escape >/dev/null
+        cardsize_expect selectionCount 0
         key -k Home >/dev/null
         for i in 1 2 3 4 5 6; do key j >/dev/null; done
         cardsize_expect cursor 6

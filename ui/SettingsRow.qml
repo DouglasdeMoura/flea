@@ -357,8 +357,9 @@ Item {
 
         Rectangle {
             visible: root.hasBox
-            width: root.hasBox ? Theme.markSize : 0
-            height: Theme.markSize
+            // The boards frame a 14px interior at bodySmall 13 with two 2px borders.
+            width: root.hasBox ? height : 0
+            height: Math.round(14 * Theme.font.bodySmall / 13) + 2 * border.width
             color: "transparent"
             border.width: 2 * Theme.spacing.hairline
             border.color: root.boxGlyph.length > 0 ? Theme.color.accent : Theme.color.muted

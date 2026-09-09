@@ -24,9 +24,9 @@ marquee_expect() {
 }
 
 marquee_state() {
-    local expression="$1" label="$2" seen deadline=$((SECONDS + 15))
+    local expression="$1" label="$2" observer="${3:-selectionBandState}" seen deadline=$((SECONDS + 15))
     while (( SECONDS < deadline )); do
-        seen=$(ipc selectionBandState) || fail "marquee: band observation failed"
+        seen=$(ipc "$observer") || fail "marquee: observation failed: $observer"
         if jq -e "$expression" <<< "$seen" >/dev/null; then
             marquee_checks=$((marquee_checks + 1))
             printf 'MARQUEE_CHECK %s %s state=%s\n' "$marquee_checks" "$label" "$seen"
@@ -38,7 +38,7 @@ marquee_state() {
 }
 
 marquee_glide() {
-    local tx="$1" ty="$2" cx cy dx dy step
+    local tx="$1" ty="$2" tolerance="${3:-4}" cx cy dx dy move_x move_y step
     [[ "$tx $ty" =~ ^-?[0-9]+\ -?[0-9]+$ ]] || fail "marquee: invalid target coordinates"
     assert_focus
     # libinput accelerates relative motion; re-read the actual position after every step.
@@ -46,8 +46,11 @@ marquee_glide() {
         read -r cx cy <<< "$(hyprctl cursorpos | tr -d ',')"
         [[ "$cx $cy" =~ ^-?[0-9]+\ -?[0-9]+$ ]] || fail "marquee: actual pointer coordinates unavailable"
         dx=$((tx - cx)); dy=$((ty - cy))
-        if (( ${dx#-} <= 4 && ${dy#-} <= 4 )); then return; fi
-        ydotool mousemove -x "$((dx / 2))" -y "$((dy / 2))" >/dev/null 2>&1 \
+        if (( ${dx#-} <= tolerance && ${dy#-} <= tolerance )); then return; fi
+        move_x=$((dx / 2)); move_y=$((dy / 2))
+        if (( dx != 0 && move_x == 0 )); then move_x=$((dx > 0 ? 1 : -1)); fi
+        if (( dy != 0 && move_y == 0 )); then move_y=$((dy > 0 ? 1 : -1)); fi
+        ydotool mousemove -x "$move_x" -y "$move_y" >/dev/null 2>&1 \
             || fail "marquee: relative pointer motion failed"
         sleep 0.05
     done
@@ -63,6 +66,13 @@ marquee_release() {
         ydotool key 29:0 >/dev/null 2>&1 || fail "marquee: Ctrl release failed"
         marquee_ctrl_down=false
     fi
+}
+
+marquee_cleanup() {
+    local result="$1"
+    trap - EXIT HUP INT TERM
+    (marquee_release) || result=1
+    trash_cleanup "$result"
 }
 
 marquee_press() {
@@ -86,13 +96,20 @@ marquee_to() {
 
 marquee_begin_below() {
     local last="$1" ctrl="${2:-false}" last_only="${3:-false}" ax ay aw ah rx ry rw rh cx cy
+    local wx wy ww wh pointer_x pointer_y
     read -r ax ay aw ah <<< "$(ipc listAreaRect)"
     read -r rx ry rw rh <<< "$(ipc rowRect "$last")"
     [[ "$ax $ay $aw $ah $rx $ry $rw $rh" =~ ^[0-9]+(\ [0-9]+){7}$ ]] || fail "marquee: listing/row geometry unavailable"
     if [[ "$(ipc viewMode)" == columns ]]; then ax=$rx; aw=$rw; fi
-    (( rh > 0 && ry + rh + 8 < ay + ah )) || fail "marquee: no empty space below the last row"
+    (( rh > 0 && ry + rh < ay + ah )) || fail "marquee: no empty space below the last row"
     cx=$((ax + aw - 12)); cy=$(((ry + rh + ay + ah) / 2))
     [[ "$last_only" == true ]] && cx=$((rx + rw * 3 / 4))
+    read -r wx wy ww wh < <(window_box) || fail "marquee: owned window is unavailable"
+    marquee_glide "$((wx + cx))" "$((wy + cy))" 1
+    read -r pointer_x pointer_y <<< "$(hyprctl cursorpos | tr -d ',')"
+    [[ "$pointer_x $pointer_y" =~ ^-?[0-9]+\ -?[0-9]+$ ]] || fail "marquee: final press position is unavailable"
+    (( pointer_x > wx + ax && pointer_x < wx + ax + aw && pointer_y > wy + ry + rh && pointer_y < wy + ay + ah )) \
+        || fail "marquee: actual pointer missed the measured empty tail; pointer=$pointer_x,$pointer_y row_bottom=$((wy + ry + rh)) view_bottom=$((wy + ay + ah))"
     marquee_press "$cx" "$cy" "$ctrl"
     marquee_state '.tracking and (.active | not)' "empty-space press owns a pending band"
 }
@@ -149,6 +166,50 @@ marquee_interactions() {
     printf 'MARQUEE_INTERACTIONS %s complete\n' "$label"
 }
 
+marquee_grid_zoom() {
+    local before after x y width height before_height cx cy deadline
+    settings_wait_value '.preview.thumbSize == "medium" and .preview.ctrlZoom == true'
+    click_row 1 left
+    marquee_expect selectedIndices 1 "Grid zoom rollback starts with one mark"
+    marquee_expect cursor 1 "Grid zoom rollback starts with an identified cursor"
+    before=$(ipc rowRect 0) || fail "marquee: Grid geometry before zoom is unavailable"
+    [[ "$before" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || fail "marquee: invalid Grid rectangle before zoom: $before"
+    read -r x y width before_height <<< "$before"
+    (( width > 0 && before_height > 0 )) || fail "marquee: Grid tile has no geometry before zoom"
+    marquee_four default-grid-zoom
+    ydotool key 29:1 >/dev/null 2>&1 || fail "marquee: zoom Ctrl press failed"
+    marquee_ctrl_down=true
+    omarchy-drive scroll up 1 >/dev/null || fail "marquee: native Ctrl-wheel zoom failed"
+    settings_wait_value '.preview.thumbSize == "large"'
+    deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        after=$(ipc rowRect 0) || fail "marquee: Grid geometry after zoom is unavailable"
+        [[ "$after" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || fail "marquee: invalid Grid rectangle after zoom: $after"
+        read -r x y width height <<< "$after"
+        (( width > 0 && height > before_height )) && break
+        sleep 0.05
+    done
+    (( width > 0 && height > before_height )) || fail "marquee: Ctrl-wheel changed no actual tile geometry: $before -> $after"
+    marquee_state '(.tracking | not) and (.active | not)' "Grid geometry change cancels the active band"
+    marquee_expect selectedIndices 1 "Grid zoom restores the pre-band marks while pressed"
+    marquee_expect cursor 1 "Grid zoom restores the pre-band cursor while pressed"
+    shot marquee-grid-zoom-cancelled-held
+    marquee_release
+    marquee_expect selectedIndices 1 "physical release cannot recommit a zoom-cancelled band"
+    marquee_expect cursor 1 "physical release preserves the zoom-restored cursor"
+    read -r cx cy <<< "$(ipc rowCentre 0)"
+    marquee_to "$cx" "$cy"
+    ydotool key 29:1 >/dev/null 2>&1 || fail "marquee: zoom restoration Ctrl press failed"
+    marquee_ctrl_down=true
+    omarchy-drive scroll down 1 >/dev/null || fail "marquee: native zoom restoration failed"
+    settings_wait_value '.preview.thumbSize == "medium"'
+    marquee_release
+    cardsize_expect rowRect "$before" 0
+    marquee_expect selectedIndices 1 "restoring zoom preserves the rolled-back marks"
+    marquee_expect cursor 1 "restoring zoom preserves the rolled-back cursor"
+    printf 'MARQUEE_GRID_ZOOM before=%q enlarged=%q restored=%q\n' "$before" "$after" "$(ipc rowRect 0)"
+}
+
 marquee_scroll() {
     local dir="$marquee_box/scroll" i ax ay aw ah cx cy before after
     mkdir "$dir" || fail "marquee: scroll fixture creation failed"
@@ -180,6 +241,121 @@ marquee_scroll() {
     marquee_expect selectedIndices '' "Escape restores the empty pre-scroll selection"
     marquee_expect cursor 39 "Escape restores the pre-scroll cursor"
     kill_flea
+}
+
+marquee_columns_boundary() {
+    local dir="$marquee_box/columns-boundary" window_size total last last_name i name state original_held cross_before
+    local ax ay aw ah rx ry rw rh cx cy band rate remaining deadline selected first
+    marquee_guard "$dir"
+    mkdir "$dir" || fail "marquee: Columns boundary fixture creation failed"
+    printf 'column 0\n' > "$dir/file-000000.txt" || fail "marquee: Columns initial fixture failed"
+    seed_ui_state "$marquee_box/columns-boundary-state" '{"keys":"default","view":"columns","preview":{"thumbnails":"off"}}'
+    HOME="$marquee_home" launch "$dir"
+    wait_listing 1
+    permissions_viewport 880 620
+    marquee_expect viewMode columns "boundary fixture enters native Columns"
+    state=$(ipc listingWindowState) || fail "marquee: initial held-window observation failed"
+    window_size=$(jq -er '.windowSize | select(. > 0)' <<< "$state") || fail "marquee: invalid held-window budget"
+    total=$((window_size * 2 + 1)); last=$((total - 1))
+    kill_flea
+    for ((i = 1; i < total; i++)); do
+        printf -v name 'file-%06d.txt' "$i"
+        printf 'column %s\n' "$i" > "$dir/$name" || fail "marquee: Columns boundary file creation failed"
+    done
+    printf -v last_name 'file-%06d.txt' "$last"
+    HOME="$marquee_home" launch "$dir"
+    wait_listing "$total"
+    permissions_viewport 880 620
+    marquee_state '.total > .windowSize * 2' "Columns fixture exceeds two held windows" listingWindowState
+    key -k End >/dev/null || fail "marquee: Columns End delivery failed"
+    marquee_expect cursor "$last" "Columns End reaches the absolute final row"
+    cardsize_expect visibleRowName "$last_name" "$last"
+    marquee_state '.held > 0 and .loaded > 0 and .held + .loaded == .total and .loaded <= .windowSize' \
+        "Columns End refills a bounded final held window" listingWindowState
+    read -r cx cy <<< "$(ipc rowCentre "$last")"
+    marquee_to "$cx" "$cy"
+    omarchy-drive scroll down 1 >/dev/null || fail "marquee: Columns tail scroll failed"
+    state=$(ipc listingWindowState) || fail "marquee: final held-window observation failed"
+    original_held=$(jq -er .held <<< "$state") || fail "marquee: final held offset unavailable"
+    read -r ax ay aw ah <<< "$(ipc listAreaRect)"
+    read -r rx ry rw rh <<< "$(ipc rowRect "$last")"
+    [[ "$ax $ay $aw $ah $rx $ry $rw $rh" =~ ^[0-9]+(\ [0-9]+){7}$ ]] || fail "marquee: Columns boundary geometry unavailable"
+    (( rh > 0 )) || fail "marquee: Columns row height is zero"
+    cross_before=$((original_held - (ah + rh - 1) / rh))
+    (( cross_before >= 0 )) || fail "marquee: fixture cannot cross a complete old held boundary"
+    marquee_begin_below "$last"
+    marquee_to "$((rx + rw / 4))" "$((ay - rh / 2))"
+    marquee_state '.active and .scrollRate > 0' "Columns band begins upward auto-scroll from its measured tail"
+    band=$(ipc selectionBandState) || fail "marquee: Columns band observation failed"
+    rate=$(jq -er '.scrollRate | select(. > 0)' <<< "$band") || fail "marquee: Columns auto-scroll rate unavailable"
+    # Travel time comes from actual row geometry and the band's reported rate; retain the usual check window after it.
+    remaining=$(jq -nr --argjson position "$(jq -r .contentY <<< "$band")" --argjson row "$cross_before" \
+        --argjson height "$rh" --argjson rate "$rate" '([0, ($position - $row * $height) / $rate] | max | ceil) + 15') \
+        || fail "marquee: Columns boundary travel time could not be derived"
+    deadline=$((SECONDS + remaining))
+    while (( SECONDS < deadline )); do
+        state=$(ipc listingWindowState) || fail "marquee: Columns refill observation failed"
+        jq -e '.held >= 0 and .loaded > 0 and .loaded <= .windowSize and .held + .loaded <= .total' <<< "$state" >/dev/null \
+            || fail "marquee: Columns exceeded its held-window budget: $state"
+        band=$(ipc selectionBandState) || fail "marquee: Columns active-band observation failed"
+        jq -e '.active and .tracking' <<< "$band" >/dev/null || fail "marquee: a Columns refill cancelled the live band: $band"
+        selected=$(ipc selectedIndices) || fail "marquee: Columns mark observation failed"
+        first=${selected%%,*}
+        if [[ "$first" =~ ^[0-9]+$ ]] && (( first <= cross_before )) \
+            && jq -e --argjson old "$original_held" '.held < $old and .held + .loaded < .total' <<< "$state" >/dev/null; then break; fi
+        sleep 0.05
+    done
+    if [[ ! "$first" =~ ^[0-9]+$ ]] || (( first > cross_before )) \
+        || ! jq -e --argjson old "$original_held" '.held < $old and .held + .loaded < .total' <<< "$state" >/dev/null; then
+        fail "marquee: Columns band did not cross its old held boundary: window=$state first=$first target=$cross_before"
+    fi
+    marquee_expect cursor "$last" "Columns auto-scroll leaves the cursor fixed until release"
+    shot marquee-columns-boundary-held
+    marquee_release
+    selected=$(ipc selectedIndices) || fail "marquee: retained Columns marks unavailable"
+    first=${selected%%,*}
+    jq -ne --arg indices "$selected" --argjson old "$original_held" --argjson total "$total" \
+        '($indices | split(",") | map(tonumber)) as $rows | ($rows | length) > 0 and $rows[0] < $old and $rows == [range($rows[0]; $total)]' >/dev/null \
+        || fail "marquee: held-window replacement changed absolute marks: $selected"
+    marquee_expect cursor "$first" "Columns release chooses the last absolute row that entered"
+    printf -v name 'file-%06d.txt' "$first"
+    cardsize_expect visibleRowName "$name" "$first"
+    marquee_expect selectedIndices "$selected" "Columns marks survive the release cursor's viewport refill"
+    printf 'MARQUEE_COLUMNS_BOUNDARY total=%s old_held=%s first_selected=%s retained=%s\n' "$total" "$original_held" "$first" "$selected"
+    kill_flea
+}
+
+marquee_filtered() {
+    local dir="$marquee_box/filtered" mode i name cx cy
+    marquee_guard "$dir"
+    mkdir "$dir" || fail "marquee: filtered fixture creation failed"
+    for i in 0 1 2 3 4 5 6 7; do
+        if (( i % 2 == 0 )); then name="file-$i-keep.txt"; else name="file-$i-skip.txt"; fi
+        printf 'filter %s\n' "$i" > "$dir/$name" || fail "marquee: filtered file creation failed"
+    done
+    # Columns deliberately has no filter entry; List and Grid exercise their shared listing-index mapping natively.
+    for mode in list grid; do
+        seed_ui_state "$marquee_box/filtered-$mode-state" '{"keys":"default","view":"list","preview":{"thumbnails":"off"}}'
+        HOME="$marquee_home" launch "$dir"
+        wait_listing 8
+        permissions_viewport 880 620
+        click_chrome "$mode"
+        marquee_expect viewMode "$mode" "filtered fixture selects native $mode"
+        key / keep -k Return >/dev/null || fail "marquee: native filter delivery failed"
+        marquee_expect drawnCount 4 "$mode filter leaves four nonconsecutive listing rows"
+        cardsize_expect visibleRowName file-6-keep.txt 6
+        marquee_begin_below 6
+        read -r cx cy <<< "$(ipc rowCentre 0)"
+        marquee_to "$cx" "$cy"
+        marquee_expect selectedIndices '0,2,4,6' "$mode filtered band stores the visible files' absolute indices"
+        marquee_release
+        marquee_expect selectedIndices '0,2,4,6' "$mode filtered release preserves only visible marks"
+        marquee_expect cursor 0 "$mode filtered release restores the last entering absolute cursor"
+        key -k Escape >/dev/null || fail "marquee: filter dismissal failed"
+        marquee_expect drawnCount 8 "$mode filter dismissal restores the full listing"
+        marquee_expect selectedIndices '0,2,4,6' "$mode filter dismissal cannot reinterpret marks as view positions"
+        kill_flea
+    done
 }
 
 marquee_targets() {
@@ -221,11 +397,14 @@ marquee_targets() {
         [[ "$(ipc path)" == "$dir" ]] || fail "marquee: refusing deletion outside the current owned listing"
         for i in 0 1 2 3; do marquee_guard "$dir/file-$i.txt"; done
         marquee_guard "$XDG_DATA_HOME/Trash"
+        trash_guard_store 0
         key dd >/dev/null || fail "marquee: protected trash pair delivery failed"
         wait_listing 0
         for i in 0 1 2 3; do [[ ! -e "$dir/file-$i.txt" ]] || fail "marquee: dd did not trash every banded file"; done
+        trash_guard_store 4
         key z >/dev/null || fail "marquee: undo key delivery failed"
         wait_listing 4
+        trash_guard_store 0
         for i in 0 1 2 3; do
             [[ "$(cat "$dir/file-$i.txt")" == "keyboard $i" ]] || fail "marquee: undo did not restore exact banded contents"
         done
@@ -237,6 +416,8 @@ marquee_targets() {
 case_marquee() (
     local marquee_checks=0 marquee_button_down=false marquee_ctrl_down=false preset mode i state other
     local marquee_box marquee_home dir
+    local trash_box trash_checks=0 trash_parent_bus_id="" trash_private_bus_id="" trash_bus_address="" trash_bus_pid="" trash_provider_pid=""
+    [[ "$(realpath -e "$(command -v gio)")" == /usr/bin/gio ]] || fail "marquee: product gio resolves to a stub"
     marquee_box=$(mktemp -d "$fixture_root/marquee.XXXXXXXX") || fail "marquee: sandbox creation failed"
     printf 'native mouse-selection fixture\n' > "$marquee_box/.flea-test-sandbox"
     marquee_home="$marquee_box/home"
@@ -244,7 +425,10 @@ case_marquee() (
     export XDG_CONFIG_HOME="$marquee_home/.config" XDG_DATA_HOME="$marquee_box/data" XDG_CACHE_HOME="$marquee_box/cache"
     export YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket"
     mkdir "$XDG_DATA_HOME" "$XDG_CACHE_HOME" || fail "marquee: private state creation failed"
-    trap 'marquee_release; kill_flea' EXIT
+    trash_box=$marquee_box
+    marquee_guard "$XDG_DATA_HOME"
+    HOME="$marquee_home" trash_start_bus
+    trap 'marquee_cleanup $?' EXIT
     for preset in default vim mac windows; do
         dir="$marquee_box/$preset"
         mkdir "$dir" || fail "marquee: listing creation failed"
@@ -258,6 +442,7 @@ case_marquee() (
             click_chrome "$mode"
             marquee_expect viewMode "$mode" "native view button selects $mode"
             marquee_interactions "$preset-$mode"
+            if [[ "$preset" == default && "$mode" == grid ]]; then marquee_grid_zoom; fi
         done
         click_chrome dual
         marquee_interactions "$preset-dual-left"
@@ -271,6 +456,8 @@ case_marquee() (
         kill_flea
     done
     marquee_scroll
+    marquee_columns_boundary
+    marquee_filtered
     marquee_targets
     printf 'MARQUEE_NATIVE checks=%s presets=4 views=list,grid,columns,dual-left,dual-right autoscroll=both-directions\n' "$marquee_checks"
 )

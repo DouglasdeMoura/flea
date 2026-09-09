@@ -25,6 +25,7 @@ Item {
     readonly property var secondaryItem: secondary
     readonly property bool transientIsError: root.errors.length > 0
     property var activities: []
+    property var dragFeedbackOwner: null
     readonly property var activity: root.activities.length ? root.activities[0] : null
     readonly property string sticky: root.activity ? root.activity.text : ""
     readonly property var transfer: root.activity ? root.activity.transfer : Ops.emptyTransfer()

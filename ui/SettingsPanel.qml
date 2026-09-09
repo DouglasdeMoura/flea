@@ -303,7 +303,7 @@ Item {
                     text: "Settings"
                     color: Theme.color.foreground
                     font.family: Theme.font.family
-                    font.pixelSize: Theme.font.body
+                    font.pixelSize: Theme.font.caption
                     font.bold: true
                     textFormat: Text.PlainText
                 }
