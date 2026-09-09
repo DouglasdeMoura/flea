@@ -9,14 +9,18 @@ impl Map {
     pub fn load() -> Self {
         Self::parse(include_str!("../../keys.toml"))
     }
-    // Sample input: [[text]] followed by char = "j" and action = "cursorDown".
+    // Sample input: [[text]]# comment, followed by char = "j" and action = "cursorDown".
     fn parse(text: &str) -> Self {
         let mut map = Self::default();
         for line in text.lines().map(str::trim) {
-            if line.starts_with("[[") && line.ends_with("]]") {
-                map.blocks
-                    .push((line[2..line.len() - 2].into(), HashMap::new()));
-                continue;
+            if let Some((kind, suffix)) = line
+                .strip_prefix("[[")
+                .and_then(|header| header.split_once("]]"))
+            {
+                if suffix.trim().is_empty() || suffix.trim_start().starts_with('#') {
+                    map.blocks.push((kind.trim().into(), HashMap::new()));
+                    continue;
+                }
             }
             if line.starts_with('#') {
                 continue;
@@ -297,5 +301,29 @@ mod tests {
             .sheet("default")
             .iter()
             .any(|line| line.to_lowercase().contains("grid")));
+    }
+    #[test]
+    fn commented_headers_keep_shipped_mac_navigation_aliases_separate() {
+        let map = Map::load();
+        for (key, action) in [("Up", "parent"), ("Down", "open"), ("Delete", "trash")] {
+            assert_eq!(map.action(&Key::named(key, "ctrl"), "mac"), action);
+        }
+        assert_eq!(map.action(&Key::character('3', "ctrl"), "mac"), "viewGrid");
+    }
+    #[test]
+    fn header_comments_do_not_strip_quoted_hashes_or_accept_other_suffixes() {
+        let map = Map::parse(r##"
+[[text]] # A header comment can contain = and ]].
+char = "#"
+action = "literal#action"
+# [[preset]] is still a comment.
+[[text]]# No intervening space is required.
+char = "j"
+action = "cursorDown"
+[[code]] unexpected
+"##);
+        assert_eq!(map.blocks.len(), 2);
+        assert_eq!(map.action(&Key::character('#', ""), "default"), "literal#action");
+        assert_eq!(map.action(&Key::character('j', ""), "default"), "cursorDown");
     }
 }

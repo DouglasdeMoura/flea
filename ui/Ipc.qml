@@ -103,6 +103,7 @@ QtObject {
             if (!dialog) return JSON.stringify({opened: false})
             return JSON.stringify({opened: dialog.opened, facts: dialog.facts, path: dialog.path, mode: dialog.modeText,
                 displayedError: dialog.displayedError, displayedSummary: dialog.displayedSummary,
+                bodyRect: root.fleaWindow.rectOf(dialog.bodyItem),
                 editable: dialog.editable, busy: dialog.busy, error: dialog.errorText, rect: root.fleaWindow.rectOf(dialog.cardItem),
                 controls: dialog.controls().map(function(control) {
                     return Object.assign(root.controlState(control.name, control.item), {checked: control.checked, bit: control.bit,

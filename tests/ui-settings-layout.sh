@@ -31,8 +31,9 @@ case_settingscompact() {
         ipc settingsScrollState | jq -e '.compactHeight > 0 and (.compactHeight == .pane.contentHeight)' >/dev/null \
             || fail "settingscompact: stable height is not measured View content"
         if [[ "$viewport" == 1100x800 ]]; then
-            ipc settingsScrollState | jq -e '.pane.height == .compactHeight' >/dev/null \
-                || fail "settingscompact: View has unused space or unexpected scrolling"
+            scroll=$(ipc settingsScrollState)
+            jq -e '.pane.height == .compactHeight' <<< "$scroll" >/dev/null \
+                || fail "settingscompact: View has unused space or unexpected scrolling: $scroll"
         fi
         shot "settings-view-$viewport"
         settings_focus_row columns

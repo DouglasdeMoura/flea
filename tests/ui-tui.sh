@@ -17,12 +17,16 @@ import sys
 import tempfile
 import termios
 import time
+import wave
 
 SCRIPT = Path(sys.argv[1]).resolve()
 ARGS = sys.argv[2:]
 ESCAPE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+STRING_CONTROL = re.compile(rb"\x1b(?:[P_^].*?(?:\x1b\\|$)|].*?(?:\x07|\x1b\\|$))", re.DOTALL)
 WAIT_SECONDS = 20
 POLL_SECONDS = 0.05
+PRESETS = ("default", "vim", "mac", "windows")
+TERMINALS = ("foot", "kitty")
 
 
 def command(args, **options):
@@ -45,10 +49,11 @@ def guard(root, path):
 # Native output: ESC[H starts a frame; ESC[rows;1H introduces its full-width final row, including editors.
 def frame(data, rows, columns):
     raw = data.rsplit(b"\x1b[H", 1)[-1] if b"\x1b[H" in data else b""
+    screen = STRING_CONTROL.sub(b"", raw)
     footer = b"\x1b[" + str(rows).encode() + b";1H"
-    if footer not in raw or len(ESCAPE.sub(b"", raw.split(footer, 1)[1]).decode("utf-8", errors="replace")) < columns:
+    if footer not in screen or len(ESCAPE.sub(b"", screen.split(footer, 1)[1]).decode("utf-8", errors="replace")) < columns:
         return b"", ""
-    text = re.sub(rb"\x1b\[\d+;1H", b"\n", raw)
+    text = re.sub(rb"\x1b\[\d+;1H", b"\n", screen)
     return raw, ESCAPE.sub(b"", text).decode("utf-8", errors="replace")
 
 
@@ -72,12 +77,13 @@ def child(case, binary):
 
 
 class Native:
-    def __init__(self, root, binary, preset):
+    def __init__(self, root, binary, preset, terminal):
         self.root, self.binary = root, binary
-        self.case = guard(root, root / preset)
+        self.preset, self.terminal = preset, terminal
+        self.case = guard(root, root / (terminal + "-" + preset))
         self.case.mkdir()
         (self.case / ".flea-test-sandbox").write_text("Flea TUI native fixture\n")
-        self.title = "flea-tui-" + root.name + "-" + preset
+        self.title = "flea-tui-" + root.name + "-" + self.case.name
         self.address = None
         self.product_pid = None
         self.checks = 0
@@ -91,6 +97,7 @@ class Native:
         (self.case / "listing/amber/nested-proof.txt").write_text("native navigation proof\n")
         (self.case / "state/flea/ui.json").write_text(json.dumps({"keys": preset, "hidden": False,
             "sort": {"key": "name", "reverse": False}, "preview": {"loadOn": "manual", "column": True}}))
+        (self.case / "config/xdg-terminals.list").write_text(terminal + ".desktop\n")
 
     def drive(self, *args):
         invocation = ["omarchy-drive", *map(str, args)]
@@ -177,7 +184,43 @@ class Native:
 
     def key(self, *args):
         self.identity()
+        before = (self.case / "input.bin").stat().st_size
         self.drive("key", "--window", self.address, *args)
+        self.wait("pty-input-" + str(self.checks), lambda: (self.case / "input.bin").stat().st_size > before)
+
+    def chord(self, key, *modifiers):
+        args = []
+        for modifier in modifiers:
+            args.extend(["-M", modifier])
+        args.extend(["-k", key])
+        for modifier in reversed(modifiers):
+            args.extend(["-m", modifier])
+        self.key(*args)
+
+    def cursor_is(self, name):
+        # The listing cursor is reverse video; marked rows use a background without reverse video.
+        runs = re.findall(rb"\x1b\[7m([^\x1b]*)", self.raw)
+        return any(name in run.decode("utf-8", errors="replace") and run.startswith((b"\xe2\x80\xba ", b"\xe2\x96\xa1 ", b"@ ", b"* ")) for run in runs)
+
+    def geometry(self, label, preview):
+        row = self.text.splitlines()[1]
+        columns = self.size[1]
+        borders = [index for index, char in enumerate(row) if char == "\u2502"]
+        expected = [columns * 22 // 100 - 1]
+        if preview:
+            expected.append(columns * 22 // 100 + columns * 40 // 100 - 1)
+        if len(row) != columns or borders != expected:
+            raise RuntimeError(f"TUI {label} geometry differs from Tui.html 22:40:38: columns={columns}, row={len(row)}, borders={borders}, expected={expected}")
+        self.checks += 1
+        print(f"TUI_PASS {label} geometry columns={columns} borders={borders}", flush=True)
+
+    def navigate(self, path, label, expected):
+        guard(self.case, path)
+        self.chord("l", "ctrl")
+        self.snapshot(label + "-editor", lambda text: ": " in text.splitlines()[-1])
+        self.key(str(path))
+        self.key("-k", "Return")
+        self.snapshot(label, lambda text: path.name in text.splitlines()[0] and expected in text)
 
     def start(self):
         child_command = shlex.join(["bash", str(SCRIPT), "--child", str(self.case), str(self.binary)])
@@ -185,7 +228,8 @@ class Native:
             "script", "--quiet", "--flush", "--return", "--log-in", str(self.case / "input.bin"),
             "--log-out", str(self.case / "output.bin"), "--log-timing", str(self.case / "timing.log"), "--command", child_command]
         self.log.write((shlex.join(invocation) + "\n").encode())
-        self.launcher = subprocess.Popen(invocation, env=self.environment, stdout=self.log, stderr=self.log, start_new_session=True)
+        terminal_environment = dict(self.environment, XDG_CONFIG_HOME=str(self.case / "config"))
+        self.launcher = subprocess.Popen(invocation, env=terminal_environment, stdout=self.log, stderr=self.log, start_new_session=True)
         self.drive("wait", "window", self.title, "--timeout", str(WAIT_SECONDS))
         window = self.window()
         self.address = window["address"]
@@ -193,19 +237,23 @@ class Native:
         self.environment["OMARCHY_DRIVE_TIER_FULL"] = window["class"]
         self.wait("product-pid", lambda: (self.case / "product.pid").is_file())
         window = self.identity()
+        executable = Path(os.readlink(f'/proc/{window["pid"]}/exe')).name
+        if executable != self.terminal:
+            raise RuntimeError(f"xdg-terminal-exec selected {executable}, expected {self.terminal}")
         (self.case / "identity.json").write_text(json.dumps({"window": window, "product_pid": self.product_pid,
             "command": invocation, "terminal_exe": os.readlink(f'/proc/{window["pid"]}/exe')}))
 
     def smoke(self):
         self.start()
         self.snapshot("listing", lambda text: "5 items" in text and "charlie.txt" in text)
+        self.geometry("listing", True)
         self.key("-k", "Down")
-        self.key("-k", "Return")
+        self.key("-k", "Right" if self.preset == "mac" else "Return")
         self.snapshot("empty-navigation", lambda text: "1 bronze" in text and "0 items" in text)
         self.key("-k", "BackSpace")
         self.snapshot("parent-navigation", lambda text: "1 listing" in text and "5 items" in text)
         self.key("-k", "Home")
-        self.key("-k", "Return")
+        self.key("-k", "Right" if self.preset == "mac" else "Return")
         self.snapshot("nested-navigation", lambda text: "1 amber" in text and "nested-proof.txt" in text and "1 items" in text)
         self.key("-k", "BackSpace")
         self.snapshot("listing-restored", lambda text: "1 listing" in text and "5 items" in text)
@@ -219,22 +267,350 @@ class Native:
         self.snapshot("selection-cleared", lambda text: " V " not in text and "5 items" in text)
         self.key("-M", "ctrl", "-k", "f", "-m", "ctrl")
         self.snapshot("search-editor", lambda text: "search:" in text and "Tab changes scope" in text)
+        self.key("-k", "Tab")
+        self.snapshot("search-current-scope", lambda text: "search:" in text and "in " + str(self.case / "listing") in text)
         self.key("needleproof")
         self.key("-k", "Return")
         self.snapshot("search-result", lambda text: "Search: 1 matches" in text and "delta-needleproof.txt" in text)
+        self.search_identity()
         self.key("-k", "Escape")
         self.snapshot("search-dismissed", lambda text: "Search:" not in text and "5 items" in text)
+        self.controls()
+        self.tabs()
+        self.previews()
         before = self.window()["size"]
         before_cells = self.terminal_size()[:2]
         self.drive("window", "fullscreen", self.address)
         self.wait("native-resize", lambda: self.window()["size"] != before and self.terminal_size()[:2] != before_cells)
         self.snapshot("resized", lambda text: "5 items" in text and "1 listing" in text)
+        self.geometry("resized", True)
         self.key("q")
         self.wait("clean-quit", lambda: (self.case / "exit.json").is_file())
         receipt = json.loads((self.case / "exit.json").read_text())
         if receipt["status"] != 0 or receipt["before"] != receipt["after"]:
             raise RuntimeError(f"TUI exit or terminal restoration failed: {receipt}")
         self.wait("terminal-closed", lambda: not self.owned_process(self.product_pid) and self.launcher.poll() is not None)
+
+    def search_identity(self):
+        listing = self.case / "listing"
+        original = guard(self.case, listing / "delta-needleproof.txt")
+        renamed = guard(self.case, listing / "delta-needleproof-renamed.txt")
+        contents = original.read_bytes()
+        for source, destination, label in [(original, renamed, "search-rename"), (renamed, original, "search-restore")]:
+            guard(self.case, source)
+            guard(self.case, destination)
+            self.key("r")
+            self.snapshot(label + "-editor", lambda text: "Enter saves" in text)
+            self.key(destination.stem)
+            self.key("-k", "Return")
+            self.wait(label + "-identity", lambda: not source.exists() and destination.is_file() and destination.read_bytes() == contents)
+            self.snapshot(label, lambda text: "Search: 1 matches" in text and self.cursor_is(destination.name))
+
+    def controls(self):
+        for label, args, expected in [
+            ("home", ("-k", "Home"), "amber"), ("down", ("-k", "Down"), "bronze"),
+            ("j", ("j",), "charlie.txt"), ("k", ("k",), "bronze"),
+            ("up", ("-k", "Up"), "amber"), ("end", ("-k", "End"), "echo.txt"),
+            ("home-again", ("-k", "Home"), "amber"), ("G", ("G",), "echo.txt"),
+            ("page-up", ("-k", "Page_Up"), "amber"), ("page-down", ("-k", "Page_Down"), "echo.txt"),
+        ]:
+            self.key(*args)
+            self.snapshot("navigation-" + label, lambda text: self.cursor_is(expected))
+        self.chord("u", "ctrl")
+        self.snapshot("navigation-ctrl-u", lambda text: self.cursor_is("amber"))
+        self.key("-k", "End")
+        self.key("gg" if self.preset == "vim" else "g")
+        self.snapshot("navigation-first-key", lambda text: self.cursor_is("amber"))
+        for label, args, count in [("shift-down", ("Down", "shift"), 2), ("shift-up", ("Up", "shift"), 2)]:
+            self.chord(*args)
+            self.snapshot("selection-" + label, lambda text: f" V {count} " in text)
+        self.key("-k", "Escape")
+        self.chord("a", "ctrl")
+        self.snapshot("selection-all-ctrl", lambda text: " V 5 " in text and "5 items selected" in text)
+        self.key("-k", "Escape")
+        if self.preset == "mac":
+            self.chord("a", "super")
+            self.snapshot("selection-all-super", lambda text: " V 5 " in text)
+            self.key("-k", "Escape")
+        self.key("/")
+        self.snapshot("filter-editor", lambda text: "filter:" in text)
+        self.key("charlie")
+        self.snapshot("filter-live", lambda text: "1 matches in 5 loaded rows" in text)
+        self.key("-k", "Return")
+        self.snapshot("filter-accepted", lambda text: "filter:" not in text and "1 matches in 5 loaded rows" in text)
+        self.key("-k", "Escape")
+        self.snapshot("filter-cleared", lambda text: "Filter " not in text and "5 items" in text)
+        for sort in ("size", "mtime", "name"):
+            self.key("s")
+            self.snapshot("sort-" + sort, lambda text: "\u00b7 " + sort + " \u25b4" in text.splitlines()[0])
+        for label, glyph in [("reverse", "\u25be"), ("forward", "\u25b4")]:
+            self.chord("s", "shift")
+            self.snapshot("sort-" + label, lambda text: "name " + glyph in text.splitlines()[0])
+        self.key(".")
+        self.snapshot("hidden-shown", lambda text: ".hidden-proof" in text and "6 items" in text)
+        self.key(".")
+        self.snapshot("hidden-restored", lambda text: ".hidden-proof" not in text and "5 items" in text)
+        self.key("-k", "Home")
+        for label, args in [("r", ("r",)), ("f2", ("-k", "F2"))] + ([("enter", ("-k", "Return"))] if self.preset == "mac" else []):
+            self.key(*args)
+            self.snapshot("rename-" + label, lambda text: "Enter saves" in text)
+            self.key("-k", "Escape")
+            self.snapshot("rename-" + label + "-cancelled", lambda text: "Enter saves" not in text and self.cursor_is("amber"))
+        self.key(":")
+        self.key("am")
+        self.snapshot("path-completion", lambda text: "amber/" in text.splitlines()[-1])
+        self.key("-k", "Tab")
+        self.key("-k", "Return")
+        self.snapshot("path-completion-opened", lambda text: "1 amber" in text and "1 items" in text)
+        history = {"default": ("H", "L"), "vim": ("H", "L"),
+                   "mac": (("bracketleft", "super"), ("bracketright", "super")),
+                   "windows": (("Left", "alt"), ("Right", "alt"))}[self.preset]
+        for label, action, directory, count in [("back", history[0], "listing", 5), ("forward", history[1], "amber", 1)]:
+            self.key(action) if isinstance(action, str) else self.chord(*action)
+            self.snapshot("history-" + label, lambda text: "1 " + directory in text and f"{count} items" in text)
+        self.key("-k", "BackSpace")
+        self.snapshot("history-returned", lambda text: "1 listing" in text and "5 items" in text)
+        self.chord("l", "ctrl")
+        self.key(str(guard(self.case, self.case / "missing-directory")))
+        self.key("-k", "Return")
+        self.snapshot("missing-path-error", lambda text: "Esc dismisses" in text and "5 items" in text)
+        self.key("s")
+        self.snapshot("missing-path-persists", lambda text: "Esc dismisses" in text and "\u00b7 size" in text.splitlines()[0])
+        self.key("-k", "Escape")
+        self.snapshot("missing-path-acknowledged", lambda text: "Esc dismisses" not in text)
+        self.key("ss")
+        self.snapshot("sort-restored-after-error", lambda text: "\u00b7 name" in text.splitlines()[0])
+        self.rename_changed_identity()
+        self.menu_and_panel()
+
+    def rename_changed_identity(self):
+        original = guard(self.case, self.case / "listing/charlie.txt")
+        held = guard(self.case, self.case / "charlie-held.txt")
+        destination = guard(self.case, self.case / "listing/changed-name.txt")
+        contents = original.read_bytes()
+        self.key("-k", "Home")
+        self.key("-k", "Down")
+        self.key("-k", "Down")
+        self.snapshot("rename-identity-selected", lambda text: self.cursor_is(original.name))
+        self.key("r")
+        self.snapshot("rename-identity-editor", lambda text: "Enter saves" in text)
+        original.rename(held)
+        original.write_text("external replacement fixture\n")
+        self.key(destination.stem)
+        self.key("-k", "Return")
+        self.snapshot("rename-changed-identity-refused", lambda text: "Selected item changed; reopen Rename." in text)
+        if destination.exists() or held.read_bytes() != contents or original.read_text() != "external replacement fixture\n":
+            raise RuntimeError("Rename changed an item after its displayed identity was replaced")
+        self.key("-k", "Escape")
+        guard(self.case, original).unlink()
+        guard(self.case, held).rename(guard(self.case, original))
+        self.snapshot("rename-identity-recovered", lambda text: "5 items" in text and "Selected item changed" not in text)
+
+    def menu_and_panel(self):
+        for label, activate in [("letter", lambda: self.key("m")), ("shift-f10", lambda: self.chord("F10", "shift")),
+                                ("menu-key", lambda: self.key("-k", "Menu"))]:
+            activate()
+            self.snapshot("menu-" + label, lambda text: "show hidden" in text and "taildrop" in text)
+            self.key("r")
+            self.snapshot("menu-" + label + "-contained", lambda text: "show hidden" in text and "Enter saves" not in text)
+            self.key("-k", "Tab")
+            self.key("-k", "Return")
+            expected = 6 if label != "shift-f10" else 5
+            self.snapshot("menu-" + label + "-activated", lambda text: "show hidden" not in text and f"{expected} items" in text)
+        self.key(".")
+        self.snapshot("menu-hidden-restored", lambda text: "5 items" in text and ".hidden-proof" not in text)
+        self.key("?")
+        self.snapshot("keymap-panel", lambda text: "\u2500 keys " in text and "open" in text)
+        self.key("r")
+        self.snapshot("keymap-panel-contained", lambda text: "\u2500 keys " in text and "Enter saves" not in text)
+        for label, args in [("down", ("-k", "Down")), ("j", ("j",)), ("up", ("-k", "Up")), ("k", ("k",))]:
+            before = self.raw
+            self.key(*args)
+            self.snapshot("keymap-scroll-" + label, lambda text: "\u2500 keys " in text and self.raw != before)
+        self.key("-k", "Escape")
+        self.snapshot("keymap-dismissed", lambda text: "\u2500 keys " not in text and "5 items" in text)
+
+    def tabs(self):
+        paths = []
+        for index in range(1, 10):
+            path = guard(self.case, self.case / ("t" + str(index)))
+            path.mkdir()
+            guard(self.case, path / ("tab-" + str(index) + ".txt")).write_text("independent tab fixture\n")
+            paths.append(path)
+            if index > 1:
+                self.chord("t", "ctrl") if self.preset in ("mac", "windows") else self.key("t")
+                self.snapshot("tab-new-" + str(index), lambda text: f"{index} t{index - 1}" in text.splitlines()[0])
+            self.navigate(path, "tab-path-" + str(index), "1 items")
+        for index in range(1, 10):
+            self.key(str(index))
+            self.snapshot("tab-direct-" + str(index), lambda text: "tab-" + str(index) + ".txt" in text and f"/{paths[index - 1].name} \u00b7" in text.splitlines()[0])
+        self.chord("Page_Down", "ctrl")
+        self.snapshot("tab-next-wrap", lambda text: "tab-1.txt" in text)
+        self.chord("Page_Up", "ctrl")
+        self.snapshot("tab-previous-wrap", lambda text: "tab-9.txt" in text)
+        for index in range(9, 1, -1):
+            self.chord("w", "ctrl")
+            self.snapshot("tab-close-" + str(index), lambda text: "tab-" + str(index - 1) + ".txt" in text)
+        self.navigate(self.case / "listing", "tabs-returned", "5 items")
+
+    def media_fixtures(self):
+        directory = guard(self.case, self.case / "media")
+        directory.mkdir()
+        guard(self.case, directory / "01-text.txt").write_text("\n".join(f"TEXT-PROOF-{index:03d}" for index in range(300)))
+        page_one = b"BT /F1 20 Tf 20 100 Td (PDF PAGE ONE) Tj ET"
+        page_two = b"BT /F1 20 Tf 20 100 Td (PDF PAGE TWO) Tj ET"
+        objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"]
+        for stream in (5, 6):
+            objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 240 160] /Resources << /Font << /F1 7 0 R >> >> /Contents {stream} 0 R >>".encode())
+        for content in (page_one, page_two):
+            objects.append(b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream")
+        objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+        pdf, offsets = bytearray(b"%PDF-1.4\n"), [0]
+        for index, content in enumerate(objects, 1):
+            offsets.append(len(pdf))
+            pdf.extend(f"{index} 0 obj\n".encode() + content + b"\nendobj\n")
+        xref = len(pdf)
+        pdf.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+        for offset in offsets[1:]:
+            pdf.extend(f"{offset:010d} 00000 n \n".encode())
+        pdf.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+        guard(self.case, directory / "02-pages.pdf").write_bytes(pdf)
+        with wave.open(str(guard(self.case, directory / "03-audio.wav")), "wb") as audio:
+            audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+            audio.writeframes(bytes(12 * 8000 * 2))
+        video = guard(self.case, directory / "04-video.mp4")
+        command(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=96x64:rate=2",
+                 "-t", "12", "-c:v", "mpeg4", "-pix_fmt", "yuv420p", video])
+        return directory
+
+    def graphics(self, label, offset):
+        def received():
+            output = (self.case / "output.bin").read_bytes()[offset:]
+            return b"\x1b_Ga=T," in output if self.terminal == "kitty" else re.search(rb"\x1bP[0-9;]*q", output)
+        self.wait(label + "-graphics-output", received)
+
+    def previews(self):
+        directory = self.media_fixtures()
+        self.navigate(directory, "preview-fixtures", "4 items")
+        self.key("-k", "Home")
+        self.snapshot("preview-manual-unloaded", lambda text: self.cursor_is("01-text.txt") and "Ctrl+Space to load preview" in text and "TEXT-PROOF-000" not in text)
+        self.chord("space", "ctrl")
+        self.snapshot("preview-manual-loaded", lambda text: "TEXT-PROOF-000" in text and "Ctrl+Space to load preview" not in text)
+        self.chord("Tab", "ctrl")
+        self.key("r")
+        self.key("t")
+        self.key("v")
+        self.snapshot("preview-context-contained", lambda text: self.cursor_is("01-text.txt") and "Enter saves" not in text and " V " not in text and "2 media" not in text)
+        before = self.raw
+        self.key("-k", "Down")
+        self.snapshot("preview-scrolled", lambda text: self.cursor_is("01-text.txt") and self.raw != before)
+        self.key("-k", "Escape")
+        self.key("-k", "Down")
+        self.snapshot("preview-focus-restored", lambda text: self.cursor_is("02-pages.pdf") and "Ctrl+Space to load preview" in text)
+        self.chord("p", "alt")
+        self.snapshot("preview-column-hidden", lambda text: "Ctrl+Space to load preview" not in text)
+        self.geometry("preview-column-hidden", False)
+        self.chord("p", "alt")
+        self.snapshot("preview-column-restored", lambda text: "Ctrl+Space to load preview" in text)
+        self.geometry("preview-column-restored", True)
+        offset = (self.case / "output.bin").stat().st_size
+        self.chord("space", "ctrl")
+        self.snapshot("pdf-loaded", lambda text: "Page 1 / 2" in text and "100%" in text)
+        self.graphics("pdf-loaded", offset)
+        self.chord("Tab", "ctrl")
+        self.pdf_controls()
+        self.key("-k", "Escape")
+        for name in ("03-audio.wav", "04-video.mp4"):
+            self.key("-k", "Down")
+            self.snapshot(name + "-unloaded", lambda text: self.cursor_is(name) and "Ctrl+Space to load preview" in text)
+            offset = (self.case / "output.bin").stat().st_size
+            self.chord("space", "ctrl")
+            self.snapshot(name + "-loaded", lambda text: "Play" in text and "0:00 / 0:12" in text)
+            if name.endswith("mp4"):
+                self.graphics("video-loaded", offset)
+            self.chord("Tab", "ctrl")
+            self.media_controls(name)
+        self.navigate(self.case / "listing", "previews-returned", "5 items")
+
+    def pdf_controls(self):
+        controls = ("\u2039", "\u203a", "\u2212", "+", "\u2197")
+        for direction, sequence in [("next", range(1, 6)), ("previous", range(4, -1, -1))]:
+            for index in sequence:
+                self.chord("Tab", "shift") if direction == "previous" else self.key("-k", "Tab")
+                self.snapshot(f"pdf-focus-{direction}-{index}", lambda text: "[" + controls[index % 5] + "]" in text)
+        self.key("-k", "Tab")
+        self.key("-k", "Return")
+        self.snapshot("pdf-next-enter", lambda text: "Page 2 / 2" in text)
+        self.key("-k", "space")
+        self.snapshot("pdf-last-page-boundary", lambda text: "Page 2 / 2" in text)
+        self.key("-k", "Left")
+        self.snapshot("pdf-previous-arrow", lambda text: "Page 1 / 2" in text)
+        self.key("l")
+        self.snapshot("pdf-next-l", lambda text: "Page 2 / 2" in text)
+        self.key("h")
+        self.snapshot("pdf-previous-h", lambda text: "Page 1 / 2" in text)
+        self.key("-k", "Tab")
+        self.key("-k", "space")
+        self.snapshot("pdf-zoom-out-space", lambda text: "75%" in text)
+        self.key("-k", "Tab")
+        self.key("-k", "Return")
+        self.snapshot("pdf-zoom-in-enter", lambda text: "100%" in text)
+        self.key("-")
+        self.snapshot("pdf-zoom-out-minus", lambda text: "75%" in text)
+        self.key("+")
+        self.snapshot("pdf-zoom-in-plus", lambda text: "100%" in text)
+        self.key("r")
+        self.key("v")
+        self.snapshot("pdf-listing-keys-contained", lambda text: "Page 1 / 2" in text and "Enter saves" not in text and " V " not in text)
+        self.key("-k", "Escape")
+        self.key("-k", "space")
+        self.snapshot("pdf-quicklook", lambda text: "Page 1 / 2" in text and "\u00d7" in text and "\u2502" not in text)
+        quick_controls = controls + ("\u00d7",)
+        current = next(index for index, control in enumerate(quick_controls) if "[" + control + "]" in self.text)
+        for direction in (1, -1):
+            for step in range(1, 7):
+                self.chord("Tab", "shift") if direction < 0 else self.key("-k", "Tab")
+                target = quick_controls[(current + step * direction) % 6]
+                self.snapshot(f"pdf-quicklook-cycle-{direction}-{step}", lambda text: "[" + target + "]" in text)
+        for step in range(6):
+            if "[\u00d7]" in self.text:
+                break
+            self.key("-k", "Tab")
+            self.snapshot("pdf-close-focus-" + str(step), lambda text: "\u2502" not in text)
+        if "[\u00d7]" not in self.text:
+            raise RuntimeError("PDF Close was not reachable within one control cycle")
+        self.key("-k", "space")
+        self.snapshot("pdf-close-space", lambda text: "\u2502" in text and self.cursor_is("02-pages.pdf"))
+        self.chord("Tab", "ctrl")
+        self.snapshot("pdf-inline-focus-after-close", lambda text: "[\u2039]" in text)
+        self.key("-k", "Escape")
+        self.key("-k", "space")
+        self.snapshot("pdf-quicklook-reopened", lambda text: "\u2502" not in text and "Page 1 / 2" in text)
+        self.chord("Tab", "shift")
+        self.key("-k", "Return")
+        self.snapshot("pdf-close-enter", lambda text: "\u2502" in text and self.cursor_is("02-pages.pdf"))
+
+    def media_controls(self, label):
+        self.key("-k", "space")
+        self.snapshot(label + "-playing", lambda text: "Pause" in text)
+        self.key("-k", "space")
+        self.snapshot(label + "-paused", lambda text: "Play" in text)
+        self.key("-k", "Tab")
+        self.snapshot(label + "-seek-focused", lambda text: "\u25c6" in text)
+        self.key("-k", "Right")
+        self.snapshot(label + "-seek-forward", lambda text: re.search(r"0:0[5-9] / 0:12", text))
+        self.key("h")
+        self.snapshot(label + "-seek-back", lambda text: re.search(r"0:0[0-4] / 0:12", text))
+        self.chord("Tab", "shift")
+        self.key("-k", "Return")
+        self.snapshot(label + "-enter-playing", lambda text: "[Pause]" in text)
+        self.key("-k", "Escape")
+        self.key("-k", "space")
+        self.snapshot(label + "-quicklook", lambda text: "Pause" in text and "\u2502" not in text)
+        self.key("-k", "space")
+        self.snapshot(label + "-quicklook-paused", lambda text: "Play" in text and "\u2502" not in text)
+        self.key("-k", "Escape")
+        self.snapshot(label + "-quicklook-closed", lambda text: "\u2502" in text and self.cursor_is(label))
 
     def cleanup(self):
         owned = lambda: [int(path.name) for path in Path("/proc").iterdir() if path.name.isdigit() and self.owned_process(int(path.name))]
@@ -267,14 +643,18 @@ def main():
         assert frame(b"\x1b[Hbefore\x1b[2;1H1234567890\x1b[Hpartial", 2, 10) == (b"", "")
         assert frame(b"\x1b[Hheader\x1b[2;1Hsearch:ab", 2, 10) == (b"", "")
         assert frame(b"\x1b[Hheader\x1b[2;1H\x1b[7msearch:abc ", 2, 10)[1] == "header\nsearch:abc "
-        print("TUI_OBSERVER_SELF_CHECK 3 passed; native coverage not exercised")
+        assert frame(b"\x1b[Hheader\x1b[2;1H1234567890\x1b_Ga=T;DATA\x1b\\", 2, 10)[1] == "header\n1234567890"
+        assert frame(b"\x1b[Hheader\x1b[2;1H1234567890\x1bPqPARTIAL", 2, 10)[1] == "header\n1234567890"
+        print("TUI_OBSERVER_SELF_CHECK 5 passed; native coverage not exercised")
         return
     if len(ARGS) == 3 and ARGS[0] == "--child":
         raise SystemExit(child(ARGS[1], ARGS[2]))
-    if ARGS not in ([], ["default"]):
-        raise RuntimeError("usage: tests/ui-tui.sh [default|--self-check]")
+    presets = ARGS or list(PRESETS)
+    terminals = [os.environ["FLEA_TUI_TERMINAL"]] if "FLEA_TUI_TERMINAL" in os.environ else list(TERMINALS)
+    if len(set(presets)) != len(presets) or any(preset not in PRESETS for preset in presets) or any(terminal not in TERMINALS for terminal in terminals):
+        raise RuntimeError("usage: [FLEA_TUI_TERMINAL=foot|kitty] tests/ui-tui.sh [default|vim|mac|windows ...]")
     os.environ["PATH"] = str(Path.home() / ".local/bin") + os.pathsep + os.environ["PATH"]
-    for helper in ["omarchy-drive", "xdg-terminal-exec", "script", "stty", "hyprctl"]:
+    for helper in ["omarchy-drive", "xdg-terminal-exec", "script", "stty", "hyprctl", "ffmpeg", "pdfinfo", "pdftoppm", "mpv", "magick", *terminals]:
         if not shutil.which(helper):
             raise RuntimeError(f"native TUI prerequisite missing: {helper}")
     repo = SCRIPT.parent.parent
@@ -310,12 +690,14 @@ def main():
             "source_status": command(["git", "-C", repo, "status", "--porcelain"]).decode(),
             "harness_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
             "keymap_sha256": hashlib.sha256((repo / "keys.toml").read_bytes()).hexdigest()}))
-        native = Native(root, binary, "default")
-        try:
-            native.smoke()
-        finally:
-            native.cleanup()
-        print(f"TUI_NATIVE preset=default checks={native.checks} failed=0 visual_inspection=pending", flush=True)
+        for terminal in terminals:
+            for preset in presets:
+                native = Native(root, binary, preset, terminal)
+                try:
+                    native.smoke()
+                finally:
+                    native.cleanup()
+                print(f"TUI_NATIVE terminal={terminal} preset={preset} checks={native.checks} failed=0 visual_inspection=pending", flush=True)
 
 
 try:

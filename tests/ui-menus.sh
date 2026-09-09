@@ -493,13 +493,13 @@ case_menuscoverage() (
     export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config" XDG_DATA_HOME="$menu_box/data" XDG_CACHE_HOME="$menu_box/cache"
     [[ "$(realpath -e "$(command -v gio)")" == /usr/bin/gio ]] || fail "menus: GIO already resolves to a stub"
     trash_start_bus
-    trash_guard_store 0
     menus_launcher_fixture
     for preset in default vim mac windows; do
         printf 'MENUS_PRESET=%s\n' "$preset"
         "$flea_bin" --ui-state "{\"view\":\"list\",\"keys\":\"$preset\",\"menu\":{\"hidden\":[]}}" >/dev/null || fail "menus: fixture settings failed"
         launch "$menu_dir"
         wait_listing 4
+        trash_guard_store "$menus_trashed"
         menus_file_menu a.txt menu-key
         menus_expect menuState '.entries as $entries | ["open","cut","copy","paste","duplicate","rename","trash","deletePermanently","openWith","openTerminal","moveTo","copyTo","properties","permissions","copypath","toggleHidden"] | all(.[]; . as $action | any($entries[]; .action == $action))' "full applicable plain-file inventory"
         menus_expect menuState 'any(.entries[]; .action == "paste" and .disabled)' "Paste remains visible with empty clipboard"

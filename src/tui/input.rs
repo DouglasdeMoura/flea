@@ -312,7 +312,9 @@ fn csi(text: &str) -> Option<Key> {
             57355 => "PageDown",
             57356 => "Home",
             57357 => "End",
+            57363 => "Menu",
             57365 => "F2",
+            57373 => "F10",
             127 => "Backspace",
             _ => "",
         };
@@ -342,6 +344,7 @@ fn csi(text: &str) -> Option<Key> {
             5 => "PageUp",
             6 => "PageDown",
             12 => "F2",
+            21 => "F10",
             _ => return None,
         },
         _ => return None,
@@ -427,5 +430,17 @@ mod tests {
         assert!(decoder.feed(b"\x1b[?62;4;22c", false).is_empty());
         assert!(decoder.sixel);
         assert!(!decoder.kitty);
+    }
+    #[test]
+    fn native_menu_keys_keep_their_context_modifiers() {
+        let mut decoder = Decoder::default();
+        assert_eq!(
+            decoder.feed(b"\x1b[21;2~\x1b[57373;2u\x1b[57363u", false),
+            vec![
+                Key::named("F10", "shift"),
+                Key::named("F10", "shift"),
+                Key::named("Menu", ""),
+            ]
+        );
     }
 }

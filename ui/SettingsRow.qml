@@ -192,7 +192,7 @@ Item {
         font.weight: Font.Medium
         // The canvas sets every group eyebrow in small caps, the same treatment the rail's own headings take.
         font.capitalization: Font.AllUppercase
-        font.letterSpacing: font.pixelSize * 0.14
+        font.letterSpacing: Theme.font.caption * 0.14
         textFormat: Text.PlainText
     }
 

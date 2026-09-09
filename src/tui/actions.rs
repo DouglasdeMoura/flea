@@ -128,6 +128,11 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
         if action == "escape" || action == "focusPreview" {
             model.preview_focus = false;
             model.quicklook = false;
+            if let Some(pdf) = &mut model.pdf {
+                if pdf.control >= 5 {
+                    pdf.control = 0;
+                }
+            }
             return Ok(());
         }
         if let Some(pdf) = &mut model.pdf {
@@ -156,6 +161,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     5 => {
                         model.quicklook = false;
                         model.preview_focus = false;
+                        pdf.control = 0;
                     }
                     _ => {}
                 },
@@ -711,7 +717,9 @@ fn pointer_key(
             if let Some(pdf) = &mut m.pdf {
                 if let Some(control) = pdf.control_at(cell, m.quicklook) {
                     pdf.control = control;
-                    return self::key(m, &Key::named("Return", ""), map, w);
+                    if !pointer.motion {
+                        return self::key(m, &Key::named("Return", ""), map, w);
+                    }
                 }
             } else if let Some(player) = &mut m.player {
                 if cell < 7 && !pointer.motion {
