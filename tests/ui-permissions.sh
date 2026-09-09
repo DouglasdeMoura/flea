@@ -454,8 +454,7 @@ permissions_eligibility() {
     first=$(row_index_of notes.md)
     second=$(row_index_of other.txt)
     click_row "$first" left
-    permissions_expect selectionCount 0
-    key v >/dev/null
+    permissions_expect selectedIndices "$first"
     permissions_expect selectionCount 1
     click_row "$second" left --mods ctrl
     permissions_expect selectionCount 2
