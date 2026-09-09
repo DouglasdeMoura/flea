@@ -102,6 +102,7 @@ QtObject {
             var dialog = root.permissionsDialog
             if (!dialog) return JSON.stringify({opened: false})
             return JSON.stringify({opened: dialog.opened, facts: dialog.facts, path: dialog.path, mode: dialog.modeText,
+                displayedError: dialog.displayedError, displayedSummary: dialog.displayedSummary,
                 editable: dialog.editable, busy: dialog.busy, error: dialog.errorText, rect: root.fleaWindow.rectOf(dialog.cardItem),
                 controls: dialog.controls().map(function(control) {
                     return Object.assign(root.controlState(control.name, control.item), {checked: control.checked, bit: control.bit,
@@ -250,6 +251,8 @@ QtObject {
             var p = overlay ? root.pane.preview.pdfItem : root.pane.previewColumnItem
             if (!p) return "null"
             return JSON.stringify({ page: overlay ? p.page : p.pdfPage(), pages: overlay ? p.pageCount : p.pdfPages,
+                frame: overlay ? "" : root.fleaWindow.rectOf(p.pdfFrameItem),
+                toolbar: overlay ? "" : root.fleaWindow.rectOf(p.pdfToolbarItem),
                 zoom: overlay ? p.zoom : p.pdfZoom, scrollY: p.pdfScrollY, focused: p.activeFocus, control: p.pdfControlIndex,
                 controls: p.pdfControls.map(function (control) { return { name: control.accessName, enabled: control.enabled,
                     visible: control.visible, centre: root.fleaWindow.centreOf(control) } }) })

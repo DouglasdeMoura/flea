@@ -19,6 +19,8 @@ FocusScope {
     readonly property bool editable: facts.ok === true && !facts.reason && !busy
     readonly property int modeValue: Permissions.parse(modeText)
     readonly property var cardItem: card
+    readonly property string displayedError: errorLabel.text
+    readonly property string displayedSummary: changeSummary.text + "\n" + scopeLabel.text
     function controls() {
         var result = [{name: "Close", item: closeMark}, {name: "Octal", item: octal, enabled: editable},
             {name: "Cancel", item: cancelFocus}, {name: "Apply", item: applyFocus, enabled: editable && modeValue >= 0}]
@@ -236,11 +238,11 @@ FocusScope {
                     }
                 }
                 Text { width: parent.width; visible: root.facts.directory === true; text: "✓ Scope: this directory only. Enclosed files and directories keep every bit."; wrapMode: Text.Wrap; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-                Text { width: parent.width; visible: text.length > 0; text: root.errorText || root.facts.reason || (root.facts.ok && root.modeValue < 0 ? "Enter three octal digits or a leading-zero four-digit mode." : root.busy ? "Reading permissions…" : ""); textFormat: Text.PlainText; wrapMode: Text.Wrap; color: root.busy ? Theme.color.muted : Theme.color.error; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { id: errorLabel; width: parent.width; visible: text.length > 0; text: root.errorText || root.facts.reason || (root.facts.ok && root.modeValue < 0 ? "Enter three octal digits or a leading-zero four-digit mode." : root.busy ? "Reading permissions…" : ""); textFormat: Text.PlainText; wrapMode: Text.Wrap; color: root.busy ? Theme.color.muted : Theme.color.error; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
                 Rectangle { width: parent.width; height: Theme.spacing.hairline; color: Theme.color.muted; opacity: 0.4 }
                 Text { text: "WILL CHANGE"; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-                Text { width: parent.width; text: (root.editable && root.modeValue >= 0 ? "Requested mode " + Permissions.octal(root.modeValue) : "No changes available") + "\nPath " + root.path; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: root.editable ? Theme.color.accent : Theme.color.muted; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-                Text { width: parent.width; text: root.scopeText; wrapMode: Text.Wrap; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { id: changeSummary; width: parent.width; text: (root.editable && root.modeValue >= 0 ? "Requested mode " + Permissions.octal(root.modeValue) : "No changes available") + "\nPath " + root.path; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: root.editable ? Theme.color.accent : Theme.color.muted; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { id: scopeLabel; width: parent.width; text: root.scopeText; wrapMode: Text.Wrap; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
                 Row {
                     anchors.right: parent.right
                     spacing: Theme.spacing.gap

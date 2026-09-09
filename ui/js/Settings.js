@@ -7,7 +7,7 @@
 var SECTIONS = [
     { id: "view", label: "View", glyph: "sliders" },
     { id: "places", label: "Places", glyph: "star" },
-    { id: "preview", label: "Preview", glyph: "columns" },
+    { id: "preview", label: "Preview", glyph: "preview" },
     { id: "keys", label: "Keys", glyph: "keyboard" },
     { id: "display", label: "Display", glyph: "maximize" },
     { id: "menus", label: "Menus", glyph: "list" },
@@ -318,32 +318,37 @@ function viewRows(state) {
         choice("addressBar", "Address bar", undefined, ["path", "breadcrumb"],
                ["Path", "Breadcrumb"], data.addressBar || "breadcrumb", true),
         { kind: "group", label: "Sorting" },
-        choice("sort.key", "Sort by", "list", ["name", "size", "date", "kind"],
+        choice("sort.key", "Sort by", "sort", ["name", "size", "date", "kind"],
                ["Name", "Size", "Date", "Kind"], sort.key || "name"),
-        { kind: "check", id: "foldersFirst", label: "Folders first", glyph: "folder", on: data.foldersFirst !== false },
-        { kind: "check", id: "groupByKind", label: "Group by kind", glyph: "grid", on: data.groupByKind === true },
+        { kind: "check", id: "foldersFirst", label: "Folders first", glyph: "folders-first", on: data.foldersFirst !== false },
+        { kind: "check", id: "groupByKind", label: "Group by kind", caption: "folders, photos, files", glyph: "grid", on: data.groupByKind === true },
         { kind: "check", id: "hidden", label: "Show hidden files", glyph: "eye", on: data.hidden === true },
         { kind: "group", label: "Cursor" },
-        { kind: "check", id: "wrapAtEnds", label: "Wrap at list ends", glyph: "arrow-up", on: data.wrapAtEnds === true },
-        { kind: "hint", label: state.saveStatus || "Saved · applied in this process",
+        { kind: "check", id: "wrapAtEnds", label: "Wrap at list ends", caption: "arrow-up at the top", glyph: "arrow-up", on: data.wrapAtEnds === true },
+        { kind: "hint", footer: true, label: state.saveStatus || "Saved · applied in this process",
           role: (state.saveStatus || "").indexOf("Could not") === 0 ? "error" : "accent" }
     ]
 }
 
 function previewRows(state) {
     var data = (state.data || {}).preview || {}
+    var load = choice("preview.loadOn", "Load", "eye", ["automatic", "manual"],
+                      ["Automatic", "Manual"], data.loadOn || "automatic", true)
+    load.indented = true
+    var size = choice("preview.thumbSize", "Thumbnail size", "maximize", ["small", "medium", "large", "xlarge"],
+                      ["Small", "Medium", "Large", "Extra large"], data.thumbSize || "medium")
+    size.indented = true
+    size.caption = [48, 64, 96, 128][Math.max(0, size.values.indexOf(size.selected))] + " px"
     return [
         { kind: "group", label: "Preview column" },
         { kind: "check", id: "preview.column", label: "Preview column", glyph: "columns", on: data.column !== false },
-        choice("preview.loadOn", "Load", "eye", ["automatic", "manual"],
-               ["Automatic", "Manual"], data.loadOn || "automatic", true),
+        load,
         { kind: "group", label: "Thumbnails" },
         choice("preview.thumbnails", "Thumbnails", "image", ["off", "images", "media"],
                ["Off", "Images", "Images and video"], data.thumbnails || "media"),
-        choice("preview.thumbSize", "Thumbnail size", "maximize", ["small", "medium", "large", "xlarge"],
-               ["48 px  Small", "64 px  Medium", "96 px  Large", "128 px  Extra large"], data.thumbSize || "medium"),
-        { kind: "check", id: "preview.ctrlZoom", label: "Zoom with ctrl and scroll", on: data.ctrlZoom !== false },
-        { kind: "hint", label: data.loadOn === "manual" ? "Ctrl+Space loads the current selection." : "Automatic follows keyboard or pointer selection." }
+        size,
+        { kind: "check", id: "preview.ctrlZoom", label: "Zoom with ctrl and scroll", indented: true, on: data.ctrlZoom !== false },
+        { kind: "hint", footer: true, role: "foreground", label: data.loadOn === "manual" ? "Ctrl+Space loads the current selection." : "Automatic follows keyboard or pointer selection." }
     ]
 }
 

@@ -9,31 +9,47 @@ Item {
     signal actionPicked(int action)
     signal moved(int to)
     readonly property bool actions: root.row.kind === "favouriteActions"
-    implicitHeight: actions ? Theme.rowHeight : Theme.railRowHeight
+    implicitHeight: actions ? Theme.hitMin + 2 * Theme.spacing.hairline + Theme.settings.railPaddingY : Theme.railRowHeight
 
     Row {
         visible: root.actions
-        anchors.centerIn: parent
-        spacing: Theme.spacing.gap
+        x: Theme.spacing.rowPaddingX + Theme.markSize + Theme.spacing.gap
+        y: 2 * Theme.spacing.hairline
+        spacing: Theme.spacing.rowPaddingY + Theme.spacing.hairline
         Repeater {
-            model: ["+ Add current folder", "− Remove"]
+            model: ["Add current folder", "Remove"]
             delegate: Rectangle {
+                id: actionButton
                 required property int index
                 required property string modelData
                 enabled: index === 0 || root.row.canRemove === true
-                width: label.implicitWidth + 2 * Theme.spacing.gap
+                width: content.implicitWidth + 2 * Theme.settings.railPaddingY
                 height: Theme.hitMin
                 color: "transparent"
                 border.width: Theme.spacing.hairline
                 border.color: enabled && index === root.row.actionIndex ? Theme.color.accent : Theme.color.muted
-                Text {
-                    id: label
+                Accessible.role: Accessible.Button
+                Accessible.name: modelData
+                Accessible.onPressAction: if (enabled) root.actionPicked(index)
+                Row {
+                    id: content
                     anchors.centerIn: parent
-                    text: modelData
-                    color: !parent.enabled ? Theme.color.muted : index === root.row.actionIndex ? Theme.color.accent : Theme.color.foreground
-                    font.family: Theme.font.family
-                    font.pixelSize: Theme.font.caption
-                    textFormat: Text.PlainText
+                    spacing: Theme.spacing.rowPaddingY - Theme.spacing.hairline
+                    Flea.Glyph {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Theme.font.caption
+                        height: width
+                        name: actionButton.index === 0 ? "plus" : "minus"
+                        color: label.color
+                    }
+                    Text {
+                        id: label
+                        text: actionButton.modelData
+                        color: !actionButton.enabled ? Theme.color.muted : actionButton.index === root.row.actionIndex ? Theme.color.accent : Theme.color.foreground
+                        font.family: Theme.font.family
+                        font.pixelSize: Theme.font.caption
+                        textFormat: Text.PlainText
+                    }
                 }
                 TapHandler { onTapped: root.actionPicked(index) }
             }

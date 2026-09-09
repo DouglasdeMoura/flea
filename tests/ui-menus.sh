@@ -21,6 +21,63 @@ menus_expect() {
     fail "menus: $label: $observed"
 }
 
+menus_equal() {
+    local label="$1" expected="$2" observed="$3"
+    [[ "$observed" == "$expected" ]] || fail "menus: $label: expected $expected, observed $observed"
+    menus_checks=$((menus_checks + 1))
+    printf 'MENUS_CHECK %s %s expected=%q observed=%q\n' "$menus_checks" "$label" "$expected" "$observed"
+}
+
+menus_error() {
+    local text="$1" label="$2" observed deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        observed=$(ipc statusDetail) || fail "menus: error detail observer failed"
+        if [[ "$(ipc statusError)" == true && "$observed" == *"$text"* ]]; then
+            menus_checks=$((menus_checks + 1))
+            printf 'MENUS_CHECK %s %s error=%q\n' "$menus_checks" "$label" "$observed"
+            return
+        fi
+        sleep 0.05
+    done
+    fail "menus: $label did not report $text: $observed"
+}
+
+menus_message() {
+    local text="$1" label="$2" observed deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        observed=$(ipc statusPrimary) || fail "menus: primary status observer failed"
+        if [[ "$(ipc statusError)" == false && "$observed" == *"$text"* ]]; then
+            menus_checks=$((menus_checks + 1))
+            printf 'MENUS_CHECK %s %s status=%q\n' "$menus_checks" "$label" "$observed"
+            return
+        fi
+        sleep 0.05
+    done
+    fail "menus: $label did not report $text: $observed"
+}
+
+menus_same_file() {
+    local label="$1" original="$2" copy="$3"
+    cmp -s -- "$original" "$copy" || fail "menus: $label: contents differ: $original and $copy"
+    menus_checks=$((menus_checks + 1))
+    printf 'MENUS_CHECK %s %s original=%q copy=%q\n' "$menus_checks" "$label" "$original" "$copy"
+}
+
+menus_acknowledge() {
+    if [[ "$(ipc statusError)" == true ]]; then
+        menus_point "$(ipc statusDismissCentre)"
+        menus_expect statusError '. == false' "pointer acknowledges the current error"
+    fi
+}
+
+menus_visit() {
+    local path="$1" count="$2"
+    menus_guard "$path"
+    key -M ctrl -k l -m ctrl "$path" -k Return >/dev/null
+    wait_path "$path"
+    wait_listing "$count"
+}
+
 menus_point() {
     local centre="$1" button="${2:-left}" cx cy wx wy ww wh
     read -r cx cy <<< "$centre"
@@ -70,8 +127,9 @@ menus_file_menu() {
     click_row "$index" left
     if [[ "$input" == key ]]; then key -M shift -k F10 -m shift >/dev/null
     elif [[ "$input" == menu-key ]]; then key -k Menu >/dev/null
+    elif [[ "$input" == menu-letter ]]; then key m >/dev/null
     else click_row "$index" right; fi
-    menus_expect menuState '.opened and .hasRow and (.forRail | not)' "file menu opens by $input"
+    menus_expect menuState '.opened and .hasRow and (.forRail | not) and .snapshotReady and .snapshotId > 0' "file menu opens and snapshots by $input"
 }
 
 menus_shot() {
@@ -143,7 +201,7 @@ menus_permissions() {
 }
 
 menus_launcher_fixture() {
-    local real_gio
+    local real_gio target
     real_gio=$(command -v gio) || fail "menus: GIO is required for the real application registry query"
     menus_guard "$menu_box/bin/gio"
     cat > "$menu_box/bin/gio" <<'SH'
@@ -151,10 +209,33 @@ menus_launcher_fixture() {
 set -eu
 box=${FLEA_MENUS_BOX:?}
 [[ "$box" == /* && -f "$box/.flea-test-sandbox" ]] || exit 90
+guard() {
+    [[ -n "$1" && "$1" == /* ]] || exit 96
+    local resolved
+    resolved=$(realpath -m -- "$1") || exit 96
+    [[ "$resolved" == "$box/"* && "$resolved" != "$box" ]] || exit 96
+}
 case "${1:-}" in
   info) exec "$FLEA_MENUS_GIO" "$@" ;;
   mime) [[ $# == 2 ]] || exit 91; exec "$FLEA_MENUS_GIO" "$@" ;;
   mount) [[ $# == 2 && "$2" == -l ]] || exit 92; exec "$FLEA_MENUS_GIO" "$@" ;;
+  open)
+    [[ $# == 2 ]] || exit 97
+    guard "$2"
+    guard "$box/gio-open.log"
+    printf '%s\n' "$2" >> "$box/gio-open.log"
+    exit 23 ;;
+  trash|list|monitor)
+    [[ "${DBUS_SESSION_BUS_ADDRESS:-}" == "$FLEA_MENUS_BUS" && "${XDG_DATA_HOME:-}" == "$box/data" ]] || exit 98
+    if [[ "$1" == trash && "${2:-}" == -- && $# -ge 3 ]]; then
+        shift 2
+        for target in "$@"; do guard "$target"; done
+        guard "$box/gio-trash.log"
+        printf '%s\n' "$@" >> "$box/gio-trash.log"
+        exec "$FLEA_MENUS_GIO" trash -- "$@"
+    fi
+    [[ $# == 2 && ( "$1 $2" == 'trash --list' || "$1 $2" == 'list trash:///' || "$1 $2" == 'monitor --dir=trash:///' ) ]] || exit 98
+    exec "$FLEA_MENUS_GIO" "$@" ;;
   launch)
     [[ $# == 3 && "$2" == "$box/data/applications/"* && "$3" == "$box/list/"* ]] || exit 93
     [[ ! -L "$box/launcher.pid" && ! -L "$box/launcher-mode" ]] || exit 94
@@ -168,8 +249,12 @@ SH
     printf '[Desktop Entry]\nType=Application\nName=Flea fixture viewer\nExec=/usr/bin/false %%f\nMimeType=text/plain;\n' > "$menu_box/data/applications/flea-menu-fixture.desktop"
     printf '[Default Applications]\ntext/plain=flea-menu-fixture.desktop;\n[Added Associations]\ntext/plain=flea-menu-fixture.desktop;\n' > "$menu_box/config/mimeapps.list"
     printf 'fail\n' > "$menu_box/launcher-mode"
+    for target in gio-open.log gio-trash.log; do
+        menus_guard "$menu_box/$target"
+        : > "$menu_box/$target"
+    done
     mkfifo "$menu_box/launcher-gate" || fail "menus: cannot create cancellation fixture gate"
-    export FLEA_MENUS_BOX="$menu_box" FLEA_MENUS_GIO="$real_gio" PATH="$menu_box/bin:$PATH"
+    export FLEA_MENUS_BOX="$menu_box" FLEA_MENUS_GIO="$real_gio" FLEA_MENUS_BUS="$trash_bus_address" PATH="$menu_box/bin:$PATH"
 }
 
 menus_open_with() {
@@ -208,9 +293,191 @@ menus_open_with() {
     kill -0 "$pid" 2>/dev/null && fail "menus: cancelled owned launcher remains alive"
 }
 
+menus_actions() {
+    local preset="$1" directory="$menu_box/actions-$1" target open_count
+    menus_guard "$directory"
+    mkdir -p "$directory/destination" || fail "menus: cannot create action fixture"
+    for target in source move rename trash; do
+        menus_guard "$directory/$target.txt"
+        printf '%s %s\n' "$preset" "$target" > "$directory/$target.txt"
+    done
+    menus_guard "$directory/destination/landing.txt"
+    printf 'paste target\n' > "$directory/destination/landing.txt"
+    menus_visit "$directory" 5
+
+    menus_file_menu source.txt menu-letter
+    menus_choose copy
+    menus_message 'Copied 1 item, p pastes.' "$preset Copy captures source"
+    menus_file_menu destination menu-key
+    menus_choose open
+    wait_path "$directory/destination"
+    wait_listing 1
+    menus_file_menu landing.txt key
+    menus_guard "$directory/destination/source.txt"
+    menus_choose paste
+    wait_listing 2
+    menus_same_file "$preset Copy/Paste preserves bytes and source" "$directory/source.txt" "$directory/destination/source.txt"
+
+    menus_visit "$directory" 5
+    menus_file_menu move.txt key
+    menus_guard "$directory/move.txt"
+    menus_choose cut
+    menus_message 'Cut 1 item, p pastes.' "$preset Cut captures source"
+    menus_file_menu destination
+    menus_choose open pointer
+    wait_path "$directory/destination"
+    wait_listing 2
+    menus_file_menu landing.txt
+    menus_guard "$directory/move.txt"
+    menus_guard "$directory/destination/move.txt"
+    menus_choose paste pointer
+    wait_listing 3
+    [[ ! -e "$directory/move.txt" ]] || fail "menus: $preset Cut/Paste left its source"
+    menus_equal "$preset Cut/Paste retains bytes at destination" "$preset move" "$(cat "$directory/destination/move.txt")"
+
+    menus_visit "$directory" 4
+    menus_file_menu source.txt
+    menus_guard "$directory/source copy.txt"
+    menus_choose duplicate pointer
+    wait_listing 5
+    menus_same_file "$preset Duplicate uses the first free copy name" "$directory/source.txt" "$directory/source copy.txt"
+    menus_file_menu rename.txt menu-letter
+    menus_choose rename
+    menus_expect renameEditorLive '. == true' "$preset Rename opens inline editor"
+    menus_guard "$directory/rename.txt"
+    menus_guard "$directory/renamed.txt"
+    key -M ctrl -k a -m ctrl renamed.txt -k Return >/dev/null
+    wait_marker "$directory/renamed.txt" "menus: $preset Rename did not commit"
+    menus_expect renameEditorLive '. == false' "$preset Rename commit closes editor"
+    [[ ! -e "$directory/rename.txt" ]] || fail "menus: $preset Rename left the old name"
+    menus_equal "$preset Rename preserves contents" "$preset rename" "$(cat "$directory/renamed.txt")"
+
+    menus_file_menu trash.txt menu-key
+    menus_guard "$directory/trash.txt"
+    trash_guard_store "$menus_trashed"
+    menus_choose trash
+    menus_trashed=$((menus_trashed + 1))
+    wait_listing 4
+    menus_expect trashState ".count == $menus_trashed" "$preset Trash updates private count"
+    trash_guard_store "$menus_trashed"
+    [[ ! -e "$directory/trash.txt" ]] || fail "menus: $preset Trash left its source"
+    menus_equal "$preset Trash reaches the real private GIO provider" "$directory/trash.txt" "$(tail -n 1 "$menu_box/gio-trash.log")"
+
+    open_count=$(wc -l < "$menu_box/gio-open.log")
+    menus_file_menu source.txt
+    menus_choose open pointer
+    menus_error 'That file could not be opened' "$preset Open reports the real launcher refusal"
+    menus_equal "$preset Open calls gio once" "$((open_count + 1))" "$(wc -l < "$menu_box/gio-open.log")"
+    menus_equal "$preset Open retains the captured path" "$directory/source.txt" "$(tail -n 1 "$menu_box/gio-open.log")"
+    menus_acknowledge
+    menus_visit "$menu_dir" 4
+}
+
+menus_replace() {
+    local original="$1" retained="$2" metadata inode
+    menus_guard "$original"
+    menus_guard "$retained"
+    [[ -f "$original" && ! -L "$original" && ! -e "$retained" ]] || fail "menus: replacement requires a fresh retained path and a regular fixture"
+    metadata=$(stat -c '%s|%y|%a' "$original")
+    inode=$(stat -c '%d:%i' "$original")
+    mv --no-clobber -- "$original" "$retained" || fail "menus: cannot retain source identity"
+    [[ ! -e "$original" && -f "$retained" ]] || fail "menus: original identity was not retained"
+    printf 'replacement\n' > "$original"
+    chmod --reference="$retained" "$original" || fail "menus: cannot preserve replacement mode"
+    touch -r "$retained" "$original" || fail "menus: cannot preserve replacement timestamp"
+    menus_equal 'replacement keeps listed size, timestamp and mode' "$metadata" "$(stat -c '%s|%y|%a' "$original")"
+    [[ "$(stat -c '%d:%i' "$original")" != "$inode" ]] || fail "menus: replacement reused the captured identity"
+}
+
+menus_stale_actions() {
+    local action directory retained token open_count trash_count
+    printf 'MENUS_SHARED_PROOF preset=default; all presets separately exercise native menu delivery and the same ContextMenu.chosen/PaneMenuActions.activate path.\n'
+    for action in open cut copy duplicate trash rename; do
+        directory="$menu_box/stale-$action"
+        retained="$menu_box/retained-$action.txt"
+        menus_guard "$directory"
+        mkdir -p "$directory/destination" || fail "menus: cannot create stale fixture"
+        menus_guard "$directory/target.txt"
+        printf 'originalone\n' > "$directory/target.txt"
+        menus_guard "$directory/sentinel.txt"
+        printf 'clipboard sentinel\n' > "$directory/sentinel.txt"
+        menus_guard "$directory/destination/landing.txt"
+        printf 'paste target\n' > "$directory/destination/landing.txt"
+        menus_visit "$directory" 3
+        menus_file_menu sentinel.txt
+        menus_choose copy
+        menus_message 'Copied 1 item, p pastes.' "$action refusal starts with a known copy clipboard"
+        menus_file_menu target.txt key
+        menus_seek "$action"
+        token=$(ipc menuState | jq -r .snapshotId)
+        open_count=$(wc -l < "$menu_box/gio-open.log")
+        trash_count=$(wc -l < "$menu_box/gio-trash.log")
+        menus_replace "$directory/target.txt" "$retained"
+        menus_expect menuState ".opened and .snapshotReady and .snapshotId == $token" "$action retains the originally opened snapshot"
+        trash_guard_store "$menus_trashed"
+        key -k Return >/dev/null
+        menus_error 'Selected item changed' "$action refuses replacement at native menu activation"
+        menus_expect menuState '.opened | not' "$action refusal closes the menu"
+        menus_expect renameEditorLive '. == false' "$action refusal does not open Rename"
+        menus_equal "$action refusal preserves replacement" replacement "$(cat "$directory/target.txt")"
+        menus_equal "$action refusal preserves captured original" originalone "$(cat "$retained")"
+        menus_equal "$action refusal preserves navigation" "$directory" "$(ipc path)"
+        [[ ! -e "$directory/target copy.txt" ]] || fail "menus: $action refusal duplicated the replacement"
+        menus_equal "$action refusal does not call the opener" "$open_count" "$(wc -l < "$menu_box/gio-open.log")"
+        menus_equal "$action refusal does not call GIO Trash" "$trash_count" "$(wc -l < "$menu_box/gio-trash.log")"
+        trash_guard_store "$menus_trashed"
+        menus_acknowledge
+        if [[ "$action" == copy || "$action" == cut ]]; then
+            menus_visit "$directory/destination" 1
+            menus_file_menu landing.txt
+            menus_guard "$directory/sentinel.txt"
+            menus_guard "$directory/destination/sentinel.txt"
+            menus_choose paste
+            wait_listing 2
+            menus_same_file "$action refusal retains copy clipboard and intent" "$directory/sentinel.txt" "$directory/destination/sentinel.txt"
+            [[ ! -e "$directory/destination/target.txt" ]] || fail "menus: $action refusal replaced the clipboard"
+        fi
+    done
+    menus_visit "$menu_dir" 4
+}
+
+menus_stale_rename_commit() {
+    local directory="$menu_box/stale-rename-commit" retained="$menu_box/retained-rename-commit.txt"
+    menus_guard "$directory"
+    mkdir "$directory" || fail "menus: cannot create Rename commit fixture"
+    menus_guard "$directory/target.txt"
+    printf 'originalone\n' > "$directory/target.txt"
+    menus_visit "$directory" 1
+    menus_file_menu target.txt
+    menus_choose rename
+    menus_expect renameEditorLive '. == true' 'Rename captures identity before editing'
+    menus_replace "$directory/target.txt" "$retained"
+    menus_guard "$directory/renamed.txt"
+    key -M ctrl -k a -m ctrl renamed.txt -k Return >/dev/null
+    menus_error 'That file could not be renamed.' 'Rename commit reports refusal of a replaced source'
+    menus_expect renameEditorLive '. == false' 'refused Rename commit closes the editor'
+    [[ ! -e "$directory/renamed.txt" ]] || fail "menus: stale Rename committed the replacement"
+    menus_equal 'Rename refusal preserves replacement' replacement "$(cat "$directory/target.txt")"
+    menus_equal 'Rename refusal preserves captured original' originalone "$(cat "$retained")"
+    menus_acknowledge
+    menus_file_menu target.txt menu-key
+    menus_choose rename
+    menus_expect renameEditorLive '. == true' 'a fresh Rename recaptures the replacement'
+    menus_guard "$directory/target.txt"
+    menus_guard "$directory/renamed.txt"
+    key -M ctrl -k a -m ctrl renamed.txt -k Return >/dev/null
+    wait_marker "$directory/renamed.txt" 'menus: fresh Rename did not recover'
+    menus_expect renameEditorLive '. == false' 'fresh Rename recovery closes the editor'
+    [[ ! -e "$directory/target.txt" ]] || fail 'menus: fresh Rename left the old path'
+    menus_equal 'fresh Rename recovery preserves replacement contents' replacement "$(cat "$directory/renamed.txt")"
+    menus_visit "$menu_dir" 4
+}
+
 case_menuscoverage() (
     local menu_box="$fixture_root/menus" menu_dir="$fixture_root/menus/list" menus_checks=0
-    local preset state before target token index cx cy wx wy ww wh control
+    local trash_box="$fixture_root/menus" trash_checks=0 menus_trashed=0
+    local trash_parent_bus_id="" trash_private_bus_id="" trash_bus_address="" trash_bus_pid="" trash_provider_pid=""
+    local preset before target token
     sandbox_scratch "$menu_box"
     : > "$menu_box/.flea-test-sandbox"
     for target in list state config cache data bin data/applications; do
@@ -224,8 +491,12 @@ case_menuscoverage() (
     printf 'child\n' > "$menu_dir/folder/child.txt"
     ln -s a.txt "$menu_dir/link"
     export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config" XDG_DATA_HOME="$menu_box/data" XDG_CACHE_HOME="$menu_box/cache"
+    [[ "$(realpath -e "$(command -v gio)")" == /usr/bin/gio ]] || fail "menus: GIO already resolves to a stub"
+    trash_start_bus
+    trash_guard_store 0
     menus_launcher_fixture
     for preset in default vim mac windows; do
+        printf 'MENUS_PRESET=%s\n' "$preset"
         "$flea_bin" --ui-state "{\"view\":\"list\",\"keys\":\"$preset\",\"menu\":{\"hidden\":[]}}" >/dev/null || fail "menus: fixture settings failed"
         launch "$menu_dir"
         wait_listing 4
@@ -246,18 +517,22 @@ case_menuscoverage() (
         menus_file_menu link
         menus_expect menuState 'any(.entries[]; .action == "permissions" and .disabled and .hint == "Symlink target not changed")' "symlink permissions stays disabled"
         key -k Escape >/dev/null
-        click_row "$(row_index_of a.txt)" left
+        click_row "$(row_index_of a.txt)" left --mods ctrl
         click_row "$(row_index_of b.txt)" left --mods ctrl
+        menus_expect selectionCount '. == 2' "Ctrl-click creates two selected items before menu eligibility"
         click_row "$(row_index_of a.txt)" right
         menus_expect menuState '.entries as $entries | ["rename","duplicate","openWith","properties","permissions"] | all(.[]; . as $action | any($entries[]; .action == $action and .disabled))' "multi-selection eligibility"
         key -k Escape >/dev/null
         key -k Escape >/dev/null
+        menus_actions "$preset"
         kill_flea
     done
     "$flea_bin" --ui-state '{"keys":"default","menu":{"hidden":[]}}' >/dev/null || fail "menus: default fixture preset failed"
     launch "$menu_dir"
     wait_listing 4
     menus_open_with
+    menus_stale_actions
+    menus_stale_rename_commit
     menus_file_menu folder
     menus_choose deletePermanently
     menus_expect menuDialogState '.confirmation.opened and .confirmation.count == 1' "directory deletion snapshots one root"
@@ -272,6 +547,6 @@ case_menuscoverage() (
     [[ "$(cat "$menu_dir/a.txt")" == alpha && "$(cat "$menu_dir/b.txt")" == beta ]] || fail "menus: deletion widened outside its confirmation"
     menus_shot deletion-completed
     printf 'MENUS_NATIVE_CHECKS=%s\n' "$menus_checks"
-    printf 'MENUS_UNVERIFIED new-file/new-folder, clipboard transfers, duplicate, rename, archive/convert, provider states, hidden-row persistence, work-area/scale matrix, partial deletion failure, directory Permissions scope, concurrent-window replacement\n'
-    kill_flea
+    printf 'MENUS_UNVERIFIED new-file/new-folder, archive/convert, provider states, hidden-row persistence, work-area/scale matrix, partial deletion failure, directory Permissions scope, concurrent windows\n'
+    trash_cleanup 0
 )

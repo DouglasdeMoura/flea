@@ -276,12 +276,31 @@ function runCompletionRows(check) {
     check("View displays the persisted view", find(view, "view").selected, "grid")
     check("View preserves optional column choices", find(view, "columns").value, "Name, Kind")
     check("View density uses schema values", find(view, "density").selected, "compact")
+    check("Folders first uses its distinct ordering mark", find(view, "foldersFirst").glyph, "folders-first")
+    check("Preview rail mark differs from the three-column view", Settings.SECTIONS[Settings.sectionIndex("preview")].glyph, "preview")
+    check("grouping explains the categories before it is enabled", find(view, "groupByKind").caption, "folders, photos, files")
+    check("wrapping explains the boundary before it is enabled", find(view, "wrapAtEnds").caption, "arrow-up at the top")
+    check("save feedback is a separate footer", view[view.length - 1].footer, true)
+    check("the save failure keeps its message and error role",
+          Settings.rows("view", { saveStatus: "Could not save settings" }).slice(-1).map(function (row) {
+              return row.label + "|" + row.role + "|" + row.footer
+          }).join(""), "Could not save settings|error|true")
     var preview = Settings.rows("preview", state)
     check("preview visibility is independent of loading", find(preview, "preview.column").on, false)
     check("manual preview reports the stored load mode", find(preview, "preview.loadOn").value, "Manual")
     check("all four thumbnail display stops remain available", find(preview, "preview.thumbSize").values.join(","), "small,medium,large,xlarge")
     check("thumbnail source policy remains separate", find(preview, "preview.thumbnails").selected, "off")
     check("ctrl zoom can be disabled", find(preview, "preview.ctrlZoom").on, false)
+    check("only dependent preview controls are indented", preview.filter(function (row) { return row.indented }).map(function (row) {
+        return row.id
+    }).join(","), "preview.loadOn,preview.thumbSize,preview.ctrlZoom")
+    var sizes = ["small", "medium", "large", "xlarge"]
+    check("thumbnail pixels are live captions separate from each named stop", sizes.map(function (size) {
+        var row = find(Settings.rows("preview", { data: { preview: { thumbSize: size } } }), "preview.thumbSize")
+        return row.caption + "|" + row.value
+    }).join(","), "48 px|Small,64 px|Medium,96 px|Large,128 px|Extra large")
+    check("preview footer explains the active loading mode", preview[preview.length - 1].label + "|" + preview[preview.length - 1].footer,
+          "Ctrl+Space loads the current selection.|true")
     var about = Settings.rows("about", { about: { version: "0.1.6", handler: "flea.desktop" } })
     check("About version comes from supplied binary facts", about[1].value, "0.1.6")
     check("unreported builds never repeat a specimen commit", about[2].value, "Not recorded in this build")

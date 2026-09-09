@@ -73,6 +73,7 @@ var PATHS = {
 
     "file": "M4 22V2h10l6 6v14H4z M14 2v6h6",
     "folder": "M2 20V3h6l2 3h12v14H2z",
+    "folders-first": "M2 12V4h6l2 2h12v6H2z M2 17h20 M2 21h20",
     "file-text": "M4 22V2h10l6 6v14H4z M14 2v6h6 M8 9h2 M8 13h8 M8 17h8",
     "code": "M16 18l6-6-6-6 M8 6l-6 6 6 6",
     "image": "M3 3h18v18H3z M7 9A2 2 0 1 0 11 9A2 2 0 1 0 7 9Z M21 15l-3-3L6 21",
@@ -130,6 +131,7 @@ var PATHS = {
     // The bullets are lucide's own zero-length-line technique, which SquareCap draws as square dots.
     "list": "M8 6h13 M8 12h13 M8 18h13 M3 6L3.01 6 M3 12L3.01 12 M3 18L3.01 18",
     "columns": "M3 3h18v18H3z M9 3v18 M15 3v18",
+    "preview": "M3 3h18v18H3z M15 3v18",
     "dual": "M3 4h8v16H3z M13 4h8v16h-8z",
     "grid": "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
     // The preview column's own two, taken from the canvas's icon table rather than recut from lucide.

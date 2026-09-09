@@ -11,6 +11,7 @@ Item {
     // {kind, label, value?, on?, state?} from ui/js/Settings.js; kind decides what is drawn.
     property var row: ({})
     property bool current: false
+    property bool firstRow: false
 
     signal activated()
     signal pointerMoved()
@@ -22,7 +23,15 @@ Item {
 
     readonly property string kind: root.row.kind || "fact"
     readonly property bool isGroup: root.kind === "group"
+    readonly property bool firstGroup: root.isGroup && root.firstRow
+    // Settings headings scale their resolved 12/15/4/8 insets once from the boards' bodySmall 13 anchor.
+    readonly property real groupScale: Theme.font.bodySmall / 13
+    readonly property real groupGap: root.firstGroup ? 0 : Math.round(8 * root.groupScale)
+    readonly property real groupPaddingTop: Math.round((root.firstGroup ? 12 : 15) * root.groupScale)
+    readonly property real groupPaddingBottom: Math.round(4 * root.groupScale)
+    readonly property real groupLineHeight: Theme.font.caption * 1.6
     readonly property bool isHint: root.kind === "hint"
+    readonly property bool isFooter: root.isHint && root.row.footer === true
     readonly property bool isFavourite: root.kind === "favourite" || root.kind === "favouriteActions"
     readonly property bool isHero: root.kind === "hero"
     readonly property bool isKeyPreview: root.kind === "keyPreview"
@@ -41,9 +50,11 @@ Item {
         ? (root.row.state === "all" ? "check" : (root.row.state === "some" ? "minus" : ""))
         : (root.row.on === true ? "check" : "")
 
-    height: root.isFavourite ? favourite.implicitHeight : root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
+    height: root.isGroup ? groupLabel.y + root.groupLineHeight + root.groupPaddingBottom
+            : root.isFavourite ? favourite.implicitHeight : root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
             : root.isKeyPreview ? keyPreview.implicitHeight + 2 * Theme.spacing.rowPaddingY
-            : root.isHint ? hint.implicitHeight + 2 * Theme.spacing.rowPaddingY : Theme.rowHeight
+            : root.isHint ? hint.y + hint.implicitHeight + (root.isFooter
+                ? Theme.settings.railPaddingY + 2 * Theme.spacing.hairline : Theme.spacing.rowPaddingY) : Theme.rowHeight
 
     Grid {
         id: keyPreview
@@ -156,9 +167,10 @@ Item {
 
     Rectangle {
         anchors.top: parent.top
+        anchors.topMargin: root.isFooter ? Theme.settings.railPaddingY : root.groupGap
         width: parent.width
         height: Theme.spacing.hairline
-        visible: root.isGroup && root.y > 0
+        visible: root.isFooter || root.isGroup && !root.firstGroup
         color: Theme.color.muted
         opacity: 0.4
     }
@@ -166,30 +178,34 @@ Item {
     // A heading and a hint are the only two rows that are not a label and a control, so they draw
     // instead of the pair below rather than beside it.
     Text {
+        id: groupLabel
         visible: root.isGroup
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
-        anchors.verticalCenter: parent.verticalCenter
+        y: root.groupGap + (root.firstGroup ? 0 : Theme.spacing.hairline) + root.groupPaddingTop
+        height: root.groupLineHeight
+        verticalAlignment: Text.AlignVCenter
         text: root.row.label || ""
         color: Theme.color.muted
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
-        font.bold: true
+        font.weight: Font.Medium
         // The canvas sets every group eyebrow in small caps, the same treatment the rail's own headings take.
         font.capitalization: Font.AllUppercase
-        font.letterSpacing: 1
+        font.letterSpacing: font.pixelSize * 0.14
         textFormat: Text.PlainText
     }
 
     Text {
         id: hint
         visible: root.isHint
-        x: Theme.settings.indent
-        y: Theme.spacing.rowPaddingY
-        width: parent.width - Theme.settings.indent - Theme.spacing.rowPaddingX
+        x: root.isFooter ? Theme.spacing.rowPaddingX : Theme.settings.indent
+        y: root.isFooter ? 2 * Theme.settings.railPaddingY + Theme.spacing.hairline : Theme.spacing.rowPaddingY
+        width: parent.width - x - Theme.spacing.rowPaddingX
         text: root.row.label || ""
         color: root.row.role === "error" ? Theme.color.error
-             : root.row.role === "accent" ? Theme.color.accent : Theme.color.muted
+             : root.row.role === "accent" ? Theme.color.accent
+             : root.row.role === "foreground" ? Theme.color.foreground : Theme.color.muted
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         textFormat: Text.PlainText
@@ -203,7 +219,7 @@ Item {
         id: markSlot
         visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite && !root.isKeyPreview
         anchors.left: parent.left
-        anchors.leftMargin: Theme.spacing.rowPaddingX
+        anchors.leftMargin: root.row.indented === true ? Theme.settings.indent - Theme.spacing.rowPaddingX : Theme.spacing.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
         width: Theme.markSize
         height: Theme.markSize
@@ -247,10 +263,11 @@ Item {
     }
 
     Text {
+        id: rowLabel
         visible: !root.isGroup && !root.isHint && !root.isHero && !root.isFavourite && !root.isRuler && !root.isKeyPreview
         anchors.left: markSlot.right
         anchors.leftMargin: Theme.spacing.gap
-        anchors.right: trailing.left
+        anchors.right: caption.visible ? caption.left : trailing.left
         anchors.rightMargin: Theme.spacing.gap
         anchors.verticalCenter: parent.verticalCenter
         text: root.row.label || ""
@@ -258,6 +275,23 @@ Item {
         font.family: Theme.font.family
         font.pixelSize: Theme.font.body
         textFormat: Text.PlainText
+        elide: Text.ElideRight
+    }
+
+    Text {
+        id: caption
+        visible: !!root.row.caption && width > 0
+        anchors.right: trailing.left
+        anchors.rightMargin: Theme.spacing.gap + Theme.settings.railPaddingY
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.row.caption || ""
+        color: Theme.color.foreground
+        font.family: Theme.font.family
+        font.pixelSize: Theme.font.caption
+        textFormat: Text.PlainText
+        // Preserve the label and real controls first; only the explanatory caption elides in the remaining space.
+        width: Math.min(implicitWidth, Math.max(0, trailing.x - anchors.rightMargin
+            - Theme.spacing.gap - rowLabel.x - rowLabel.implicitWidth))
         elide: Text.ElideRight
     }
 

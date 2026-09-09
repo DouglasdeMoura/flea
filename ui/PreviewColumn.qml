@@ -25,6 +25,8 @@ Item {
     property int pdfControlIndex: -1
     property real pdfZoom: 1
     readonly property real pdfScrollY: pdfFlick.contentY
+    readonly property var pdfFrameItem: frame
+    readonly property var pdfToolbarItem: pdfToolbar
     readonly property var pdfControls: [pagePrev, pageNext, pdfZoomOut, pdfZoomIn, pdfExpand]
     signal expandRequested()
     // No player exists until the operator presses play. The strip draws from the probe's own
@@ -217,65 +219,6 @@ Item {
                 }
             }
 
-            // The canvas's PdfViewer draws "3 / 51" and a chevron each side; a column that showed
-            // page one of fifty-one with no way past it would be pretending the document is one page.
-            Flow {
-                width: Math.min(pagePrev.width * root.pdfControls.length + pageLabel.width + spacing * root.pdfControls.length,
-                    parent.width - Theme.spacing.gap * 2)
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: Theme.spacing.gap
-                spacing: Theme.spacing.gap
-                visible: root.previewState === Facts.PDF && root.pdfPages > 0
-
-                Flea.ChromeButton {
-                    id: pagePrev
-                    glyph: "chevron-left"
-                    keyboardFocused: root.activeFocus && root.pdfControlIndex === 0
-                    enabled: root.pdfPage() > 0
-                    onActivated: root.turnPage(-1)
-                }
-
-                Text {
-                    id: pageLabel
-                    height: pagePrev.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: (root.pdfPage() + 1) + " / " + root.pdfPages
-                    color: Theme.color.muted
-                    font.family: Theme.font.family
-                    font.pixelSize: Theme.font.caption
-                    textFormat: Text.PlainText
-                }
-
-                Flea.ChromeButton {
-                    id: pageNext
-                    glyph: "chevron-right"
-                    keyboardFocused: root.activeFocus && root.pdfControlIndex === 1
-                    enabled: root.pdfPage() + 1 < root.pdfPages
-                    onActivated: root.turnPage(1)
-                }
-                Flea.ChromeButton {
-                    id: pdfZoomOut
-                    glyph: "minus"
-                    enabled: root.pdfZoom > 1
-                    keyboardFocused: root.activeFocus && root.pdfControlIndex === 2
-                    onActivated: root.zoomBy(-1)
-                }
-                Flea.ChromeButton {
-                    id: pdfZoomIn
-                    glyph: "plus"
-                    enabled: root.pdfZoom < 4
-                    keyboardFocused: root.activeFocus && root.pdfControlIndex === 3
-                    onActivated: root.zoomBy(1)
-                }
-                Flea.ChromeButton {
-                    id: pdfExpand
-                    glyph: "maximize"
-                    keyboardFocused: root.activeFocus && root.pdfControlIndex === 4
-                    onActivated: root.toggleExpand()
-                }
-            }
-
             // The canvas's Archive tile: the first entries by name, then the count it could not show.
             Flea.PreviewArchive {
                 id: archivePane
@@ -314,6 +257,63 @@ Item {
                     font.pixelSize: Theme.font.caption
                     textFormat: Text.PlainText
                 }
+            }
+        }
+
+        // PDF controls stay outside the page frame, including when a narrow column wraps them.
+        Flow {
+            id: pdfToolbar
+            width: Math.min(pagePrev.width * root.pdfControls.length + pageLabel.width + spacing * root.pdfControls.length,
+                parent.width)
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: Theme.spacing.gap
+            visible: root.previewState === Facts.PDF && root.pdfPages > 0
+
+            Flea.ChromeButton {
+                id: pagePrev
+                glyph: "chevron-left"
+                keyboardFocused: root.activeFocus && root.pdfControlIndex === 0
+                enabled: root.pdfPage() > 0
+                onActivated: root.turnPage(-1)
+            }
+
+            Text {
+                id: pageLabel
+                height: pagePrev.height
+                verticalAlignment: Text.AlignVCenter
+                text: (root.pdfPage() + 1) + " / " + root.pdfPages
+                color: Theme.color.muted
+                font.family: Theme.font.family
+                font.pixelSize: Theme.font.caption
+                textFormat: Text.PlainText
+            }
+
+            Flea.ChromeButton {
+                id: pageNext
+                glyph: "chevron-right"
+                keyboardFocused: root.activeFocus && root.pdfControlIndex === 1
+                enabled: root.pdfPage() + 1 < root.pdfPages
+                onActivated: root.turnPage(1)
+            }
+            Flea.ChromeButton {
+                id: pdfZoomOut
+                glyph: "minus"
+                enabled: root.pdfZoom > 1
+                keyboardFocused: root.activeFocus && root.pdfControlIndex === 2
+                onActivated: root.zoomBy(-1)
+            }
+            Flea.ChromeButton {
+                id: pdfZoomIn
+                glyph: "plus"
+                enabled: root.pdfZoom < 4
+                keyboardFocused: root.activeFocus && root.pdfControlIndex === 3
+                onActivated: root.zoomBy(1)
+            }
+            Flea.ChromeButton {
+                id: pdfExpand
+                glyph: "maximize"
+                keyboardFocused: root.activeFocus && root.pdfControlIndex === 4
+                onActivated: root.toggleExpand()
             }
         }
 

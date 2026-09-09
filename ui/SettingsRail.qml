@@ -106,7 +106,7 @@ Flickable {
                     anchors.rightMargin: Theme.spacing.gap
                     anchors.verticalCenter: parent.verticalCenter
                     text: railRow.modelData.label
-                    color: railRow.current ? Theme.color.accent : Theme.color.foreground
+                    color: Theme.color.foreground
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.body
                     textFormat: Text.PlainText

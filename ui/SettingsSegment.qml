@@ -29,7 +29,8 @@ Row {
             readonly property string glyph: root.glyphs[segment.index] || ""
 
             // The WCAG floor the Blueprint sets for a compact control, which this row has room for.
-            width: segment.glyph ? Theme.hitMin : name.implicitWidth + 2 * Theme.spacing.gap
+            width: segment.glyph ? Math.max(Theme.hitMin, Theme.railIconSize + 2 * (Theme.spacing.gap - Theme.spacing.hairline))
+                                 : name.implicitWidth + 2 * Theme.spacing.gap
             height: Theme.hitMin
             // selectedAccentFill already carries the theme's own selected alpha, as ui/MenuRow.qml has it.
             color: segment.current ? Style.selectedAccentFill : "transparent"
@@ -40,7 +41,7 @@ Row {
             Flea.Glyph {
                 anchors.centerIn: parent
                 visible: segment.glyph.length > 0
-                width: Theme.chromeMarkSize
+                width: Theme.railIconSize
                 height: width
                 name: segment.glyph || "file"
                 color: segment.current ? Theme.color.accent : Theme.color.foreground

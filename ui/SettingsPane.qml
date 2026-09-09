@@ -88,6 +88,7 @@ Flickable {
                     required property int index
                     width: column.width
                     row: modelData
+                    firstRow: index === 0
                     current: column.visible && root.side === "pane" && root.cursor === index
                     onActivated: root.activated(index)
                     onPointerMoved: root.pointerMoved(index)

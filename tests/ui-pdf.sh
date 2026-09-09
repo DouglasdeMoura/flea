@@ -157,6 +157,10 @@ case_pdffocus() {
         pdf_expect false '.pages == 3' "$mode inline document"
         key -M ctrl -k Tab -m ctrl >/dev/null
         pdf_expect false '.focused' "$mode inline focus entry"
+        pdf_expect false '(.frame | split(" ") | map(tonumber)) as $frame |
+            (.toolbar | split(" ") | map(tonumber)) as $toolbar |
+            $frame[2] > 0 and $frame[3] > 0 and $toolbar[3] > 0 and $toolbar[1] >= ($frame[1] + $frame[3])' \
+            "$mode inline controls stay below the page frame"
         shot "pdf-inline-$mode-800x480"
         key -k Escape >/dev/null
         pdf_expect false '(.focused | not)' "$mode inline focus return"

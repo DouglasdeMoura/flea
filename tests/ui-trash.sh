@@ -342,7 +342,7 @@ trash_confirmation_controls() {
         trash_wait '.selectedCount == 1 and .rows[0].selected' "$preset pointer selection"
         trash_click trashRowCentre 0 left --mods ctrl
         trash_wait '.selectedCount == 0 and (.rows[0].selected == false)' "$preset Ctrl-click deselects"
-        hotkey ctrl+a >/dev/null
+        key -M ctrl -k a -m ctrl >/dev/null || fail "trash: Ctrl+A delivery failed"
         trash_wait '.selectedCount == 1 and .rows[0].selected' "$preset Ctrl+A selects snapshot"
         if [[ "$mode" != controls ]]; then trash_key_alternatives "$preset"; fi
         if [[ "$mode" == keys ]]; then continue; fi
@@ -381,7 +381,7 @@ trash_confirmation_controls() {
         trash_wait '.confirmation.destructiveFocus' "$preset Backtab wraps to danger"
         key -k Tab >/dev/null
         trash_wait '(.confirmation.destructiveFocus == false)' "$preset Tab wraps to Cancel"
-        hotkey ctrl+a >/dev/null
+        key -M ctrl -k a -m ctrl >/dev/null || fail "trash: modified confirmation input failed"
         trash_wait ".confirmation.opened and .confirmation.token == $token and (.confirmation.destructiveFocus == false)" "$preset modified input stays in strip"
         key -k space >/dev/null
         trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset Space on Cancel preserves Trash"
@@ -681,7 +681,7 @@ case_trash() {
     trash_move locked 1 1
     trash_rail
     trash_wait '.total == 2 and (.busy == false)'
-    hotkey ctrl+a >/dev/null
+    key -M ctrl -k a -m ctrl >/dev/null || fail "trash: Ctrl+A delivery failed"
     trash_wait '.selectedCount == 2 and (.busy == false)'
     trash_guard_store 2
     key -k Delete >/dev/null

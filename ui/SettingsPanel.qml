@@ -32,6 +32,7 @@ Item {
     readonly property int clampMargin: 8
     // GM's compact-card ruling keeps View's measured size across sections, clamped to the window.
     readonly property int chromeAndBorder: Theme.chromeHeight + 2 * Theme.spacing.hairline
+    readonly property int paneBottomPadding: Math.round(8 * Theme.font.bodySmall / 13)
     readonly property real groundOpacity: 0.5
     // The card's title, for ui/Ipc.qml: a driven click on it proves the card swallows what its controls do not.
     readonly property alias titleItem: title
@@ -252,7 +253,7 @@ Item {
         width: Math.min(root.panelWidth, Math.max(0, root.width - 2 * root.clampMargin))
         // Settings.html gives the rail and pane separate vertical insets.
         height: Math.min(root.chromeAndBorder + Math.max(rail.implicitHeight + 2 * Theme.settings.railPaddingY,
-                                                          pane.compactHeight + 2 * Theme.spacing.rowPaddingY),
+                                                          pane.compactHeight + root.paneBottomPadding),
                          Math.max(0, root.height - 2 * root.clampMargin))
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
@@ -393,8 +394,7 @@ Item {
                 anchors.right: parent.right
                 anchors.top: chrome.bottom
                 anchors.bottom: parent.bottom
-                anchors.topMargin: Theme.spacing.rowPaddingY
-                anchors.bottomMargin: Theme.spacing.rowPaddingY
+                anchors.bottomMargin: root.paneBottomPadding
                 section: root.section
                 values: root.settingsState
                 cursor: root.cursor

@@ -179,10 +179,6 @@ class Native:
         self.identity()
         self.drive("key", "--window", self.address, *args)
 
-    def hotkey(self, modifiers, key):
-        self.identity()
-        self.drive("hotkey", modifiers, key, self.address)
-
     def start(self):
         child_command = shlex.join(["bash", str(SCRIPT), "--child", str(self.case), str(self.binary)])
         invocation = ["xdg-terminal-exec", "--title=" + self.title, "--dir=" + str(self.case / "listing"), "--",
@@ -221,7 +217,7 @@ class Native:
         self.snapshot("selection-two", lambda text: " V 2 " in text and "2 items selected" in text)
         self.key("-k", "Escape")
         self.snapshot("selection-cleared", lambda text: " V " not in text and "5 items" in text)
-        self.hotkey("ctrl", "f")
+        self.key("-M", "ctrl", "-k", "f", "-m", "ctrl")
         self.snapshot("search-editor", lambda text: "search:" in text and "Tab changes scope" in text)
         self.key("needleproof")
         self.key("-k", "Return")
