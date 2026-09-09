@@ -310,8 +310,8 @@ fn handle_line(
         Request::Archive { op, paths, path, dest, format, menu_id } => start_archive(
             out, ops, Arc::clone(&tb.formats), &op,
             paths, format, PathBuf::from(&path), PathBuf::from(&dest), menu_id),
-        Request::Convert { path, dest, strip, menu_id } =>
-            start_convert(out, ops, PathBuf::from(&path), PathBuf::from(&dest), strip, menu_id),
+        Request::Convert { path, dest, strip, menu_id, request_id, check } =>
+            start_convert(out, ops, PathBuf::from(&path), PathBuf::from(&dest), strip, menu_id, request_id, check),
         Request::Formats => say(out, &formats_line(&tb.formats, convert::available())),
         Request::FsInfo => say(out, &fsinfo_line(&read_fsinfo(&st.base))),
         // One row, only when a client asked: the same no-sweep rule thumb and dirsize already follow.

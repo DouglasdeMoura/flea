@@ -19,6 +19,11 @@ operations_status_control() {
     menus_point "$centre"
 }
 
+operations_secondary() {
+    cardsize_expect statusSecondary "$1"
+    menus_equal "$2" "$1" "$(ipc statusSecondary)"
+}
+
 operations_absent() {
     local path="$1" end=$((SECONDS + 15))
     menus_guard "$path"
@@ -40,6 +45,8 @@ operations_mixed() {
     printf 'existing collision\n' > "$destination/c.txt"
     launch "$source"
     wait_listing 5
+    permissions_viewport 920 600
+    operations_secondary "" "no retry claim exists before an attributed failure"
     hotkey --global ctrl a flea >/dev/null
     menus_expect selectionCount '. == 5' "native Select All captures all five sources"
     operations_copy_to "$destination"
@@ -48,6 +55,7 @@ operations_mixed() {
     menus_expect selectionCount '. == 1' "failed original is selected for retry"
     selected=$(ipc selectedIndices)
     [[ "$selected" == "$(row_index_of c.txt)" ]] || fail "operations: retry selected a different source"
+    operations_secondary "c.txt selected for retry" "only the identity-verified selected original receives retry secondary text"
     for name in a.txt b.txt d.txt e.txt; do menus_same_file "committed copy $name" "$source/$name" "$destination/$name"; done
     [[ "$(cat "$destination/c.txt")" == 'existing collision' ]] || fail "operations: collision was overwritten"
     shot operations-mixed-error
@@ -56,7 +64,23 @@ operations_mixed() {
     operations_status_control dismiss
     menus_message 'Copied 4 of 5' 'acknowledgement reveals the complete outcome'
     menus_expect statusActivityState '.undo.visible and .undo.enabled and .errors == 0' "successful items retain their native Undo control"
+    operations_secondary "c.txt selected for retry" "acknowledged completion retains its selected-retry secondary"
     shot operations-mixed-acknowledged
+    key -k Escape >/dev/null
+    menus_expect selectionCount '. == 0' "native Escape clears the retry selection"
+    operations_secondary "" "changing selection removes the previous retry claim"
+    seek_row_named c.txt
+    key v >/dev/null
+    menus_expect selectionCount '. == 1' "native re-selection names one source for the explicit retry"
+    operations_secondary "" "manual re-selection cannot revive an earlier identity proof"
+    operations_copy_to "$destination"
+    menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1' "a repeated collision records its own completed failure"
+    operations_secondary "c.txt selected for retry" "a new verified locate reply establishes fresh retry text"
+    menus_guard "$source/c.txt"
+    touch "$source/c.txt"
+    operations_secondary "" "external metadata change invalidates displayed retry proof"
+    menus_expect selectionCount '. == 1' "watch invalidation does not change the user's selected source"
+    menus_acknowledge
 
     menus_guard "$destination/c.txt"
     menus_guard "$menu_box/collision-kept.txt"
@@ -85,6 +109,7 @@ operations_cancel() (
     mkdir "$destination"
     launch "$source"
     wait_listing 2
+    permissions_viewport 920 600
     hotkey --global ctrl a flea >/dev/null
     menus_expect selectionCount '. == 2' "$variant cancellation selects two real files"
     operations_copy_to "$destination"

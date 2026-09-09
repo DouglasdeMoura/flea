@@ -8,8 +8,7 @@ import "js/Mounts.js" as Mounts
 import "js/Protocols.js" as Protocols
 import "js/Motion.js" as Motion
 
-// The Network group's popup: the approved form writes a secret-free GTK bookmark, then hands its
-// session-only password to NetworkMounts for one helper stdin write.
+// A new favourite is saved only after its identified mount succeeds; credentials stay in this session.
 Item {
     id: root
 
@@ -18,6 +17,16 @@ Item {
     property bool dropboxInstalled: false
     property bool retrying: false
     property bool failedConnect: false
+    property int requestSerial: 0
+    property string requestId: ""
+    property string mountedUri: ""
+    property string pendingUri: ""
+    property string pendingLabel: ""
+    property bool connecting: false
+    property bool saving: false
+    property bool saveCommitted: false
+    property bool saveNewPlace: true
+    readonly property bool busy: root.connecting || root.saving
     readonly property string dialogTitle: root.baseTitle() + (root.failedConnect ? ", failed connect" : "")
     // The card keeps this much window above and below it when the window is shorter than the card.
     readonly property int clampMargin: 8
@@ -26,10 +35,8 @@ Item {
     readonly property var bodyItem: body
 
     signal closed()
-    // Sidebar's own bookmarksFile FileView never watched a directory absent at its own
-    // construction, so a plain watch is not enough the first run; the caller reloads on this.
-    signal saved()
-    signal mountRequested(string uri, string label, string password)
+    signal mountRequested(string requestId, string uri, string label, string password)
+    signal cancelRequested(string requestId)
 
     // A plain overlay, not a QQC Popup, the same call ui/ContextMenu.qml already made.
     anchors.fill: parent
@@ -38,18 +45,26 @@ Item {
     visible: root.opened || card.opacity > 0
 
     function open() {
+        if (root.opened || root.busy) return
         root.statusText = ""
         root.retrying = false
         root.failedConnect = false
+        root.mountedUri = ""
+        root.saveNewPlace = true
+        root.saveCommitted = false
         form.reset()
         root.present()
     }
 
     function openLocation(uri, label, password, reason, failed) {
+        if (root.opened || root.busy) return
         form.load(root.valuesFor(uri, label, password))
         root.statusText = reason || ""
         root.retrying = true
         root.failedConnect = failed === true
+        root.mountedUri = ""
+        root.saveNewPlace = false
+        root.saveCommitted = false
         root.present()
     }
 
@@ -63,6 +78,11 @@ Item {
     }
 
     function close() {
+        if (root.saving) return
+        if (root.connecting) root.cancelRequested(root.requestId)
+        root.connecting = false
+        root.requestId = ""
+        root.mountedUri = ""
         form.takePassword()
         root.opened = false
         root.closed()
@@ -70,6 +90,8 @@ Item {
 
     // The URI the form built, which is the same one the Mounts-as line showed.
     function submitLocation() {
+        if (!root.opened || root.busy) return
+        if (root.saveCommitted) { root.close(); return }
         if (!form.complete) {
             root.statusText = "Enter a valid host and port."
             return
@@ -80,26 +102,63 @@ Item {
             root.failedConnect = false
             return
         }
-        var uri = Mounts.normalize(form.uri)
-        var label = form.labelText()
-        // A refusal leaves the dialog open over its own sentence rather than reporting a save, and
-        // the password is taken only after it, so the retry over that sentence still has one.
-        if (!root.appendBookmark(uri, label))
-            return
-        var password = form.takePassword()
-        root.mountRequested(uri, label, password)
-        password = ""
-        root.close()
+        root.pendingUri = Mounts.normalize(form.uri)
+        root.pendingLabel = form.labelText()
+        root.statusText = ""
+        root.requestId = "network-" + (++root.requestSerial)
+        if (root.mountedUri === root.pendingUri) { root.saveFavourite(); return }
+        pendingFocus.forceActiveFocus()
+        root.connecting = true
+        root.mountRequested(root.requestId, root.pendingUri, root.pendingLabel, form.password)
     }
 
-    function appendBookmark(uri, label) {
-        Favourites.add(Mounts.normalize(uri), label)
-        return true
+    function mountFinished(requestId, uri, success, reason) {
+        if (!root.opened || !root.connecting || requestId !== root.requestId || uri !== root.pendingUri) return
+        root.connecting = false
+        if (!success) { root.saveFailed(reason); return }
+        root.mountedUri = uri
+        root.saveFavourite()
+    }
+
+    function saveFavourite() {
+        if (!root.saveNewPlace) { root.close(); return }
+        pendingFocus.forceActiveFocus()
+        root.saving = true
+        if (!Favourites.add(root.pendingUri, root.pendingLabel, root.requestId))
+            root.saveFailed("A favourites change is still being saved. Retry to save this location.")
+    }
+
+    function saveFailed(message) {
+        root.saving = false
+        root.statusText = message
+        root.retrying = true
+        root.failedConnect = message.indexOf("Connect failed:") === 0
+        form.focusHost()
     }
 
     Connections {
         target: Favourites
-        function onWrote() { root.saved() }
+        function onCompleted(requestId, success, message) {
+            if (!root.opened || !root.saving || requestId !== root.requestId) return
+            if (!success) { root.saveFailed(message); return }
+            root.saving = false
+            if (message) {
+                root.saveCommitted = true
+                root.statusText = message
+                pendingFocus.forceActiveFocus()
+                return
+            }
+            root.close()
+        }
+    }
+
+    Item {
+        id: pendingFocus
+        Keys.onTabPressed: function(event) { event.accepted = true }
+        Keys.onBacktabPressed: function(event) { event.accepted = true }
+        Keys.onEscapePressed: root.close()
+        Keys.onReturnPressed: if (root.saveCommitted) root.close()
+        Keys.onEnterPressed: if (root.saveCommitted) root.close()
     }
 
     // Read back by shell.qml's IPC so a test asserts the protocol swap without OCR.
@@ -114,8 +173,12 @@ Item {
     function formPasswordState() { return form.passwordState() }
     function formPasswordEyeCentre() { return form.passwordEyeCentre() }
     function formNote() { return form.protocol === "NFS" ? "No credentials: NFS trusts the client host" : "" }
-    // The canvas labels this "Connect and save" on every protocol card, and it is the accurate name: the save mounts as well as writing the bookmark.
-    function formAction() { return root.retrying ? "Retry" : "Connect and save" }
+    function formAction() {
+        if (root.saveCommitted) return "Close"
+        if (root.saving) return "Saving..."
+        if (root.connecting) return "Connecting..."
+        return root.retrying ? "Retry" : "Connect and save"
+    }
     function formMetrics() { return Math.round(card.padding) + "|" + Math.round(content.spacing) }
     // "contentY|contentHeight|height" of the scrolling body, so a test sees the clamp and the scroll.
     function bodyScroll() { return Math.round(body.contentY) + "|" + Math.round(body.contentHeight) + "|" + Math.round(body.height) }
@@ -284,6 +347,7 @@ Item {
                 NetworkForm {
                     id: form
                     width: parent.width
+                    enabled: !root.busy && !root.saveCommitted
                     onSubmitted: root.submitLocation()
                     Keys.onEscapePressed: root.close()
 
@@ -319,21 +383,21 @@ Item {
                     }
                 }
 
-                // Network.dc.html draws the accept pair right-aligned and reading Cancel then Save,
-                // in the same hairline treatment ui/ConvertDialog.qml already uses; the stock Button
-                // that stood here painted OEM chrome instead of the palette Flea reads from colors.toml.
+                // Network.html places Cancel before the primary action at the card's right edge.
                 Row {
                     anchors.right: parent.right
                     spacing: Theme.spacing.gap
 
                     Flea.DialogButton {
                         label: "Cancel"
+                        available: !root.saving
                         onActivated: root.close()
                     }
 
                     Flea.DialogButton {
                         label: root.formAction()
                         primary: true
+                        available: !root.busy
                         onActivated: root.submitLocation()
                     }
                 }
@@ -353,7 +417,7 @@ Item {
                 // nothing: the label states the fact and the ink says the press will not be taken.
                 Flea.DialogButton {
                     label: root.dropboxInstalled ? "Dropbox is already installed" : "Install Dropbox"
-                    available: !root.dropboxInstalled
+                    available: !root.dropboxInstalled && !root.busy
                     onActivated: root.installDropbox()
                 }
             }

@@ -1,8 +1,9 @@
 # Sourced by ui.sh; reuse its guarded fixtures, exact window ownership, input and cleanup.
 cardsize_expect() {
     local reader="$1" expected="$2" seen=unread end=$((SECONDS + 20))
+    shift 2
     while (( SECONDS < end )); do
-        seen=$(ipc "$reader") || fail "cardsizes: $reader failed"
+        seen=$(ipc "$reader" "$@") || fail "cardsizes: $reader failed"
         [[ "$seen" == "$expected" ]] && return
         sleep 0.05
     done
@@ -41,9 +42,17 @@ cardsize_network() {
     cardsize_expect dialogOpen true
 }
 
+cardsize_focus() {
+    local phase="$1" observed
+    observed=$(ipc contextMenuFocusState) || fail "cardsizes: native focus observation failed"
+    jq -e '(.opened | not) and (.menu | not) and .pane and .list and .view == "list"' <<< "$observed" >/dev/null \
+        || fail "cardsizes: $phase lost listing keyboard focus: $observed"
+    printf 'CARD_FOCUS phase=%s state=%s\n' "$phase" "$observed"
+}
+
 case_cardsizes() {
     local dir="$fixture_root/cardsizes" addr viewport initial_width initial_height wx wy ww wh index=0
-    local base protocol network_rect before sy content visible after bx by bw bh cx cy focus last menu_count step box body eye rows
+    local base protocol network_rect before sy content visible after bx by bw bh cx cy focus last menu_count step box body eye rows menu_rect menu_width work_width
     sandbox_make "$dir"
     mkdir -p "$dir/listing" "$dir/config" "$dir/data" "$dir/bin" || fail "cardsizes: fixture creation failed"
     export XDG_CONFIG_HOME="$dir/config" XDG_DATA_HOME="$dir/data"
@@ -96,6 +105,7 @@ OPENER
             || fail "cardsizes: expected $viewport, actual viewport ${ww}x${wh}"
         printf 'CARD_VIEWPORT index=%s requested=%s actual=%sx%s address=%s\n' "$index" "$viewport" "$ww" "$wh" "$addr"
 
+        cardsize_focus "resized-$index"
         cardsize_network
         base=$(ipc networkChipCentre SMB)
         [[ "$base" =~ ^[0-9]+\ [0-9]+$ ]] || fail "cardsizes: SMB chip has no native centre"
@@ -183,10 +193,23 @@ OPENER
         (( last >= 0 )) || fail "cardsizes: no visible listing row for menu placement"
         click_row "$last" right || fail "cardsizes: bottom-row context menu failed"
         cardsize_expect contextMenuVisible true
-        cardsize_rect "bottom-menu-$index" "$(ipc contextMenuRect)"
+        menu_rect=$(ipc contextMenuRect) || fail "cardsizes: menu frame observation failed"
+        cardsize_rect "bottom-menu-$index" "$menu_rect"
+        read -r bx by bw bh <<< "$menu_rect"
+        menu_width=$(token_of menuWidth) || fail "cardsizes: menu width token observation failed"
+        work_width=$(ipc menuState | jq -er '.workArea.width | numbers') || fail "cardsizes: menu work area observation failed"
+        jq -en --argjson observed "$bw" --argjson token "$menu_width" --argjson area "$work_width" --argjson rounding 1 \
+            '([$token, $area] | all(type == "number" and . > 0)) and (($observed - ([$token, $area] | min | round) | fabs) <= $rounding)' >/dev/null \
+            || fail "cardsizes: menu frame width $bw differs from token $menu_width clamped to work area $work_width"
         shot "cardsizes-menu-$index-$viewport"
         key -k Escape >/dev/null || fail "cardsizes: context menu dismissal failed"
         cardsize_expect contextMenuVisible false
+        cardsize_focus "menu-dismissed-$index"
+        key -k Tab >/dev/null || fail "cardsizes: restored listing Tab failed"
+        cardsize_expect focusView rail
+        key -M shift -k Tab -m shift >/dev/null || fail "cardsizes: restored rail Shift+Tab failed"
+        cardsize_expect focusView list
+        cardsize_focus "tab-cycle-$index"
         [[ ! -e "$FLEA_CARDSIZE_OPENER_RECEIPT" ]] || fail "cardsizes: unexpected file opener was refused"
         printf 'CARDSIZES viewport=%s network=ok protocols=5 scroll=ok keymap=ok convert=ok menu=ok\n' "$viewport"
     done

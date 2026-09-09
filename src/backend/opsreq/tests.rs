@@ -53,7 +53,7 @@ fn menu_workers_refuse_replacement_sources_before_helpers_or_mutations() {
     let OpMsg::Meta { line } = rx.recv().unwrap() else { panic!("archive terminal result"); };
     assert!(line.contains(r#""ok":false"#) && line.contains("changed"));
     let (tx, rx) = channel();
-    crate::backend::archivereq::run_convert(2, path.clone(), destination.clone(), false, tx, Some(captured));
+    crate::backend::archivereq::run_convert(2, 0, path.clone(), destination.clone(), false, tx, Some(captured));
     let OpMsg::Meta { line } = rx.recv().unwrap() else { panic!("convert terminal result"); };
     assert!(line.contains(r#""ok":false"#) && line.contains("changed"));
     assert!(!destination.exists());

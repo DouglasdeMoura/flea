@@ -335,6 +335,7 @@ fn csi(text: &str) -> Option<Key> {
         'D' => "Left",
         'H' => "Home",
         'F' => "End",
+        'Q' => "F2",
         'Z' => return Some(Key::named("Tab", "shift")),
         '~' => match code {
             1 | 7 => "Home",
@@ -434,6 +435,8 @@ mod tests {
     #[test]
     fn native_menu_keys_keep_their_context_modifiers() {
         let mut decoder = Decoder::default();
+        // Kitty with NumLock enabled sends CSI 1;129Q for physical F2.
+        assert_eq!(decoder.feed(b"\x1b[1;129Q", false), vec![Key::named("F2", "")]);
         assert_eq!(
             decoder.feed(b"\x1b[21;2~\x1b[57373;2u\x1b[57363u", false),
             vec![

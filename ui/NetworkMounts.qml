@@ -15,14 +15,17 @@ Item {
     // Secrets live only here for this QML process lifetime; the map is never serialized or exposed.
     property var _passwords: ({})
     property string result: "idle"
+    property Item origin: null
+    property Item _pendingOrigin: null
 
-    signal opened(string path)
+    signal opened(string path, var origin)
     signal message(string text, bool isError)
     // Client-side only, see "listShares" below: ui/ShareBrowser.qml renders these as pane rows.
-    signal sharesListed(string baseUri, string baseLabel, var names)
+    signal sharesListed(string baseUri, string baseLabel, var names, var origin)
     // Fired once ui/NetworkPlaces.qml's write has actually landed, so a caller's reload reads it.
     signal renamed()
-    signal retryRequested(string uri, string label, string password, string reason, bool failedConnect)
+    signal retryRequested(string uri, string label, string password, string reason, bool failedConnect, var origin)
+    signal completed(string requestId, string uri, bool success, string reason)
 
     // Hyprland has no auth portal here, so "gio mount" on a share that wants a credential prompt
     // hangs forever with no stdin to answer it, and "gio info" on a location gvfs cannot reach does
@@ -53,6 +56,9 @@ Item {
     property string _pendingLabel: ""
     property string _pendingPassword: ""
     property bool _authAwaitingStart: false
+    property bool _authCancelled: false
+    property string _requestId: ""
+    property string _requestPassword: ""
 
     onBookmarksTextChanged: root.rebuild()
 
@@ -140,7 +146,7 @@ Item {
             root.openShare(e.uri, e.mounted, e.label)
             return
         }
-        root.opened(e.path)
+        root.opened(e.path, root.origin)
     }
 
     function credentialed(uri) {
@@ -158,29 +164,34 @@ Item {
         root._passwords = next
     }
 
-    function saveLocation(uri, label, password) {
-        root.remember(uri, password)
-        root.openShare(uri, false, label, password.length > 0)
+    function saveLocation(uri, label, password, requestId, origin) {
+        return root.openShare(uri, false, label, password.length > 0, { id: requestId, password: password, origin: origin })
     }
 
-    function openChildShare(uri, label) {
+    function openChildShare(uri, label, origin) {
         var password = root.passwordFor(root._pendingUri)
         root.remember(uri, password)
-        root.openShare(uri, false, label, password.length > 0)
+        root.openShare(uri, false, label, password.length > 0, { origin: origin })
     }
 
-    function openShare(uri, alreadyMounted, label, authenticated) {
+    function openShare(uri, alreadyMounted, label, authenticated, request) {
+        request = request || ({})
         // An open is single flight over four children, the share listing included, so a new one must
         // not start over the running leg and hand that leg's deadline to itself; see "listShares".
         if (mountProcess.running || authProcess.running || infoProcess.running || listSharesProcess.running) {
             // A guard that returns in silence names nothing at all, and a leg can hold it 15 s.
-            root.message("Another network location is still opening; give it a moment.", false)
+            var reason = "Another network location is still opening; give it a moment."
+            if (request.id) root.completed(request.id, Mounts.normalize(uri), false, reason)
+            else root.message(reason, false)
             return
         }
         if (root.result === "failed") root.message("", false)
         // One canonical spelling from here: tests/network-open-share.sh pins the info leg to it.
         root._pendingUri = Mounts.normalize(uri)
         root._pendingLabel = label || ""
+        root._requestId = request.id || ""
+        root._requestPassword = request.password || ""
+        root._pendingOrigin = request.origin === undefined ? root.origin : request.origin
         root._mountFailed = false
         if (alreadyMounted) {
             root.result = "resolving"
@@ -188,11 +199,12 @@ Item {
             return
         }
         if (authenticated === true || root.credentialed(uri)) {
-            var password = root.passwordFor(uri)
+            var password = request.password || root.passwordFor(uri)
             if (password.length === 0) {
                 root.result = "missing-credential"
-                root.retryRequested(uri, root._pendingLabel, "",
-                                    "Enter the password to mount this location.", false)
+                var reason = "Enter the password to mount this location."
+                if (!root.finishRequest(false, reason))
+                    root.retryRequested(uri, root._pendingLabel, "", reason, false, root._pendingOrigin)
                 return
             }
             root._pendingPassword = password
@@ -222,7 +234,32 @@ Item {
         root._pendingPassword = ""
         root.result = "failed"
         root.message(reason, true)
-        root.retryRequested(root._pendingUri, root._pendingLabel, password || "", reason, true)
+        if (!root.finishRequest(false, reason))
+            root.retryRequested(root._pendingUri, root._pendingLabel, password || "", reason, true, root._pendingOrigin)
+    }
+
+    function finishRequest(success, reason) {
+        var requestId = root._requestId
+        if (!requestId) return false
+        root._requestId = ""
+        if (success) root.remember(root._pendingUri, root._requestPassword)
+        root._requestPassword = ""
+        root.completed(requestId, root._pendingUri, success, reason || "")
+        return true
+    }
+
+    function cancelLocation(requestId) {
+        if (!requestId || requestId !== root._requestId) return
+        root._requestId = ""
+        root._requestPassword = ""
+        root._pendingPassword = ""
+        root._authAwaitingStart = false
+        mountTimeout.stop()
+        if (mountProcess.running) { root._mountTimedOut = true; mountProcess.running = false }
+        if (infoProcess.running) { root._infoTimedOut = true; infoProcess.running = false }
+        if (listSharesProcess.running) { root._listSharesTimedOut = true; listSharesProcess.running = false }
+        if (authProcess.running) { root._authCancelled = true; authProcess.running = false }
+        root.result = "cancelled"
     }
 
     // A server root with no share segment mounts but has no FUSE path of its own.
@@ -277,6 +314,7 @@ Item {
             // answered has no credential to correct anyway.
             root.result = "failed"
             root.message("Connect failed: host did not respond", true)
+            root.finishRequest(false, "Connect failed: host did not respond")
         }
     }
 
@@ -302,6 +340,7 @@ Item {
             }
         }
         onExited: function (exitCode) {
+            if (root._authCancelled) { root._authCancelled = false; return }
             root._pendingPassword = ""
             if (exitCode === 0) {
                 root.runInfo(root._pendingUri)
@@ -344,14 +383,15 @@ Item {
             var path = Mounts.localPath(String(infoOut.text || root._infoOutput || ""))
             if (exitCode === 0 && path.length > 0) {
                 root.result = "mounted"
-                root.opened(path)
+                root.finishRequest(true, "")
+                root.opened(path, root._pendingOrigin)
                 return
             }
             // A server root has no FUSE path of its own, so its shares are listed instead, and the
             // exit code is not read for that: gio describes a reachable root on some servers and
             // refuses on others, and the listing that follows is what answers either way.
             if (root.isBareRoot(root._pendingUri)) {
-                root.result = "mounted"
+                root.result = "resolving"
                 root.listShares(root._pendingUri)
                 return
             }
@@ -379,7 +419,8 @@ Item {
                 return
             }
             root.result = "mounted"
-            root.sharesListed(root._pendingUri, root._pendingLabel, names)
+            root.finishRequest(true, "")
+            root.sharesListed(root._pendingUri, root._pendingLabel, names, root._pendingOrigin)
         }
     }
 

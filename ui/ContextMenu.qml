@@ -69,6 +69,9 @@ Item {
 
     // The pane keeps its Keys handler on the list, so the menu has to hand focus back on close.
     property Item focusHolder: null
+    // The original focus item may disappear while the menu is open; the owning view is the fallback.
+    property Item focusOwner: null
+    readonly property bool keyboardFocused: keyCatcher.activeFocus
 
     // The keyboard-highlighted top-level row, and which row's flyout is open beside it, or -1.
     property int cursor: 0
@@ -201,6 +204,8 @@ Item {
     }
 
     function place(scenePoint) {
+        if (!root.opened)
+            root.focusHolder = root.Window.window ? root.Window.window.activeFocusItem : null
         var point = root.mapFromItem(null, scenePoint)
         root.placeX = point.x
         root.placeY = point.y
@@ -211,7 +216,6 @@ Item {
         root.cursor = root.firstRow()
         root.openSubmenuRow = -1
         root.submenuCursor = 0
-        root.focusHolder = root.focusedSibling()
         root.opened = true
         if (root.hasRow && !root.forRail && !root.forHeader) root.snapshotRequested()
         keyCatcher.forceActiveFocus()
@@ -220,16 +224,6 @@ Item {
     onCursorChanged: scroll.reveal(menuRows.itemAt(root.cursor))
     onSubmenuCursorChanged: subScroll.reveal(subRows.itemAt(root.submenuCursor))
 
-    // Whichever sibling holds active focus when the menu opens, which is the pane's list today.
-    function focusedSibling() {
-        var siblings = root.parent ? root.parent.children : []
-        for (var i = 0; i < siblings.length; i++) {
-            if (siblings[i] !== root && siblings[i].activeFocus)
-                return siblings[i]
-        }
-        return null
-    }
-
     // Every wheel scroll calls this, so a shut menu costs nothing and never touches focus.
     function close() {
         if (!root.opened)
@@ -237,8 +231,9 @@ Item {
         root.opened = false
         root.openSubmenuRow = -1
         root.clearRail()
-        if (root.focusHolder)
-            root.focusHolder.forceActiveFocus()
+        var holder = root.focusHolder && root.focusHolder.visible && root.focusHolder.enabled ? root.focusHolder : root.focusOwner
+        if (holder)
+            holder.forceActiveFocus()
     }
 
     // The menu closes before the action runs, so it never hangs over the listing that action opened.

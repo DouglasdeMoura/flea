@@ -15,19 +15,21 @@ QtObject {
     property string lastError: ""
     signal wrote()
     signal failed(string message)
+    signal completed(string requestId, bool success, string message)
 
-    function apply(operation) {
+    function apply(operation, requestId) {
         if (root.busy) { root.failed("A favourites change is still being saved."); return false }
         root.lastError = ""
         writer.answer = ""
         writer.errorText = ""
+        writer.requestId = requestId || ""
         writer.command = [Quickshell.env("FLEA_BIN") || "flea", "--favourites", JSON.stringify(operation)]
         writer.pending = true
         writer.running = true
         return true
     }
-    function add(path, label) {
-        return root.apply({ op: "add", record: { label: label, path: path } })
+    function add(path, label, requestId) {
+        return root.apply({ op: "add", record: { label: label, path: path } }, requestId)
     }
     function remove(index) {
         return root.apply({ op: "remove", index: index, expected: root.records })
@@ -68,11 +70,14 @@ QtObject {
         property string answer: ""
         property string errorText: ""
         property bool pending: false
+        property string requestId: ""
+        onStarted: writer.pending = false
         onRunningChanged: {
             if (!running && pending) {
                 pending = false
                 root.lastError = "Favourites updater could not start."
                 root.failed(root.lastError)
+                root.completed(writer.requestId, false, root.lastError)
             }
         }
         stdout: StdioCollector { onStreamFinished: writer.answer = this.text }
@@ -82,6 +87,7 @@ QtObject {
             if (code !== 0) {
                 root.lastError = writer.errorText.replace(/^flea: /, "").split("\n")[0] || "Favourites could not be saved."
                 root.failed(root.lastError)
+                root.completed(writer.requestId, false, root.lastError)
                 return
             }
             try {
@@ -89,9 +95,12 @@ QtObject {
                 if (!state.places || !Array.isArray(state.places.favourites)) throw new Error("missing favourites")
                 ViewState.state = UiState.withGroup(ViewState.state, "places", { favourites: state.places.favourites })
                 root.wrote()
+                root.completed(writer.requestId, true, "")
             } catch (error) {
                 root.lastError = "Favourites were saved, but their new state could not be read."
                 root.failed(root.lastError)
+                // CLI exit zero means the write committed; a response error must never replay the add.
+                root.completed(writer.requestId, true, root.lastError)
             }
         }
     }

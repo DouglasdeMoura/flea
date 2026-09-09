@@ -171,7 +171,11 @@ class Request:
         return found[0]
 
     def until(self, label, predicate):
-        result = wait(f"{self.name}: {label}", lambda: (state if predicate(state := self.state()) else None))
+        try:
+            result = wait(f"{self.name}: {label}", lambda: (state if predicate(state := self.state()) else None))
+        except AssertionError:
+            write(root / (self.name + "-failed-state.json"), json.dumps(self.state(), indent=2))
+            raise
         check(f"{self.name}: {label}", True)
         return result
 

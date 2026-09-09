@@ -12,6 +12,7 @@ Item {
     id: root
 
     property bool focused: false
+    property Item navigationPane: null
     property bool trashActive: false
     // ui/Pane.qml's one ui/ContextMenu.qml, handed in rather than built here: a second instance in
     // this tree took the keyboard away from the list, see ui/SidebarRow.qml's own note.
@@ -54,11 +55,13 @@ Item {
     }
 
     signal opened(string path)
+    signal networkOpened(string path, var origin)
     signal addRequested()
     signal message(string text, bool isError)
     // Bubbled straight from NetworkMounts; shell.qml opens ui/ShareBrowser.qml on this.
-    signal sharesListed(string baseUri, string baseLabel, var names)
-    signal networkRetryRequested(string uri, string label, string password, string reason, bool failedConnect)
+    signal sharesListed(string baseUri, string baseLabel, var names, var origin)
+    signal networkRetryRequested(string uri, string label, string password, string reason, bool failedConnect, var origin)
+    signal networkCompleted(string requestId, string uri, bool success, string reason)
 
     // The entry index mid-rename, or -1; Network only, see startRename below. ui/SidebarRow.qml
     // reads this to swap its Text for the OEM TextField, and ui/Pane.qml reads it as its own
@@ -111,13 +114,15 @@ Item {
 
     NetworkMounts {
         id: mounts
+        origin: root.navigationPane
         bookmarksText: bookmarksFile.text()
-        onOpened: function (path) { root.opened(path) }
+        onOpened: function (path, origin) { root.networkOpened(path, origin) }
         onMessage: function (text, isError) { root.message(text, isError) }
-        onSharesListed: function (baseUri, baseLabel, names) { root.sharesListed(baseUri, baseLabel, names) }
-        onRetryRequested: function (uri, label, password, reason, failedConnect) {
-            root.networkRetryRequested(uri, label, password, reason, failedConnect)
+        onSharesListed: function (baseUri, baseLabel, names, origin) { root.sharesListed(baseUri, baseLabel, names, origin) }
+        onRetryRequested: function (uri, label, password, reason, failedConnect, origin) {
+            root.networkRetryRequested(uri, label, password, reason, failedConnect, origin)
         }
+        onCompleted: function (requestId, uri, success, reason) { root.networkCompleted(requestId, uri, success, reason) }
         // The same race NetworkDialog.qml's own saved() exists for, see AGENTS.md "A FileView
         // write can race a reload fired the moment setText() is called": mounts.rename() already
         // blocked on waitForJob() before this fires, so the reload here reads the write it caused.
@@ -147,17 +152,18 @@ Item {
         bookmarksFile.waitForJob()
     }
 
-    function saveNetwork(uri, label, password) {
-        mounts.saveLocation(uri, label, password)
+    function saveNetwork(requestId, uri, label, password, origin) {
+        mounts.saveLocation(uri, label, password, requestId, origin)
     }
+    function cancelNetwork(requestId) { mounts.cancelLocation(requestId) }
 
     function networkResult() {
         return mounts.result
     }
 
     // ui/ShareBrowser.qml's own Enter action calls this with the resolved share uri; not yet one of root.entries, so it goes straight to NetworkMounts's own open-a-share path.
-    function mountShare(uri, label) {
-        mounts.openChildShare(uri, label)
+    function mountShare(uri, label, origin) {
+        mounts.openChildShare(uri, label, origin)
     }
 
     // Right click raises the menu over the row, which is the whole affordance: an eject that can

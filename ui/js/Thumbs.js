@@ -33,7 +33,7 @@ function plan(state, rows, held, first, last, mode) {
             continue
         }
         var at = Number(key)
-        if (at < first || at > last) {
+        if (at < first || at > last || !allowed(rows[at - held], mode)) {
             drop.push(at)
         }
     }

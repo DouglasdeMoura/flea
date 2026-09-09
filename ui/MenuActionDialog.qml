@@ -133,6 +133,8 @@ FocusScope {
             errorText = "Enter one filename without a path separator."
             return
         }
+        if (action === "newFile") body.forceActiveFocus()
+        else closeFocus.forceActiveFocus()
         busy = true
         committing = true
         errorText = ""

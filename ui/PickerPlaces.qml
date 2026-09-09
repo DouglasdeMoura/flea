@@ -19,6 +19,7 @@ Item {
     property color edge: Theme.color.surface
 
     signal chosen(string path)
+    signal networkCompleted(string requestId, string uri, bool success, string reason)
 
     // SendPicker.html draws Recent above Home, and a save has no history to write into, so the one
     // mode that cannot use the location does not offer it.
@@ -108,7 +109,11 @@ Item {
         } else root.chosen(entry.path)
     }
     function openChild(uri, label) { network.item.openChildShare(uri, label) }
-    function retry(uri, label, password) { root.awaitingNetwork = true; network.item.saveLocation(uri, label, password) }
+    function retry(requestId, uri, label, password) { root.awaitingNetwork = true; network.item.saveLocation(uri, label, password, requestId) }
+    function cancelNetwork(requestId) {
+        root.awaitingNetwork = false
+        if (network.item) network.item.cancelLocation(requestId)
+    }
     Connections {
         target: root.picker
         function onPathChanged() { root.awaitingNetwork = false }
@@ -127,6 +132,7 @@ Item {
         active: false
         sourceComponent: Component {
             Flea.NetworkMounts {
+                onCompleted: function(requestId, uri, success, reason) { root.networkCompleted(requestId, uri, success, reason) }
                 onOpened: function(path) { if (root.awaitingNetwork) root.chosen(path) }
                 onMessage: function(text, error) { root.picker.say(text, error) }
                 onRetryRequested: function(uri, label, password, reason, failed) {

@@ -200,7 +200,7 @@ ShellRoot {
                 // Issue 9. ViewState persists the stop and Theme derives its own tokens from it, so
                 // the whole window follows without any surface reading the chord itself.
                 onTextSizeRequested: function (direction) { fleaWindow.applyTextSize(direction) }
-                onOpened: function (path) { shareBrowser.close() }
+                onOpened: function (path) { if (shareBrowser.owner === primaryPane) shareBrowser.close() }
             }
 
             Loader {
@@ -242,7 +242,7 @@ ShellRoot {
                         onPermissionsRequested: function(path) { permissionsDialog.open(path, otherPane) }
                         onPathBarRequested: chrome.startEdit()
                         onTextSizeRequested: function(direction) { fleaWindow.applyTextSize(direction) }
-                        onOpened: otherPane.shareBrowser.close()
+                        onOpened: if (otherPane.shareBrowser.owner === otherPane) otherPane.shareBrowser.close()
                     }
                 }
                 onLoaded: {
@@ -280,6 +280,7 @@ ShellRoot {
                             ? Search.statusLine(view.currentPane.searchRunning, view.currentPane.total, view.currentPane.searchScanned, view.currentPane.searchMs)
                             : ""
                 searchKeys: Search.statusKeys(view.currentPane.searchRunning)
+                retryLine: view.currentPane.trash.opened ? "" : view.currentPane.retrySelectionText
                 onTransferCancelRequested: function (id) {
                     bar.transferOwner.backend.transfercancel(id)
                 }
@@ -314,7 +315,7 @@ ShellRoot {
             }
             Connections {
                 target: convertDialog.item
-                function onAccepted(format, strip) { Ops.convert(convertDialog.owner, format, strip) }
+                function onAccepted(source, format, strip, requestId) { Ops.convert(convertDialog.owner, source, format, strip, requestId) }
             }
 
             Loader {
@@ -372,9 +373,18 @@ ShellRoot {
                 anchors.fill: parent
                 active: false
                 source: "NetworkDialog.qml"
+                property var owner: null
+                property Item origin: null
                 readonly property bool opened: item !== null && item.opened
-                function open() { active = true; item.open() }
-                function openLocation(uri, label, password, reason, failedConnect) {
+                function open() {
+                    if (opened) return
+                    origin = view.currentPane
+                    active = true
+                    item.open()
+                }
+                function openLocation(uri, label, password, reason, failedConnect, fromPane) {
+                    if (opened || !fromPane) return
+                    origin = fromPane
                     active = true
                     item.openLocation(uri, label, password, reason, failedConnect)
                 }
@@ -383,16 +393,30 @@ ShellRoot {
                 target: networkDialog.item
                 // FocusScope remembers its own last-focused child, list or rail, and restores it.
                 function onClosed() { view.currentPane.forceActiveFocus() }
-                function onSaved() { view.currentPane.sidebar.reloadBookmarks() }
-                function onMountRequested(uri, label, password) { view.currentPane.sidebar.saveNetwork(uri, label, password) }
+                function onMountRequested(requestId, uri, label, password) {
+                    if (!networkDialog.origin) {
+                        networkDialog.item.mountFinished(requestId, uri, false, "The requesting pane is no longer available.")
+                        return
+                    }
+                    networkDialog.owner = networkDialog.origin.sidebar
+                    networkDialog.owner.saveNetwork(requestId, uri, label, password, networkDialog.origin)
+                }
+                function onCancelRequested(requestId) { if (networkDialog.owner) networkDialog.owner.cancelNetwork(requestId) }
+            }
+
+            Connections {
+                target: networkDialog.owner
+                function onNetworkCompleted(requestId, uri, success, reason) {
+                    if (networkDialog.item) networkDialog.item.mountFinished(requestId, uri, success, reason)
+                }
             }
 
             Connections {
                 target: view.currentPane.sidebar
                 function onAddRequested() { networkDialog.open() }
-                function onSharesListed(baseUri, baseLabel, names) { shareBrowser.open(baseUri, baseLabel, names) }
-                function onNetworkRetryRequested(uri, label, password, reason, failedConnect) {
-                    networkDialog.openLocation(uri, label, password, reason, failedConnect)
+                function onSharesListed(baseUri, baseLabel, names, origin) { if (origin) shareBrowser.open(baseUri, baseLabel, names, origin) }
+                function onNetworkRetryRequested(uri, label, password, reason, failedConnect, origin) {
+                    networkDialog.openLocation(uri, label, password, reason, failedConnect, origin)
                 }
             }
 
@@ -400,12 +424,15 @@ ShellRoot {
             // An Item fronts this Loader because its callers read active, which is a Loader's own load switch.
             Item {
                 id: shareBrowser
-                x: view.currentPane.mapToItem(view, view.currentPane.listSlot.x, 0).x
-                y: view.currentPane.y + view.currentPane.listSlot.y
-                width: view.currentPane.listSlot.width
-                height: view.currentPane.listSlot.height
+                property Item owner: primaryPane
+                onOwnerChanged: if (!owner) close()
+                visible: owner !== null && (owner === primaryPane || view.dualMode)
+                x: owner ? owner.mapToItem(view, owner.listSlot.x, 0).x : 0
+                y: owner ? owner.y + owner.listSlot.y : 0
+                width: owner ? owner.listSlot.width : 0
+                height: owner ? owner.listSlot.height : 0
                 readonly property bool active: shareLoader.item !== null && shareLoader.item.active
-                function open(uri, label, names) { shareLoader.active = true; shareLoader.item.open(uri, label, names) }
+                function open(uri, label, names, origin) { owner = origin; shareLoader.active = true; shareLoader.item.open(uri, label, names) }
                 function close() { if (shareLoader.item) shareLoader.item.close() }
                 // ui/js/Focus.js shareBrowserAct's two other verbs, reached only while the overlay is up.
                 function moveCursor(delta) { if (shareLoader.item) shareLoader.item.moveCursor(delta) }
@@ -415,7 +442,10 @@ ShellRoot {
             Connections {
                 target: shareLoader.item
                 function onClosed() { view.currentPane.forceActiveFocus() }
-                function onActivated(uri, label) { view.currentPane.sidebar.mountShare(uri, label) }
+                function onActivated(uri, label) {
+                    view.focusPane(shareBrowser.owner === primaryPane ? 0 : 1)
+                    shareBrowser.owner.sidebar.mountShare(uri, label, shareBrowser.owner)
+                }
             }
 
             // Issue 20: the mouse's own back button, taken by the window because no row is being
@@ -427,7 +457,7 @@ ShellRoot {
                 acceptedButtons: Qt.BackButton
                 onTapped: {
                     if (view.currentPane.menuActions.opened || settingsPanel.opened || view.currentPane.trash.confirming || chrome.editing || convertDialog.opened || permissionsDialog.opened || keymapSheet.opened
-                            || networkDialog.opened || shareBrowser.active || preview.active
+                            || networkDialog.opened || (shareBrowser.active && shareBrowser.owner === view.currentPane) || preview.active
                             || view.currentPane.renameEditor() !== null || view.currentPane.sidebar.renameEditor() !== null)
                         return
                     if (view.currentPane.trash.opened) view.currentPane.trash.close()

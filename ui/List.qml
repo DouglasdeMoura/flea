@@ -313,10 +313,29 @@ ListView {
         onTriggered: root.requestIfDrifted()
     }
 
-    // A fast listing beats the compositor's resize, so a viewport change restarts the settle exactly like a scroll does.
+    // Resize and filter changes can change the visible work without moving contentY.
     Connections {
         target: root.pane
         function onVisibleRowsChanged() { settle.restart() }
+        function onFilterQueryChanged() {
+            if (!root.visible) return
+            var work = Filter.cut({ask: [], drop: []}, root.pane.shown, root.pane.thumbState)
+            work.drop = work.drop.filter(function(index) { return index !== root.pane.previewIndex })
+            if (work.drop.length > 0) {
+                root.pane.backend.thumbcancel(work.drop)
+                root.thumbsApplied(work)
+            }
+            if (DirSizes.hasPending(root.pane.dirSizeState)) {
+                root.pane.backend.dirsizecancel()
+                root.dirSizesCancelled()
+            }
+            settle.restart()
+        }
+    }
+
+    Connections {
+        target: ViewState
+        function onThumbnailModeChanged() { if (root.visible) settle.restart() }
     }
 
     Timer {
@@ -333,13 +352,13 @@ ListView {
 
     // Only the visible rows, only once each, and only after the list has stopped moving.
     function requestThumbs() {
-        if (root.pane.shownTotal === 0 || root.pane.listInFlight)
+        if (!root.visible || root.pane.listInFlight)
             return
         var view = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)
         // A filtered viewport covers a set and not a run, so the run it spans is what the planner
         // gets and Filter.cut takes back every row inside that run the filter is hiding.
         var span = Filter.span(root.pane.shown, view.first, view.last)
-        var work = Filter.cut(Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, span.first, span.last, ViewState.thumbnailMode), root.pane.shown)
+        var work = Filter.cut(Thumbs.plan(root.pane.thumbState, root.pane.rows, root.pane.held, span.first, span.last, ViewState.thumbnailMode), root.pane.shown, root.pane.thumbState)
         work.drop = work.drop.filter(function (index) { return index !== root.pane.previewIndex })
         root.pane.backend.thumbcancel(work.drop)
         root.pane.backend.thumb(work.ask)
@@ -359,7 +378,7 @@ ListView {
 
     // Same idiom as requestThumbs, minus a cancel: onContentYChanged already sent it, see above.
     function requestDirSizes() {
-        if (root.pane.shownTotal === 0 || root.pane.listInFlight)
+        if (!root.visible || root.pane.shownTotal === 0 || root.pane.listInFlight)
             return
         // Thumbs.viewport() is reused: it takes no thumb-specific state, only geometry.
         var view = Thumbs.viewport(root.contentY, Theme.fileRowHeight, root.pane.visibleRows, root.pane.shownTotal)

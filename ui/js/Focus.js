@@ -19,6 +19,10 @@ function next(current) {
     return current === LIST ? RAIL : LIST
 }
 
+function shareBrowserHere(root) {
+    return !!(root.shareBrowser && root.shareBrowser.active && (!root.shareBrowser.owner || root.shareBrowser.owner === root))
+}
+
 // The one lookup Pane.qml's Keys.onPressed calls. "addNetwork" is a rail-only action (the
 // dialog is reached from the rail's own "+" mark), so "a" does nothing in the list;
 // filtering it here, not in Keymap.js, keeps the generated file a pure keys.toml mirror.
@@ -26,16 +30,14 @@ function next(current) {
 // rail, so Left/Right stay silent everywhere else rather than reaching act()'s "not built yet".
 function lookup(event, root) {
     var context = root.preview.active ? (root.preview.isPdf ? "pdf" : root.preview.isMedia ? "media" : "preview")
-                  : root.shareBrowser && root.shareBrowser.active ? "menu" : root.focusView === RAIL ? "rail" : "listing"
+                  : shareBrowserHere(root) ? "menu" : root.focusView === RAIL ? "rail" : "listing"
     var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
     // Only the bare a is rail-only; Ctrl+K is scoped to neither view and opens the dialog anywhere.
     if (action === "addNetwork" && root.focusView !== RAIL && !(event.modifiers & Qt.ControlModifier))
         return ""
-    // A filter narrows rows already on screen, which is the list view's own job: the GridView and
-    // Columns boards draw no filter, so / is dropped there rather than narrowing a view nothing shows.
-    // It goes quiet while a search owns the header too, the same way the two sort keys do below.
+    // List and Grid filter held rows; search owns the header while its results are active.
     if (action === "filter")
-        return (root.viewMode === "list" && root.searchMode.length === 0) ? action : ""
+        return (root.viewMode !== "columns" && root.searchMode.length === 0) ? action : ""
     // Left and Right seek inside a media preview and turn the page in a PDF one. With no preview
     // open they are free, and in the grid they are the only sensible way to move one tile sideways,
     // so the grid claims them there.
@@ -52,7 +54,7 @@ function lookup(event, root) {
     if (action === "pageForward") {
         if (root.preview.active)
             return root.preview.isPdf ? action : ""
-        if (root.shareBrowser.active || root.focusView === RAIL)
+        if (shareBrowserHere(root) || root.focusView === RAIL)
             return "open"
         var row = root.rowFor(root.cursorIndex)
         return row && (row.d || (Format.isSymlink(row.p) && row.i === "folder")) ? "open" : (row ? "preview" : "")
@@ -71,12 +73,9 @@ function lookup(event, root) {
 // Takes the Pane root because every case is a method call or a property read on it.
 function act(action, root, menuId, paths) {
     switch (action) {
-    // One row in the list, one row of tiles in the grid: a grid that stepped linearly on Down would
-    // move the cursor sideways, which is not what the key looks like it does.
-    // Every one of these moves through what is drawn, not through the listing: with a filter up the
-    // two differ, and stepping the listing would land the cursor on a row nothing is showing.
-    case "cursorDown": step(root, root.cursorStride); return
-    case "cursorUp": step(root, -root.cursorStride); return
+    // Letter bindings follow item order; physical grid arrows use gridArrow's visual neighbours.
+    case "cursorDown": step(root, 1); return
+    case "cursorUp": step(root, -1); return
     case "cursorLeft": step(root, -1); return
     case "cursorRight": step(root, 1); return
     case "cursorFirst": Filter.setCursorView(root, 0); return
@@ -167,12 +166,26 @@ function act(action, root, menuId, paths) {
     root.message(action + " is not built yet.", false)
 }
 
-// Issue 27: what a cursor key does at an end. The state file's wrapAtEnds is off by default, which
-// is deliberately both answers at once: the operator who reported the jump past the top as a bug
-// keeps the clamp, and the one who asked for it turns the key on. Only a step taken from an end
-// wraps, so a page key overshooting from the middle still stops at the end it was heading for, and
-// the selection keys keep ui/js/Filter.js moveCursor's plain clamp, because an extend that wrapped
-// would run the anchor to the far end and take every row between the two with it.
+// Arrows require an existing visual cell, even when item-order navigation wraps at the ends.
+function gridArrow(event, action, root) {
+    if (root.viewMode !== "grid") return false
+    var columns = root.cursorStride
+    var delta = event.key === Qt.Key_Down && (action === "cursorDown" || action === "extendDown") ? columns
+              : event.key === Qt.Key_Up && (action === "cursorUp" || action === "extendUp") ? -columns
+              : event.key === Qt.Key_Left && action === "cursorLeft" ? -1
+              : event.key === Qt.Key_Right && action === "cursorRight" ? 1 : 0
+    if (!delta) return false
+    var index = Filter.viewOf(root.shown, root.cursorIndex)
+    var nextIndex = index + delta
+    if (nextIndex < 0 || nextIndex >= root.shownTotal
+            || (event.key === Qt.Key_Left && index % columns === 0)
+            || (event.key === Qt.Key_Right && nextIndex % columns === 0)) return true
+    if (action === "extendDown" || action === "extendUp") root.extendSelection(delta)
+    else Filter.moveCursor(root, delta)
+    return true
+}
+
+// Only a step from an end wraps; page overshoots and selection extensions retain their clamps.
 function step(root, delta) {
     var last = root.shownTotal - 1
     if (root.wrapAtEnds !== true || last < 0) {
@@ -259,7 +272,7 @@ function handleKey(event, root, sidebar) {
         PreviewKeys.act(action, root)
         return true
     }
-    if (root.shareBrowser.active) {
+    if (shareBrowserHere(root)) {
         shareBrowserAct(action, root)
         return true
     }
@@ -302,6 +315,7 @@ function handleKey(event, root, sidebar) {
         RailKeys.act(action, root, sidebar)
         return true
     }
+    if (gridArrow(event, action, root)) return true
     if (action.length > 0 || Keymap.lookup(event.key, event.text, event.modifiers).length > 0) {
         if (action.length > 0) root.act(action)
         return true

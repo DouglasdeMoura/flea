@@ -41,6 +41,7 @@ Item {
     readonly property color markColor: !root.available ? Theme.color.muted : root.danger ? Theme.color.error
                                      : root.picked ? Theme.color.accent : Theme.color.muted
     readonly property color labelColor: !root.available ? Theme.color.muted : root.danger ? Theme.color.error
+                                      : root.entry.labelColor !== undefined ? root.entry.labelColor
                                       : root.picked ? Theme.color.accent : Theme.color.foreground
 
     // The hover lift Row.qml uses, so a menu row and a list row read alike.

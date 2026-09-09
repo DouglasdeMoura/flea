@@ -50,7 +50,7 @@ ShellRoot {
         readonly property var filter: win.filterIndex >= 0 ? win.req.filters[win.filterIndex] : null
         readonly property var shown: null
         readonly property int shownTotal: win.total
-        onFilterIndexChanged: if (win.path.length) win.openWithoutHistory(win.path)
+        onFilterChanged: if (win.path.length) win.openWithoutHistory(win.path)
 
         // Where Back goes, and it only ever goes back: Parent is its own button and pushes here too.
         property var history: []
@@ -411,6 +411,9 @@ ShellRoot {
                 edge: win.edge
                 offerRecent: !win.saving
                 onChosen: function (path) { win.open(path); list.forceActiveFocus() }
+                onNetworkCompleted: function(requestId, uri, success, reason) {
+                    if (networkDialog.item) networkDialog.item.mountFinished(requestId, uri, success, reason)
+                }
             }
 
             Flea.PickerList {
@@ -533,10 +536,9 @@ ShellRoot {
                 active: false
                 sourceComponent: Component {
                     Flea.NetworkDialog {
-                        // Authenticating an existing favourite does not add another stored entry.
-                        function appendBookmark(uri, label) { return true }
                         onClosed: list.forceActiveFocus()
-                        onMountRequested: function(uri, label, password) { places.retry(uri, label, password) }
+                        onMountRequested: function(requestId, uri, label, password) { places.retry(requestId, uri, label, password) }
+                        onCancelRequested: function(requestId) { places.cancelNetwork(requestId) }
                     }
                 }
             }

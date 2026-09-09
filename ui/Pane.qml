@@ -81,6 +81,7 @@ FocusScope {
     readonly property alias trash: trashHost
     readonly property alias menuActions: menuActions
     readonly property alias emptyState: emptyState
+    readonly property alias retrySelectionText: wire.retrySelectionText
     readonly property string menuSelectionIdentity: JSON.stringify([root.path, root.held, root.rows,
         root.selectionVersion, root.cursorIndex, root.total, root.listInFlight])
 
@@ -198,7 +199,7 @@ FocusScope {
     // Rename lives in ui/js/Ops.js with the other write operations; ui/List.qml's editor commits through this.
     function commitRename(newName) { Ops.commitRename(root, newName) }
     property int renameMenuId: 0
-    property int convertMenuId: 0
+    property var convertSource: null
     onRenamingIndexChanged: if (root.renamingIndex < 0) root.renameMenuId = 0
 
     // A set of row indices over the current listing, mutated in place; selectionVersion tells a reactive binding (List.qml's delegate, StatusBar's count) to re-read it. Task 8 declined ScriptModel plus ItemSelectionModel on measured memory, see AGENTS.md "The list model".
@@ -335,9 +336,11 @@ FocusScope {
         width: item ? item.implicitWidth : 0
         active: !root.listOnly && root.sharedSidebar === null
         sourceComponent: Flea.Sidebar {
+            navigationPane: root.railPane
             focused: root.railPane.focusView === Focus.RAIL
             trashActive: root.railPane.trash.opened
             onOpened: function(path) { root.railPane.open(path) }
+            onNetworkOpened: function(path, origin) { if (origin) origin.open(path) }
             onTrashRequested: root.railPane.trash.open()
             onMessage: function(text, isError) { root.railPane.message(text, isError) }
             menu: root.railPane.contextMenu()
@@ -514,6 +517,7 @@ FocusScope {
     Flea.ContextMenu {
         id: menu
         parent: root.overlayParent || root
+        focusOwner: root.listArea
         showHidden: root.showHidden
         taildropPeers: (root.cursorRow && !root.cursorRow.d) ? wire.taildrop.peers : []
         archiveFormats: root.backend.archiveFormats

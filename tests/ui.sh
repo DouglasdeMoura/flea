@@ -2580,6 +2580,90 @@ case_grid() {
     kill_flea
 }
 
+case_gridnavigation() {
+    local dir="$fixture_root/grid-navigation" preset i columns next_columns edge selected_name
+    local start_x start_y target_x target_y
+    sandbox_scratch "$dir"
+    for i in $(seq -w 1 61); do printf 'grid navigation %s\n' "$i" > "$dir/file-$i.txt"; done
+    for preset in default vim mac windows; do
+        seed_ui_state "$fixture_root/grid-state" "{\"keys\":\"$preset\",\"view\":\"list\",\"wrapAtEnds\":true,\"preview\":{\"thumbnails\":\"off\"}}"
+        launch "$dir"
+        wait_listing 61
+        click_chrome grid
+        cardsize_expect viewMode grid
+        permissions_viewport 1100 800
+        columns=$(ipc gridColumns)
+        [[ "$columns" =~ ^[0-9]+$ ]] && (( columns > 1 && columns < 30 )) || fail "grid: invalid measured column count $columns"
+        click_row "$((columns - 1))" left
+        key j >/dev/null
+        cardsize_expect cursor "$columns"
+        key k >/dev/null
+        cardsize_expect cursor "$((columns - 1))"
+        key -k Right >/dev/null
+        cardsize_expect cursor "$((columns - 1))"
+        key j -k Left >/dev/null
+        cardsize_expect cursor "$columns"
+        read -r start_x start_y <<< "$(ipc rowCentre "$columns")"
+        key -k Down >/dev/null
+        cardsize_expect cursor "$((columns * 2))"
+        read -r target_x target_y <<< "$(ipc rowCentre "$((columns * 2))")"
+        (( start_x == target_x && target_y > start_y )) || fail "grid: Down did not reach the next visual cell"
+        key -k Up >/dev/null
+        cardsize_expect cursor "$columns"
+        key -k Home -k Up -k Left >/dev/null
+        cardsize_expect cursor 0
+        key -k End -k Down -k Right >/dev/null
+        cardsize_expect cursor 60
+        # Prime fixture count guarantees an incomplete row at every admitted column count.
+        (( 61 % columns != 0 )) || fail "grid: fixture did not produce an incomplete row"
+        edge=$((61 - columns))
+        key -k Home >/dev/null
+        for ((i = 0; i < edge; i++)); do key j >/dev/null; done
+        cardsize_expect cursor "$edge"
+        key -k Down >/dev/null
+        cardsize_expect cursor "$edge"
+        key -k Home >/dev/null
+        for i in 1 2 3 4 5 6; do key j >/dev/null; done
+        cardsize_expect cursor 6
+        key v >/dev/null
+        cardsize_expect selectedIndices 6
+        selected_name=$(ipc visibleRowName 6)
+        [[ "$selected_name" == file-07.txt ]] || fail "grid: selected visible tile identity unavailable"
+        permissions_viewport 800 600
+        next_columns=$(ipc gridColumns)
+        (( next_columns > 1 && next_columns < columns )) || fail "grid: narrower native viewport did not reflow $columns columns"
+        cardsize_expect cursor 6
+        cardsize_expect selectedIndices 6
+        [[ "$(ipc visibleRowName 6)" == "$selected_name" ]] || fail "grid: reflow changed the selected item's identity"
+        key -k Down >/dev/null
+        cardsize_expect cursor "$((6 + next_columns))"
+        cardsize_expect selectedIndices 6
+        key -k Up >/dev/null
+        cardsize_expect cursor 6
+        shot "grid-navigation-$preset-reflow"
+        key -k Escape -k Home -M shift -k Down -m shift >/dev/null
+        cardsize_expect cursor "$next_columns"
+        cardsize_expect selectionCount "$((next_columns + 1))"
+        key -k Escape / file-0 -k Return -k Home >/dev/null
+        cardsize_expect drawnCount 9
+        cardsize_expect cursor 0
+        cardsize_expect visibleRowName file-01.txt 0
+        key -k Down >/dev/null
+        cardsize_expect cursor "$next_columns"
+        key v >/dev/null
+        cardsize_expect selectedIndices "$next_columns"
+        shot "grid-navigation-$preset-filtered"
+        key -k Escape / no-such-tile -k Return >/dev/null
+        cardsize_expect drawnCount 0
+        [[ -z "$(ipc visibleRowName "$next_columns")" ]] || fail "grid: hidden filtered tile still has a visible delegate"
+        shot "grid-navigation-$preset-zero-matches"
+        key -k Escape >/dev/null
+        cardsize_expect drawnCount 61
+        printf 'GRID_NAVIGATION preset=%s columns=%s reflow=%s item_keys=ok cell_edges=ok identity=ok range=ok\n' "$preset" "$columns" "$next_columns"
+        kill_flea
+    done
+}
+
 case_header() {
     launch "$repo"
     local titles mark
@@ -3327,8 +3411,31 @@ case_network() {
     : > "$dir/apple.txt"
     local fixture_home="$fixture_root/network-home"
     fixture_home_make "$fixture_home"
-    local real_home="$HOME" product_root mount_log="$fake_root/mount.log"
+    local real_home="$HOME" mount_log="$fake_root/mount.log" mount_calls="$fake_root/mount-calls"
+    local state="$fixture_root/network-state" stored bookmarks="$fixture_home/.config/gtk-3.0/bookmarks"
+    local real_state="${XDG_STATE_HOME-}" real_config="${XDG_CONFIG_HOME-}"
+    export XDG_CONFIG_HOME="$fixture_home/.config"
+    seed_ui_state "$state" '{"view":"list","keys":"default","places":{"favourites":[]}}'
+    stored="$state/flea/ui.json"
     : > "$mount_log"
+    : > "$mount_calls"
+    mkfifo "$fake_root/mount-release"
+
+    network_wait_favourites() {
+        settings_wait_value "$1"
+        local expected
+        expected=$(ipc uiSettings | jq -c '.places.favourites')
+        ipc railEntries | jq -e --argjson expected "$expected" '[.[] | select(.kind == "favourite") | .original] == $expected' >/dev/null \
+            || fail "network: saved favourites and their visible rail rows differ"
+    }
+    network_wait_closed() {
+        local attempt
+        for attempt in $(seq 1 100); do
+            [[ "$(ipc dialogOpen)" == false ]] && return
+            sleep 0.05
+        done
+        fail "network: successful persistence did not close the form: $(ipc networkStatus)"
+    }
 
     local live_mounts
     live_mounts=$(gio mount -l 2>/dev/null | grep -c '^Mount(') || true
@@ -3341,9 +3448,13 @@ case_network() {
 #!/bin/sh
 case "\$1 \${2:-}" in
 "mount -l") exit 0 ;;
+"mount nfs://cancel.test/export")
+    : > "$fake_root/cancel-started"
+    read release < "$fake_root/mount-release"
+    ;;
 "mount nfs://stale-one.test/export") printf 'Location is already mounted\n' >&2; exit 2 ;;
 "mount nfs://stale-two.test/export") exit 2 ;;
-"mount "*) printf '%s\n' "\$*" > "$mount_log" ;;
+"mount "*) printf '%s\n' "\$*" > "$mount_log"; printf '%s\n' "\$*" >> "$mount_calls" ;;
 "info nfs://stale-two.test/export") exit 1 ;;
 "info smb://shares-one.test/"|"info smb://shares-two.test/") exit 1 ;;
 "info "*) printf 'local path: %s\n' "$dir" ;;
@@ -3389,30 +3500,20 @@ EOS
         || fail "network: the Mounts-as line reads $(ipc networkUri)"
     key -k Return >/dev/null
     wait_network_result mounted 5
+    network_wait_closed
     [[ "$(ipc dialogOpen)" == "false" ]] || fail "network: Enter did not submit and close the dialog"
     [[ "$(cat "$mount_log")" == 'mount --anonymous smb://198.51.100.1/' ]] \
         || fail "network: guest SMB did not use gio mount --anonymous"
-    for _attempt in $(seq 1 100); do
-        [[ -n "$(ipc networkEntries)" ]] && break
-        sleep 0.05
-    done
-    # With no share typed the label falls back to the host, which is what Protocols.label does and
-    # what the sidebar row then carries.
-    [[ "$(ipc networkEntries)" == "198.51.100.1|network|share|false" ]] \
-        || fail "network: the dialog's own write never reached the rail with gtk-3.0/ absent at launch, got $(ipc networkEntries)"
+    network_wait_favourites '.places.favourites == [{"label":"198.51.100.1","path":"smb://198.51.100.1/"}]'
+    network_wait_closed
+    [[ -z "$(ipc networkEntries)" ]] || fail "network: an unlisted mount was invented as a Network row"
+    [[ ! -e "$bookmarks" ]] || fail "network: the new favourite created shared GTK bookmarks"
     shot network-appeared
-    [[ -f "$fixture_home/.config/gtk-3.0/bookmarks" ]] || fail "network: the dialog did not create gtk-3.0/bookmarks under the fixture HOME"
 
-    # The mark's own case walks the text sizes and probes the target; here it is read once, on the
-    # rail this case just filled, so a regression shows up in the case that produced the row.
-    settle
-    assert_network_mark_alignment "the live text size" true
-
-    local bookmarks="$fixture_home/.config/gtk-3.0/bookmarks"
     local invalid_port invalid_port_failures=0 snapshot
     for invalid_port in "22/path" "0" "65536"; do
-        snapshot="$fixture_root/network-bookmarks-${invalid_port//\//-}"
-        if ! assert_invalid_network_port "$invalid_port" "$bookmarks" "$snapshot"; then
+        snapshot="$fixture_root/network-state-${invalid_port//\//-}"
+        if ! assert_invalid_network_port "$invalid_port" "$stored" "$snapshot"; then
             invalid_port_failures=$((invalid_port_failures + 1))
         fi
     done
@@ -3555,103 +3656,83 @@ EOS
     [[ "$(ipc dialogOpen)" == "false" ]] \
         || fail "network: escape did not close the dialog after the re-home walk"
 
-    # Remove on the place this session's own dialog added, which is the sequence the rail's own
-    # write used to refuse forever: ui/NetworkDialog.qml appends through its own FileView, and
-    # ui/NetworkPlaces.qml's never reloads, so the body it wrote back was the pre-Add snapshot. The
-    # write is derived from bookmarksText now, the text ui/shell.qml:158 has the rail reload on saved().
-    click_rail_row 1 right
+    # Favourites owns the new row; Remove edits that store without touching GTK or unmounting.
+    click_rail_row 0 right
     settle
-    [[ "$(ipc contextMenuEntries)" == "Rename|Remove" ]] \
-        || fail "network: the added place offers $(ipc contextMenuEntries), not Rename then Remove"
-    menu_seek Remove
+    [[ "$(ipc contextMenuEntries)" == "Remove" ]] \
+        || fail "network: the added favourite offers $(ipc contextMenuEntries), not Remove"
     key -k Return >/dev/null
-    wait_message "198.51.100.1 is forgotten."
-    # cat and stat both print nothing for a path that is gone, so existence is asserted separately:
-    # an empty read alone cannot tell a correct removal from a forget that unlinked the file. The
-    # sentence above is what separates a correct removal from the stale write-back this case exists
-    # for, because that one refused with "is not a saved place" instead.
-    [[ -f "$fixture_home/.config/gtk-3.0/bookmarks" ]] \
-        || fail "network: Remove unlinked the bookmarks file instead of rewriting it"
-    [[ -z "$(cat "$fixture_home/.config/gtk-3.0/bookmarks")" ]] \
-        || fail "network: Remove wrote a body older than the rail, the file reads: $(cat "$fixture_home/.config/gtk-3.0/bookmarks")"
-    for _attempt in $(seq 1 100); do
-        [[ -z "$(ipc networkEntries)" ]] && break
-        sleep 0.05
-    done
-    [[ -z "$(ipc networkEntries)" ]] \
-        || fail "network: the forgotten place stayed on the rail, got $(ipc networkEntries)"
-    printf 'NETWORK add-then-remove=ok\n'
+    network_wait_favourites '.places.favourites == []'
+    [[ ! -e "$bookmarks" ]] || fail "network: Remove created shared GTK bookmarks"
+    [[ "$(wc -l < "$mount_calls")" -eq 1 ]] || fail "network: Remove called the mount helper"
+    printf 'NETWORK add-then-remove=ok gtk-absent=ok\n'
 
-    # The other half of the same fix, and the half nothing drove: rename() derives its body from
-    # bookmarksText too. The Remove above left ui/NetworkPlaces.qml's write view holding "", the
-    # dialog appends through a view of its own, so a rename taken from the write view would write
-    # one of the two lines below and drop the other. Focus is still on the rail after the menu.
-    local bookmarks="$fixture_home/.config/gtk-3.0/bookmarks"
     local host
     for host in 198.51.100.2 198.51.100.3; do
-        # The dialog hands focus back to the list when it closes, so the rail is reached explicitly
-        # rather than assumed: "a" is bound on the rail alone.
         rail_focus
         key a >/dev/null
         settle
-        [[ "$(ipc dialogOpen)" == "true" ]] || fail "network: a from the rail did not reopen the dialog for $host"
+        [[ "$(ipc dialogOpen)" == true ]] || fail "network: the form did not reopen for $host"
         key "$host" >/dev/null
         key -k Return >/dev/null
-        settle
+        network_wait_closed
     done
-    for _attempt in $(seq 1 100); do
-        [[ "$(ipc networkEntries)" == "198.51.100.2|network|share|false"$'\n'"198.51.100.3|network|share|false" ]] && break
-        sleep 0.05
-    done
-    [[ "$(ipc networkEntries)" == "198.51.100.2|network|share|false"$'\n'"198.51.100.3|network|share|false" ]] \
-        || fail "network: the two added places did not reach the rail, got $(ipc networkEntries)"
-    rail_focus
-    key g >/dev/null
-    key j >/dev/null
-    settle
-    [[ "$(ipc railCursor)" == "1" ]] || fail "network: cursor did not reach the first added place, it is $(ipc railCursor)"
-    key -k F2 >/dev/null
-    settle
-    key "Second" >/dev/null
-    key -k Return >/dev/null
-    settle
-    [[ "$(grep -c . "$bookmarks")" == "2" ]] \
-        || fail "network: the rename changed the line count, the file reads: $(cat "$bookmarks")"
-    # ui/RenameField.qml preselects the stem alone, and this label's last dot reads as an extension,
-    # so typing over it keeps the ".2": the name written is the name the operator would have seen.
-    grep -q ' Second\.2$' "$bookmarks" \
-        || fail "network: the rename did not write the name just typed, the file reads: $(cat "$bookmarks")"
-    grep -q '198.51.100.3' "$bookmarks" \
-        || fail "network: the rename dropped the line the second Add wrote, the file reads: $(cat "$bookmarks")"
-    printf 'NETWORK rename-after-add=ok\n'
+    network_wait_favourites '.places.favourites == [{"label":"198.51.100.2","path":"smb://198.51.100.2/"},{"label":"198.51.100.3","path":"smb://198.51.100.3/"}]'
 
-    # The append re-reads this file before it writes, and a read that failed empties FileView.text():
-    # the write that followed left a bookmarks file holding one line and destroyed the rest. Mode 200
-    # is the exact shape, unreadable and still writable, because taking write away too would hide the
-    # defect behind a second failure. The mode is restored before the tick arm below reads
-    # anything. See AGENTS.md "A failed FileView read".
-    local before
-    before=$(cat "$bookmarks")
-    [[ -n "$before" ]] || fail "network: the unreadable-file arm needs saved places to lose, and the file is empty"
-    chmod 200 "$bookmarks"
+    # A real unreadable-but-writable store must refuse its asynchronous append without losing inputs.
+    local before mount_count
+    before=$(cat "$stored")
+    mount_count=$(wc -l < "$mount_calls")
+    chmod 200 "$stored"
     rail_focus
     key a >/dev/null
     settle
-    [[ "$(ipc dialogOpen)" == "true" ]] || fail "network: a from the rail did not reopen the dialog for the unreadable-file arm"
     key "198.51.100.4" >/dev/null
+    key -k Return -k Return >/dev/null
+    for _attempt in $(seq 1 100); do
+        [[ "$(ipc networkStatus)" == *"could not be read"* ]] && break
+        sleep 0.05
+    done
+    chmod 600 "$stored"
+    [[ "$(ipc dialogOpen)" == true && "$(ipc networkStatus)" == *"could not be read"* ]] \
+        || fail "network: persistence refusal did not keep its error and form visible: $(ipc networkStatus)"
+    [[ "$(ipc networkUri)" == 'smb://198.51.100.4/' && "$(ipc networkAction)" == Retry ]] \
+        || fail "network: save refusal lost the entered endpoint or retry action"
+    [[ "$(cat "$stored")" == "$before" ]] || fail "network: unreadable state was overwritten"
+    [[ "$(wc -l < "$mount_calls")" -eq $((mount_count + 1)) ]] \
+        || fail "network: repeated submit mounted more than once"
+    shot network-save-refused
     key -k Return >/dev/null
+    network_wait_closed
+    network_wait_favourites '.places.favourites | length == 3 and .[2] == {"label":"198.51.100.4","path":"smb://198.51.100.4/"}'
+    [[ "$(wc -l < "$mount_calls")" -eq $((mount_count + 1)) ]] \
+        || fail "network: persistence retry remounted an already connected endpoint"
+    [[ ! -e "$bookmarks" ]] || fail "network: persistence retry created GTK bookmarks"
+    printf 'NETWORK save-refusal=retained repeat-submit=single retry=save-only\n'
+
+    # A mount blocked at a fixture-owned FIFO provides an observable, cancellable in-flight request.
+    before=$(cat "$stored")
+    rail_focus
+    key a >/dev/null
     settle
-    chmod 600 "$bookmarks"
-    [[ "$(cat "$bookmarks")" == "$before" ]] \
-        || fail "network: a read that failed still wrote, and the file now reads: $(cat "$bookmarks")"
-    # And the refusal is visible rather than silent: the dialog stays open over its own sentence.
-    [[ "$(ipc dialogOpen)" == "true" ]] \
-        || fail "network: the dialog closed on an append it could not read a body for"
+    click_chip NFS
+    key "cancel.test" >/dev/null
+    key -k Tab -k Tab >/dev/null
+    key "/export" >/dev/null
+    key -k Return >/dev/null
+    for _attempt in $(seq 1 100); do
+        [[ -e "$fake_root/cancel-started" ]] && break
+        sleep 0.05
+    done
+    [[ -e "$fake_root/cancel-started" && "$(ipc dialogOpen)" == true ]] \
+        || fail "network: cancellable mount did not remain in the open form"
+    [[ "$(cat "$stored")" == "$before" ]] || fail "network: favourite was saved before mount completion"
+    shot network-mount-pending
     key -k Escape >/dev/null
-    settle
-    [[ "$(ipc dialogOpen)" == "false" ]] \
-        || fail "network: escape did not close the dialog after the unreadable-file arm"
-    printf 'NETWORK unreadable-file-writes-nothing=ok\n'
+    wait_network_result cancelled 5
+    [[ "$(ipc dialogOpen)" == false && "$(cat "$stored")" == "$before" ]] \
+        || fail "network: Cancel reopened the form or saved an unfinished mount"
+    printf 'NETWORK mount-first=ok cancel=inflight no-place=ok\n'
 
     # Plain WebDAV is port 80, so the tick that picks the scheme has to pick the number with it, or
     # the dialog offers a port that scheme does not use while the rail dedups against the one it
@@ -3684,89 +3765,32 @@ EOS
     settle
     [[ "$(ipc dialogOpen)" == "false" ]] || fail "network: escape did not close the dialog after the TLS pass"
 
-    # The same class on the rail's own rename, which derived its body from the text the rail was
-    # built from: a read that failed empties that too, so relabelling it appended the renamed share
-    # to nothing and left a bookmarks file holding one line. Only a live mount reaches it, because a
-    # saved place is drawn from the very text the failed read emptied; gio is stubbed for one (the
-    # case_sharebrowser idiom), and the mode is set before the launch so the read fails at startup
-    # rather than depending on what a chmod tells inotify. See AGENTS.md "A failed FileView read".
-    local gio_stub="$fixture_root/network-gio"
-    sandbox_scratch "$gio_stub"
-    mkdir -p "$gio_stub/bin"
-    # Nothing here is activated, so the listing is the one subcommand the stub is ever asked for.
-    cat > "$gio_stub/bin/gio" <<'EOS'
-#!/bin/sh
-if [ "$1" = mount ] && [ "$2" = "-l" ]; then
-  printf 'Mount(0): data on 198.51.100.9 -> smb://198.51.100.9/data/\n'
-fi
-exit 0
-EOS
-    chmod +x "$gio_stub/bin/gio"
-    local before_rename
-    before_rename=$(cat "$bookmarks")
-    [[ -n "$before_rename" ]] || fail "network: the rename arm needs saved places to lose, and the file is empty"
-    chmod 200 "$bookmarks"
-    # Its own name: "local saved_path" again would reassign the one this case restores PATH from.
-    local rename_arm_path="$PATH"
-    export PATH="$gio_stub/bin:$PATH"
-    export HOME="$fixture_home"
-    launch "$dir"
-    export HOME="$real_home"
-    export PATH="$rename_arm_path"
-    wait_listing 3
-    # Only the live mount: the two saved places are invisible because the read that would have drawn
-    # them failed, which is the state the rename then has to refuse to derive a body from.
-    for _attempt in $(seq 1 200); do
-        [[ "$(ipc networkEntries)" == "data|network|share|true" ]] && break
-        sleep 0.05
-    done
-    [[ "$(ipc networkEntries)" == "data|network|share|true" ]] \
-        || fail "network: the stubbed live mount is not the rail's only network row, got $(ipc networkEntries)"
-    rail_focus
-    key g >/dev/null
-    key j >/dev/null
-    settle
-    [[ "$(ipc railCursor)" == "1" ]] || fail "network: cursor did not reach the live mount, it is $(ipc railCursor)"
-    key -k F2 >/dev/null
-    settle
-    key "Renamed" >/dev/null
-    key -k Return >/dev/null
-    settle
-    chmod 600 "$bookmarks"
-    [[ "$(cat "$bookmarks")" == "$before_rename" ]] \
-        || fail "network: a rename derived from a read that failed still wrote, the file now reads: $(cat "$bookmarks")"
-    # And the refusal reaches the operator: a rename that reported nothing at all is how the file was
-    # lost in silence, so the sentence is asserted and not only the bytes.
-    wait_message "Saved places could not be read, so the new name was not saved."
-
-    # The other side of the same guard, and the whole reason it lets FileNotFound through: a box that
-    # has never saved a place has no file to read at all, and renaming a live mount is how the first
-    # one gets written. A guard that refused every failed read would refuse this too, in silence.
-    rm -f "$bookmarks"
-    rail_focus
-    [[ "$(ipc railCursor)" == "1" ]] || fail "network: the refused rename moved the cursor to $(ipc railCursor)"
-    key -k F2 >/dev/null
-    settle
-    key "First" >/dev/null
-    key -k Return >/dev/null
-    settle
-    for _attempt in $(seq 1 200); do
-        [[ -s "$bookmarks" ]] && break
-        sleep 0.05
-    done
-    [[ "$(cat "$bookmarks" 2>&1)" == "smb://198.51.100.9/data First" ]] \
-        || fail "network: a rename with no bookmarks file at all did not write the first place, it reads: $(cat "$bookmarks" 2>&1)"
-    printf 'NETWORK unreadable-file-renames-nothing=ok absent-file-renames-write-the-first=ok\n'
-
-    # The arm above runs against a listing-only gio, so the cache arms below need this case's own
-    # stub back and a window started under it. Its saved places go with it: they are the arm above's
-    # subject, not this one's, and the rail rows they draw are nothing below reads.
+    # Legacy GTK rows stay readable and byte-for-byte intact alongside persisted Flea favourites.
+    mkdir -p "$fixture_home/.config/gtk-3.0"
+    printf 'smb://legacy.test/data Legacy share\nfile:///missing/legacy Local legacy\n' > "$bookmarks"
+    local legacy_before
+    legacy_before=$(cat "$bookmarks")
     kill_flea
-    rm -f "$bookmarks"
     export HOME="$fixture_home"
     launch "$dir"
     export HOME="$real_home"
     wait_listing 3
+    network_wait_favourites '.places.favourites | length == 3'
+    for _attempt in $(seq 1 100); do
+        [[ "$(ipc networkEntries)" == 'Legacy share|network|share|false' ]] && break
+        sleep 0.05
+    done
+    [[ "$(ipc networkEntries)" == 'Legacy share|network|share|false' ]] \
+        || fail "network: restarting did not preserve the readable legacy Network row"
+    assert_network_mark_alignment "the live text size" true
+    local legacy_index
+    legacy_index=$(ipc railEntries | jq -r 'map(.label) | index("Legacy share")')
+    click_rail_row "$legacy_index" right
+    settle
+    [[ "$(ipc contextMenuVisible)" == false ]] || fail "network: a legacy GTK row offered a write action"
+    [[ "$(cat "$bookmarks")" == "$legacy_before" ]] || fail "network: legacy GTK bytes changed"
+    printf 'NETWORK restart=favourites-and-legacy gtk=unchanged\n'
+
     rail_focus
     key a >/dev/null
     settle
@@ -3777,6 +3801,7 @@ EOS
     key "/export" >/dev/null
     key -k Return >/dev/null
     wait_network_result mounted 5
+    network_wait_closed
     [[ "$(cat "$mount_log")" == 'mount nfs://nfs.test/export' ]] \
         || fail "network: NFS did not retain plain gio mount"
 
@@ -3792,6 +3817,7 @@ EOS
     key "/export" >/dev/null
     key -k Return >/dev/null
     wait_network_result mounted 5
+    network_wait_closed
     key a >/dev/null
     click_chip NFS
     key "stale-two.test" >/dev/null
@@ -3800,6 +3826,8 @@ EOS
     key "/export" >/dev/null
     key -k Return >/dev/null
     wait_network_result failed 5
+    network_wait_favourites '.places.favourites | all(.[]; .path != "nfs://stale-two.test/export")'
+    [[ "$(ipc dialogOpen)" == true ]] || fail "network: failed mount discarded its draft"
     [[ "$(ipc networkStatus)" == "Connect failed: network location was refused" ]] \
         || fail "network: the refused direct open reported the previous open's verdict"
     key -k Escape >/dev/null
@@ -3810,6 +3838,7 @@ EOS
     key "shares-one.test" >/dev/null
     key -k Return >/dev/null
     wait_network_result mounted 5
+    network_wait_closed
     [[ "$(ipc shareBrowserOpen)" == "true" && "$(ipc shareBrowserEntries)" == "old-share" ]] \
         || fail "network: share-cache setup did not list first root"
     key -k Escape >/dev/null
@@ -3823,10 +3852,15 @@ EOS
         && "$(ipc networkStatus)" == "Connect failed: location has no browsable folder" ]] \
         || fail "network: bare root reused stale share output"
 
+    network_wait_favourites '.places.favourites | all(.[]; .path != "smb://shares-two.test/")'
+    [[ "$(cat "$bookmarks")" == "$legacy_before" ]] || fail "network: later Network actions changed GTK bookmarks"
+    key -k Escape >/dev/null
+    settle
     printf 'NETWORK empty=ok a-scoped=ok dialog=ok submit-path=ok keyboard-after=ok guest-smb=anonymous nfs=plain caches=isolated\n'
     export PATH="$saved_path"
+    if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
+    if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
     kill_flea
-    sandbox_remove "$gio_stub"
     sandbox_remove "$fixture_home"
     sandbox_remove "$fake_root"
 }
@@ -7295,6 +7329,7 @@ case_previewviews() {
 . "$repo/tests/ui-preview-visibility.sh"
 . "$repo/tests/ui-permissions.sh"
 . "$repo/tests/ui-operations-design.sh"
+. "$repo/tests/ui-convert-design.sh"
 
 declare -a wanted=("$@")
 [[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)

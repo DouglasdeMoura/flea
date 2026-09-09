@@ -30,6 +30,7 @@ Item {
     readonly property bool stickyHere: root.sticky.length > 0
     property string searchLine: ""
     property string searchKeys: ""
+    property string retryLine: ""
     property bool searchRunning: false
     readonly property bool searching: root.searchLine.length > 0
     readonly property int spiralSize: Style.font.body
@@ -38,7 +39,8 @@ Item {
                                     && root.notice.indexOf(Ops.UNDO_HINT) >= 0
     readonly property string secondaryText: [root.transientIsError && root.stickyHere ? root.sticky : "",
         root.activities.slice(1).map(function (entry) { return entry.text }).join(" · "),
-        (root.transientIsError || root.stickyHere) && root.searching ? "search " + root.searchLine : ""]
+        (root.transientIsError || root.stickyHere) && root.searching ? "search " + root.searchLine : "",
+        root.retryLine]
         .filter(function (s) { return s.length > 0 }).join(" · ")
     signal transferCancelRequested(int id)
     signal undoRequested()

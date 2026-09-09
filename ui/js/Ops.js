@@ -48,6 +48,12 @@ function transferFailure(t, name, error) {
     return (t.moving ? "Move" : "Copy") + " failed: " + name + " · " + error
 }
 
+// Only the identity-checked locate reply supplies these selected retry matches.
+function retrySelectionLine(matches) {
+    if (!matches.length) return ""
+    return (matches.length === 1 ? leaf(matches[0].path) : items(matches.length)) + " selected for retry"
+}
+
 // The canvas draws this one verbatim: "Moved 4 items to Trash · z undoes".
 function trashed(ok, failed) {
     if (ok === 0) {
@@ -276,20 +282,15 @@ function extract(pane, menuId) {
 function openConvert(pane, menuId) {
     var row = pane.rowFor(pane.cursorIndex)
     if (row && !row.d) {
-        pane.convertMenuId = menuId || 0
+        pane.convertSource = {path: pane.join(pane.path, row.n), name: leaf(row.n), menuId: menuId || 0}
         pane.convertRequested(row.n)
     }
 }
 
-function convert(pane, format, strip) {
-    var row = pane.rowFor(pane.cursorIndex)
-    if (!row) {
-        return
-    }
-    pane.backend.convertImage(pane.join(pane.path, row.n),
-                              pane.join(pane.path, Convert.destName(row.n, format)), strip, pane.convertMenuId)
-    pane.convertMenuId = 0
-    pane.sticky("Converting " + row.n + " to ." + format)
+function convert(pane, source, format, strip, requestId) {
+    pane.convertSource = Object.assign({}, source, {requestId: requestId})
+    pane.sticky("Converting " + source.name + " to ." + format)
+    pane.backend.convertImage(source.path, Convert.destination(source, format), strip, source.menuId, requestId, false)
 }
 
 // Move to Dropbox is the transfer request with a destination filled in, which is the concrete case

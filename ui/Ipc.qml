@@ -54,10 +54,27 @@ QtObject {
         // Every token the Blueprint board states, one key=value per line; tools/flea-metrics-gate diffs it. metrics() above stays positional for tests/ui.sh.
         function tokens(): string { return Theme.tokens() }
         function cursor(): int { return root.pane.cursorIndex }
+        function gridColumns(): int { return root.pane.cursorStride }
+        function drawnCount(): int { return root.pane.listArea.count }
         function total(): int { return root.pane.total }
         function selectionCount(): int { return root.pane.selectionCount() }
         function selectedIndices(): string { return root.pane.selectedIndices().join(",") }
         function focusView(): string { return root.pane.focusView }
+        function keyDeliveryState(): string {
+            var pane = root.pane
+            var window = pane.Window.window
+            return JSON.stringify({keySequence: pane.keySequence, keySequenceIdentity: pane.keySequenceIdentity,
+                trashArmedAt: pane.trashArmedAt, clipboard: {paths: pane.clipboard.paths, cut: pane.clipboard.moving},
+                searchMode: pane.searchMode, filterTyping: pane.filterTyping, filterQuery: pane.filterQuery,
+                paneFocus: pane.activeFocus, listFocus: pane.listArea.activeFocus,
+                activeFocusItem: window ? String(window.activeFocusItem) : "",
+                preview: {index: pane.previewIndex, focused: !!pane.previewColumnItem && pane.previewColumnItem.activeFocus},
+                history: {back: pane.history, forward: pane.forwardHistory}})
+        }
+        function visibleRowName(i: int): string {
+            var item = root.pane.visibleItemFor(i)
+            return item && item.visible && item.row ? item.row.n : ""
+        }
         function railCursor(): int { return root.pane.railCursor }
         function railCount(): int { return root.pane.railCount }
         function path(): string { return root.pane.path }
@@ -226,7 +243,15 @@ QtObject {
         // A menu row's own centre, so a driven click lands on the row a test named rather than on a
         // pixel derived from a row count the Menus settings section can change under it.
         function contextMenuRowCentre(i: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().itemFor(i)) }
-        function contextMenuRect(): string { return root.fleaWindow.rectOf(root.pane.contextMenu()) }
+        function contextMenuRect(): string { return root.fleaWindow.rectOf(root.pane.contextMenu().frameItem) }
+        function contextMenuFocusState(): string {
+            var menu = root.pane.contextMenu()
+            var window = menu.Window.window
+            return JSON.stringify({opened: menu.opened, view: root.pane.focusView,
+                menu: menu.keyboardFocused, pane: root.pane.activeFocus, list: root.pane.listArea.activeFocus,
+                origin: !!menu.focusHolder && menu.focusHolder.activeFocus,
+                activeItem: window ? String(window.activeFocusItem) : ""})
+        }
         function contextMenuRowProbe(i: int): string { var item = root.pane.contextMenu().itemFor(i); return item ? item.probe() : "" }
         // Where a driven right click reaches the background menu: the centre of the surface that
         // answers for the directory being shown, which in the columns view is the pane's own column
@@ -410,6 +435,23 @@ QtObject {
         function keymapSheetRows(): string { return root.keymapSheet ? root.keymapSheet.rows() : "" }
         function convertFormat(): string { return root.convertDialog ? root.convertDialog.format : "" }
         function convertStrip(): bool { return root.convertDialog ? root.convertDialog.strip : false }
+        function convertState(): string {
+            var dialog = root.convertDialog
+            if (!dialog) return JSON.stringify({opened: false})
+            return JSON.stringify({opened: dialog.opened, source: dialog.source, format: dialog.format, strip: dialog.strip,
+                checking: dialog.checking, busy: dialog.busy, unavailable: dialog.unavailable, collision: dialog.collision, error: dialog.errorText,
+                output: dialog.outputPath, outputText: dialog.outputItem.text, outputLines: dialog.outputItem.lineCount,
+                outputRect: root.fleaWindow.rectOf(dialog.outputItem),
+                bodyRect: root.fleaWindow.rectOf(dialog.bodyItem), scrollY: dialog.bodyItem.contentY,
+                requestId: dialog.requestId, operationId: dialog.operationId, cursor: dialog.cursor, focusPart: dialog.focusPart, canConvert: dialog.canConvert,
+                rect: root.fleaWindow.rectOf(dialog.cardItem),
+                formats: dialog.formats.map(function(format, index) {
+                    return Object.assign(root.controlState(format, dialog.formatItem(index)), {selected: dialog.format === format,
+                        current: dialog.formatItem(index).current, labelColor: String(dialog.formatItem(index).labelColor),
+                        markColor: String(dialog.formatItem(index).markColor)})
+                }), controls: [root.controlState("Remove metadata", dialog.metadataItem),
+                    root.controlState("Cancel", dialog.cancelItem), root.controlState("Convert", dialog.submitItem)]})
+        }
         function convertTitleCentre(): string { return root.convertDialog ? root.fleaWindow.centreOf(root.convertDialog.titleItem) : "" }
         // The preview column's own table and state, so a test asserts the canvas's rows without OCR.
         function previewFacts(): string { return root.columns ? root.columns.factsLine() : "" }

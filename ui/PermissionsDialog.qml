@@ -22,6 +22,10 @@ FocusScope {
     readonly property bool applying: busy && facts.ok === true
     readonly property color focusFill: Qt.rgba(Theme.color.accent.r, Theme.color.accent.g, Theme.color.accent.b, 0.14)
     readonly property real labelWidth: Math.round(86 * Theme.font.bodySmall / 13)
+    readonly property int controlHeight: Math.max(Theme.rowHeight, Math.ceil(Theme.font.body * Theme.lineBoxRatio) + 2 * Theme.spacing.rowPaddingY)
+    readonly property int headingHeight: Math.max(Theme.hitMin, Math.ceil(Theme.font.caption * Theme.lineBoxRatio) + 2 * Theme.spacing.rowPaddingY)
+    // Permissions.html gives wrapped scope, effect and refusal text the same 1.6 leading.
+    readonly property real paragraphLineHeight: Theme.font.caption * 1.6
     readonly property var cardItem: card
     readonly property var bodyItem: body
     readonly property string displayedError: errorLabel.text
@@ -131,7 +135,7 @@ FocusScope {
         anchors.centerIn: parent
         // The board's 420 content width shares the Settings board's 560 scale.
         width: Math.max(0, Math.min(Theme.settings.panelWidth * 3 / 4 + 2 * Theme.spacing.hairline, root.width - 2 * Theme.spacing.gap))
-        height: Math.max(0, Math.min(Theme.chromeHeight + body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * Theme.spacing.gap))
+        height: Math.max(0, Math.min(chrome.height + body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * Theme.spacing.gap))
         color: Theme.color.surface
         border.color: Theme.color.muted
         border.width: Theme.spacing.hairline
@@ -148,7 +152,7 @@ FocusScope {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: Theme.chromeHeight
+            height: root.controlHeight
             Row {
                 anchors.left: parent.left
                 anchors.leftMargin: Theme.spacing.rowPaddingX
@@ -195,20 +199,20 @@ FocusScope {
                 spacing: 0
                 Row {
                     width: parent.width
-                    height: Theme.rowHeight
+                    height: root.controlHeight
                     spacing: Theme.spacing.gap
-                    Flea.Glyph { width: Theme.markSize; height: nameLabel.height; name: root.facts.directory ? "folder" : "file"; color: Theme.color.foreground }
-                    Text { id: nameLabel; width: parent.width - Theme.markSize - kindLabel.width - 2 * parent.spacing; text: root.path.split("/").pop(); elide: Text.ElideMiddle; textFormat: Text.PlainText; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
-                    Text { id: kindLabel; text: root.facts.ok ? (root.facts.directory ? "directory" : "file") : ""; textFormat: Text.PlainText; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                    Flea.Glyph { width: Theme.markSize; height: nameLabel.height; anchors.verticalCenter: parent.verticalCenter; name: root.facts.directory ? "folder" : "file"; color: Theme.color.foreground }
+                    Text { id: nameLabel; width: parent.width - Theme.markSize - kindLabel.width - 2 * parent.spacing; anchors.verticalCenter: parent.verticalCenter; text: root.path.split("/").pop(); elide: Text.ElideMiddle; textFormat: Text.PlainText; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
+                    Text { id: kindLabel; anchors.verticalCenter: parent.verticalCenter; text: root.facts.ok ? (root.facts.directory ? "directory" : "file") : ""; textFormat: Text.PlainText; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
                 }
                 Rectangle { width: parent.width; height: Theme.spacing.hairline; color: Theme.color.muted; opacity: 0.4 }
                 Row {
                     width: parent.width
-                    height: Theme.rowHeight - 2 * Theme.spacing.rowPaddingY
+                    height: root.headingHeight
                     Item { width: root.labelWidth; height: parent.height }
                     Repeater {
                         model: ["READ", "WRITE", root.facts.directory ? "ENTER" : "EXEC"]
-                        Text { required property string modelData; width: (body.width - root.labelWidth) / 3; horizontalAlignment: Text.AlignHCenter; text: modelData; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                        Text { required property string modelData; width: (body.width - root.labelWidth) / 3; height: parent.height; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; text: modelData; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption; letterSpacing: Theme.font.caption / 10 } }
                     }
                 }
                 Repeater {
@@ -220,7 +224,7 @@ FocusScope {
                         required property int index
                         readonly property alias checks: checks
                         width: body.width
-                        height: Theme.rowHeight
+                        height: root.controlHeight
                         Text { width: root.labelWidth; anchors.verticalCenter: parent.verticalCenter; text: permissionRow.modelData; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
                         Repeater {
                             id: checks
@@ -265,7 +269,7 @@ FocusScope {
                 }
                 Row {
                     width: parent.width
-                    height: Theme.rowHeight
+                    height: root.controlHeight
                     spacing: Theme.spacing.gap
                     Text { width: root.labelWidth; anchors.verticalCenter: parent.verticalCenter; text: "Octal"; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
                     Rectangle {
@@ -276,7 +280,9 @@ FocusScope {
                         TextInput {
                             id: octal
                             anchors.fill: parent
-                            anchors.margins: Theme.spacing.gap
+                            anchors.leftMargin: Theme.spacing.gap
+                            anchors.rightMargin: Theme.spacing.gap
+                            verticalAlignment: TextInput.AlignVCenter
                             text: root.modeText
                             readOnly: !root.editable
                             activeFocusOnTab: true
@@ -299,7 +305,7 @@ FocusScope {
                         required property string modelData
                         required property int index
                         width: body.width
-                        height: Theme.rowHeight
+                        height: root.controlHeight
                         spacing: Theme.spacing.gap
                         Text { width: root.labelWidth; anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
                         Text { width: body.width - root.labelWidth - identity.width - 2 * parent.spacing; anchors.verticalCenter: parent.verticalCenter; text: root.facts.ok ? ((parent.index === 0 ? root.facts.owner : root.facts.group) || "Unknown") + " · read-only" : ""; textFormat: Text.PlainText; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
@@ -322,6 +328,8 @@ FocusScope {
                         text: "Scope: this directory only. Enclosed files and directories keep every bit."
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
+                        lineHeightMode: Text.FixedHeight
+                        lineHeight: root.paragraphLineHeight
                         color: Theme.color.foreground
                         font { family: Theme.font.family; pixelSize: Theme.font.caption }
                     }
@@ -336,6 +344,8 @@ FocusScope {
                         : root.facts.ok && root.modeValue < 0 ? "Enter three octal digits or a leading-zero four-digit mode." : "")
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
+                    lineHeightMode: Text.FixedHeight
+                    lineHeight: root.paragraphLineHeight
                     color: root.busy ? Theme.color.muted : Theme.color.error
                     font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 }
@@ -344,9 +354,9 @@ FocusScope {
                     height: Theme.settings.railPaddingY + Theme.spacing.gap + Theme.spacing.hairline
                     Rectangle { y: Theme.settings.railPaddingY; width: parent.width; height: Theme.spacing.hairline; color: Theme.color.muted; opacity: 0.4 }
                 }
-                Text { text: "WILL CHANGE"; bottomPadding: Theme.spacing.rowPaddingY / 2; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption; letterSpacing: Theme.font.caption / 10 } }
-                Text { id: changeSummary; width: parent.width; text: (root.facts.ok && !root.facts.reason && root.modeValue >= 0 ? "Requested mode " + Permissions.octal(root.modeValue) : "No changes available") + "\nPath " + root.path + (root.facts.reason ? "\nCurrent mode " + root.facts.mode : ""); textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; lineHeightMode: Text.FixedHeight; lineHeight: Theme.font.caption * 1.6; color: root.facts.ok && !root.facts.reason ? Theme.color.accent : Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-                Text { id: scopeLabel; width: parent.width; text: root.scopeText; wrapMode: Text.Wrap; lineHeightMode: Text.FixedHeight; lineHeight: Theme.font.caption * 1.6; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { text: "WILL CHANGE"; bottomPadding: Theme.spacing.rowPaddingY / 2; lineHeightMode: Text.FixedHeight; lineHeight: root.paragraphLineHeight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption; letterSpacing: Theme.font.caption / 10 } }
+                Text { id: changeSummary; width: parent.width; text: (root.facts.ok && !root.facts.reason && root.modeValue >= 0 ? "Requested mode " + Permissions.octal(root.modeValue) : "No changes available") + "\nPath " + root.path + (root.facts.reason ? "\nCurrent mode " + root.facts.mode : ""); textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; lineHeightMode: Text.FixedHeight; lineHeight: root.paragraphLineHeight; color: root.facts.ok && !root.facts.reason ? Theme.color.accent : Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { id: scopeLabel; width: parent.width; text: root.scopeText; wrapMode: Text.Wrap; lineHeightMode: Text.FixedHeight; lineHeight: root.paragraphLineHeight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
                 Item { width: parent.width; height: Theme.settings.railPaddingY + Theme.spacing.hairline }
                 Row {
                     anchors.right: parent.right
@@ -360,7 +370,7 @@ FocusScope {
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
-                        Flea.DialogButton { id: cancelButton; label: "Cancel"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: !root.applying; onActivated: root.close() }
+                        Flea.DialogButton { id: cancelButton; implicitHeight: root.controlHeight; label: "Cancel"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: !root.applying; onActivated: root.close() }
                     }
                     FocusScope {
                         id: applyFocus
@@ -371,7 +381,7 @@ FocusScope {
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.apply()
                         Keys.onSpacePressed: root.apply()
-                        Flea.DialogButton { id: applyButton; label: "Apply"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: root.editable && root.modeValue >= 0; onActivated: root.apply() }
+                        Flea.DialogButton { id: applyButton; implicitHeight: root.controlHeight; label: "Apply"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: root.editable && root.modeValue >= 0; onActivated: root.apply() }
                     }
                 }
             }

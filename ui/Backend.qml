@@ -50,8 +50,9 @@ Item {
     signal peeked(string path, bool hidden, int total, var rows, bool readFailed, int mode)
     signal archiveStarted(int id)
     signal archiveDone(int id, bool ok, bool verified, string err)
-    signal convertStarted(int id)
-    signal convertDone(int id, bool ok, string path, string err)
+    signal convertChecked(var message)
+    signal convertStarted(int id, int requestId, string source)
+    signal convertDone(int id, bool ok, string path, string err, int requestId, string source, bool collision)
     // The shell's exit gate: the backend has drained and this process can end.
     signal quitReady()
 
@@ -224,8 +225,9 @@ Item {
     }
 
     // No format field: magick reads the codec off dest's own extension, see docs/protocol.md "convert".
-    function convertImage(path, dest, strip, menuId) {
-        root.send({ c: "convert", path: path, dest: dest, strip: strip, menuId: menuId || 0 })
+    function convertImage(path, dest, strip, menuId, requestId, check) {
+        root.send({ c: "convert", path: path, dest: dest, strip: strip, menuId: menuId || 0,
+                    requestId: requestId || 0, check: check === true })
     }
 
     function thumb(rows) {
@@ -365,10 +367,13 @@ Item {
             root.archiveStarted(message.id)
         } else if (message.t === "archivedone") {
             root.archiveDone(message.id, message.ok, message.verified !== false, message.err || "")
+        } else if (message.t === "convertchecked") {
+            root.convertChecked(message)
         } else if (message.t === "convertstarted") {
-            root.convertStarted(message.id)
+            root.convertStarted(message.id, message.requestId || 0, message.source || "")
         } else if (message.t === "convertdone") {
-            root.convertDone(message.id, message.ok, message.path || "", message.err || "")
+            root.convertDone(message.id, message.ok, message.path || "", message.err || "", message.requestId || 0,
+                             message.source || "", message.collision === true)
         }
     }
 

@@ -43,6 +43,7 @@ Item {
     property var retryPaths: []
     property string retryFolder: ""
     property string retryListing: ""
+    property string retrySelectionText: ""
     // One burst of writes is one re-read: the timer absorbs later notifications instead of being
     // restarted by them, so a directory under continuous change settles rather than never firing.
     readonly property int watchMs: 400
@@ -115,6 +116,7 @@ Item {
             root.retryId = 0
             root.retryPaths = []
         }
+        function onMenuSelectionIdentityChanged() { root.retrySelectionText = "" }
         function onListInFlightChanged() { if (!pane.listInFlight) root.locateRetry() }
     }
 
@@ -198,6 +200,7 @@ Item {
             for (var i = 0; i < matches.length; i++) pane.selection.toggle(matches[i].index)
             pane.selectionVersion++
             pane.setCursor(matches[0].index)
+            root.retrySelectionText = Ops.retrySelectionLine(matches)
         }
 
         // Sample input: {"t":"searching","n":812,"scanned":41200,"ms":300.114}
@@ -238,6 +241,7 @@ Item {
             // A notification for a directory the pane has already left says nothing about this one.
             if (path !== pane.path)
                 return
+            root.retrySelectionText = ""
             root.stale = true
             if (!watchSettle.running)
                 watchSettle.start()
@@ -261,6 +265,7 @@ Item {
         function onTransferStarted(id, n, moving) {
             root.retryId = 0
             root.retryPaths = []
+            root.retrySelectionText = ""
             pane.transfer = Ops.started(id, moving, n)
             pane.sticky(Ops.progressLine(pane.transfer))
         }
@@ -364,10 +369,14 @@ Item {
             pane.refresh("")
         }
 
-        function onConvertDone(id, ok, path, err) {
+        function onConvertDone(id, ok, path, err, requestId, source, collision) {
+            if (requestId && (!pane.convertSource || pane.convertSource.requestId !== requestId || pane.convertSource.path !== source)) return
             pane.sticky("")
             pane.message(ok ? "Converted to " + Ops.leaf(path) + "." : Errors.sentence("convert", err), !ok)
-            pane.refresh(ok ? path : "")
+            if (ok) {
+                if (pane.searchMode === Search.RESULTS) root.stale = true
+                else pane.refresh(path)
+            }
         }
 
         // One statfs per directory, so the status bar's right half is refreshed by navigation alone.
@@ -401,6 +410,7 @@ Item {
             if (terminal || where === "scan")
                 root.renameOnArrival = ""
             if (terminal) {
+                root.retrySelectionText = ""
                 pane.total = 0
                 pane.held = 0
                 pane.rows = []

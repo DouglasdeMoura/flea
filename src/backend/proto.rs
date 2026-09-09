@@ -39,7 +39,7 @@ pub enum Request {
     Peek { path: String, first: usize, hidden: bool, focus: String },
     // op is "compress" or "extract"; a compress names paths and a format, an extract names one path.
     Archive { op: String, paths: Vec<String>, path: String, dest: String, format: String, menu_id: usize },
-    Convert { path: String, dest: String, strip: bool, menu_id: usize },
+    Convert { path: String, dest: String, strip: bool, menu_id: usize, request_id: usize, check: bool },
     // Which archive formats this box actually offers, and whether a converter is installed at all.
     Formats,
     Permissions { line: String },
@@ -132,6 +132,8 @@ pub fn parse_request(line: &str) -> Request {
             format: field_str(line, "format").unwrap_or_default(),
         },
         Some("convert") => Request::Convert {
+            request_id: field_usize(line, "requestId").unwrap_or(0),
+            check: field_bool(line, "check"),
             menu_id: field_usize(line, "menuId").unwrap_or(0),
             path: field_str(line, "path").unwrap_or_default(),
             dest: field_str(line, "dest").unwrap_or_default(),
@@ -254,6 +256,14 @@ mod tests {
             Request::LocateMany { paths, id: 0, menu_id: 0, transfer_id: 12 } if paths == ["/a/file"]));
         assert_eq!(located_many_line("/a", 2, 0, &[("/a/\"\n", 3)], None),
             r#"{"t":"located","directory":"/a","id":2,"transferId":0,"matches":[{"path":"/a/\"\n","index":3}],"ok":true,"error":""}"#);
+    }
+
+    #[test]
+    fn convert_preserves_probe_and_caller_identity_without_changing_legacy_activation() {
+        assert!(matches!(parse_request(r#"{"c":"convert","path":"/a.png","dest":"/a.jpg","strip":true,"menuId":7,"requestId":29,"check":true}"#),
+            Request::Convert { path, dest, strip: true, menu_id: 7, request_id: 29, check: true } if path == "/a.png" && dest == "/a.jpg"));
+        assert!(matches!(parse_request(r#"{"c":"convert","path":"/a.png","dest":"/a.jpg"}"#),
+            Request::Convert { strip: false, menu_id: 0, request_id: 0, check: false, .. }));
     }
 
     #[test]

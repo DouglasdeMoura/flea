@@ -132,6 +132,40 @@ function run(check) {
     check("left still steps a grid tile", Focus.lookup(left, pane(closed(), "grid")), "cursorLeft")
     check("right still steps a grid tile", Focus.lookup(right, pane(closed(), "grid")), "cursorRight")
 
+    var gridPane = Fixture.pane()
+    gridPane.viewMode = "grid"
+    gridPane.cursorStride = 3
+    gridPane.wrapAtEnds = true
+    gridPane.cursorIndex = 2
+    Focus.act("cursorDown", gridPane)
+    check("grid j follows row-major order across a row boundary", gridPane.cursorIndex, 3)
+    Focus.act("cursorUp", gridPane)
+    check("grid k follows the previous item", gridPane.cursorIndex, 2)
+    check("grid j is not a physical arrow", Focus.gridArrow(key(Qt.Key_J, "j", none), "cursorDown", gridPane), false)
+    for (var move of [
+        [Qt.Key_Right, "cursorRight", 2, 2], [Qt.Key_Left, "cursorLeft", 3, 3],
+        [Qt.Key_Down, "cursorDown", 2, 5], [Qt.Key_Down, "cursorDown", 5, 5],
+        [Qt.Key_Down, "cursorDown", 3, 6], [Qt.Key_Up, "cursorUp", 6, 3],
+        [Qt.Key_Up, "cursorUp", 0, 0], [Qt.Key_Right, "cursorRight", 6, 6]
+    ]) {
+        gridPane.cursorIndex = move[2]
+        Focus.gridArrow(key(move[0], "", none), move[1], gridPane)
+        check("grid visual neighbour from " + move[2] + " with " + move[1], gridPane.cursorIndex, move[3])
+    }
+    gridPane.cursorStride = 2
+    gridPane.cursorIndex = 3
+    Focus.gridArrow(key(Qt.Key_Down, "", none), "cursorDown", gridPane)
+    check("grid arrows use the reflowed column count", gridPane.cursorIndex, 5)
+
+    gridPane.filterQuery = "screen"
+    gridPane.refresh()
+    gridPane.cursorIndex = 0
+    gridPane.cursorStride = 2
+    Focus.gridArrow(key(Qt.Key_Down, "", none), "cursorDown", gridPane)
+    check("filtered grid arrows address visible cells", gridPane.cursorIndex, 6)
+    Focus.gridArrow(key(Qt.Key_Right, "", none), "cursorRight", gridPane)
+    check("filtered final row has no right cell", gridPane.cursorIndex, 6)
+
     // Nothing in keys.toml is bound ahead of its feature now: lookup hands both actions through
     // and handleKey routes each above the views, so neither answers with a sentence any more.
     var colon = key(Qt.Key_Colon, ":", shift)
@@ -139,11 +173,10 @@ function run(check) {
     var newTab = key(Qt.Key_T, "t", none)
     check("t resolves to a new tab", Focus.lookup(newTab, pane(closed())), "tabNew")
 
-    // The filter narrows rows already on screen, which only the list view draws; the GridView and
-    // Columns boards draw no filter, so / is dropped there rather than narrowing a view nothing shows.
+    // GridView includes Filter in its chrome; both supported views narrow their held rows.
     var slash = key(Qt.Key_Slash, "/", none)
     check("slash opens the filter in the list view", Focus.lookup(slash, pane(closed())), "filter")
-    check("slash is discarded in the grid", Focus.lookup(slash, pane(closed(), "grid")), "")
+    check("slash opens the filter in the grid view", Focus.lookup(slash, pane(closed(), "grid")), "filter")
     check("slash is discarded in the columns view", Focus.lookup(slash, pane(closed(), "columns")), "")
     // A walk replaces the listing a filter would be narrowing, and its strip covers the header, so
     // / goes quiet there exactly as s and S do.
@@ -305,4 +338,14 @@ function run(check) {
     var copyRail = chromePane("rail")
     Focus.handleKey(copyKey, copyRail, copyRail.sidebar)
     check("Y copies the folder path from the rail as well", copyRail.copied, 1)
+
+    var shareOwner = chromePane("list")
+    var otherPane = chromePane("list")
+    var sharedBrowser = {active: true, owner: shareOwner}
+    shareOwner.shareBrowser = sharedBrowser
+    otherPane.shareBrowser = sharedBrowser
+    check("a share listing belongs to the pane that requested it", Focus.shareBrowserHere(shareOwner), true)
+    check("another pane keeps its own key context while the shared listing is open", Focus.shareBrowserHere(otherPane), false)
+    sharedBrowser.active = false
+    check("closing the share listing releases its owner's keys", Focus.shareBrowserHere(shareOwner), false)
 }

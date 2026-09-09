@@ -49,6 +49,12 @@ function run(check) {
     check("a named failure retains the backend cause",
           Ops.transferFailure({ moving: true }, "photo.heic", "disk full"),
           "Move failed: photo.heic · disk full")
+    check("no located retry match makes no selection claim", Ops.retrySelectionLine([]), "")
+    check("one verified retry match uses the board's filename wording",
+          Ops.retrySelectionLine([{path: "/source/c.txt", index: 2}]), "c.txt selected for retry")
+    check("multiple verified retry matches report their actual selected count",
+          Ops.retrySelectionLine([{path: "/source/c.txt", index: 2}, {path: "/source/d.txt", index: 3}]),
+          "2 items selected for retry")
 
     // The canvas draws this one verbatim on the Operations artboard's status strip.
     check("trash reads exactly as the canvas draws it",
@@ -252,20 +258,30 @@ function run(check) {
     check("committing retains the menu identity before closing the editor clears it", renameIdentity, 33)
 
     var operationIds = []
+    var convertedArguments = null
     var menuPane = windowedPane([])
     menuPane.backend.duplicate = function (path, id) { operationIds.push("duplicate:" + id) }
     menuPane.backend.trash = function (rows, id) { operationIds.push("trash:" + id) }
     menuPane.backend.extract = function (path, dest, id) { operationIds.push("extract:" + id) }
-    menuPane.backend.convertImage = function (path, dest, strip, id) { operationIds.push("convert:" + id) }
+    menuPane.backend.convertImage = function (path, dest, strip, id, requestId) {
+        operationIds.push("convert:" + id)
+        convertedArguments = {path: path, dest: dest, requestId: requestId}
+    }
     menuPane.convertRequested = function () {}
     Ops.duplicate(menuPane, 34)
     Ops.trash(menuPane, 35)
     Ops.extract(menuPane, 36)
     Ops.openConvert(menuPane, 37)
-    Ops.convert(menuPane, "png", false)
+    var conversion = menuPane.convertSource
+    var convertedSource = conversion.path
+    menuPane.path = "/different-directory"
+    Ops.convert(menuPane, conversion, "png", false, 73)
     check("menu mutations forward the selected identity to their operation workers",
           operationIds.join(","), "duplicate:34,trash:35,extract:36,convert:37")
-    check("conversion consumes its retained menu identity", menuPane.convertMenuId, 0)
+    check("conversion sends its original source after navigation", convertedArguments.path, convertedSource)
+    check("conversion sends its captured output directory", convertedArguments.dest.indexOf("/different-directory/"), -1)
+    check("conversion keeps its menu identity for the complete dialog lifetime", menuPane.convertSource.menuId, 37)
+    check("conversion retains the caller's operation identity", menuPane.convertSource.requestId, 73)
 
     // ---- the new folder, the one operation whose name the backend chooses ----
 
