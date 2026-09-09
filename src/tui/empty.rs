@@ -43,7 +43,7 @@ pub fn line(y: usize, height: usize, width: usize, cell: Option<(usize, usize)>,
     let text = if y >= start && y < start + rows {
         let source_width = SPIRAL[0].chars().count();
         // Each terminal cell carries two raster rows; measured cell pixels preserve the mark's aspect.
-        let filled = |x, half| {
+        let filled = |x: usize, half: usize| {
             let source_y = ((y - start) * 2 + half) * SPIRAL.len() / (rows * 2);
             SPIRAL[source_y].chars().nth(x * source_width / columns) == Some('█')
         };
