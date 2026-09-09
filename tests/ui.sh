@@ -4242,10 +4242,18 @@ EOS
     shot network-dual-origin-child
     printf 'NETWORK dual-mount=origin-preserved shares=origin-preserved other-pane-keys=independent other-pane-navigation=independent child-mount=origin-preserved\n'
 
+    printf 'NETWORK_SECOND_SHARES before=%s result=%s panes=%s\n' "$(ipc shareBrowserState)" "$(ipc networkResult)" "$(ipc dualState)"
     network_click_favourite "Second shares"
     wait_network_result mounted 5
-    ipc shareBrowserState | jq -e '.active and .owner == 1 and .rect == .paneRects[1]' >/dev/null \
-        || fail "network: second-pane shares did not retain their owner"
+    printf 'NETWORK_SECOND_SHARES after-result=%s result=%s panes=%s\n' "$(ipc shareBrowserState)" "$(ipc networkResult)" "$(ipc dualState)"
+    local second_shares attempt
+    for attempt in $(seq 1 100); do
+        second_shares=$(ipc shareBrowserState)
+        jq -e '.active and .baseUri == "smb://shares-second.test/"' <<< "$second_shares" >/dev/null && break
+        sleep 0.05
+    done
+    jq -e '.active and .baseUri == "smb://shares-second.test/" and .owner == 1 and .rect == .paneRects[1]' <<< "$second_shares" >/dev/null \
+        || fail "network: second-pane shares did not retain their owner: $second_shares; panes=$(ipc dualState); result=$(ipc networkResult)"
     shot network-second-pane-shares
     local destruction_log_start
     destruction_log_start=$(wc -l < "$flea_log")

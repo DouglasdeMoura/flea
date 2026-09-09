@@ -69,15 +69,23 @@ def separator_pixel(pixels, width, height, grid_width, grid_height, rows):
     for y in range(max(1, math.floor(cell_height)), min(height, math.ceil(height - grid_height + 2 * cell_height) + 1)):
         before, after = pixels[(y - 1) * stride:y * stride], pixels[y * stride:(y + 1) * stride]
         changed = [x for x in range(width) if before[x * 3:(x + 1) * 3] != after[x * 3:(x + 1) * 3]]
-        if len(changed) == grid_width and changed[-1] - changed[0] + 1 == grid_width:
-            transitions.append((y, changed[0]))
+        if changed:
+            transitions.append((y, changed[0], changed[-1], len(changed)))
     anchors = []
-    for (top, left), (bottom, next_left) in zip(transitions, transitions[1:]):
-        if left != next_left or bottom - top >= cell_height:
-            continue
-        section = lambda y: pixels[y * stride + left * 3:y * stride + (left + grid_width) * 3]
-        if section(top - 1) == section(bottom) and all(section(y) == section(top) for y in range(top + 1, bottom)):
-            anchors.append((left + grid_width // 2, (top + bottom - 1) // 2))
+    for index, (top, _, _, _) in enumerate(transitions):
+        for end in range(index + 1, len(transitions)):
+            bottom = transitions[end][0]
+            if bottom - top >= cell_height:
+                break
+            stroke = transitions[index:end + 1]
+            left, right = min(item[1] for item in stroke), max(item[2] for item in stroke)
+            if right - left + 1 != grid_width or any(count != last - first + 1 for _, first, last, count in stroke):
+                continue
+            section = lambda y: pixels[y * stride + left * 3:y * stride + (right + 1) * 3]
+            # Antialiasing can vary every raster row; the observed stroke must return to its original background.
+            background = section(top - 1)
+            if section(bottom) == background and all(section(y) != background for y in range(top, bottom)):
+                anchors.append((left + grid_width // 2, (top + bottom - 1) // 2))
     # ponytail: Clipped or overlaid rules require an unobscured native capture at the same geometry.
     if len(anchors) != 1:
         raise RuntimeError(f"terminal row-2 separator is missing or ambiguous: {len(anchors)} strokes")
@@ -96,8 +104,11 @@ def separator_image(path, terminal_size):
 
 
 def calibration_check(path, dimensions, pixels):
-    if hashlib.sha256(path.read_bytes()).hexdigest() != "099561e36935a3c523bf4aade3cf477282f219a6e976883ef8b1211ed1865a8e":
-        raise RuntimeError("calibration check requires the archived f0d Kitty listing.png sample")
+    samples = {"099561e36935a3c523bf4aade3cf477282f219a6e976883ef8b1211ed1865a8e": (1267, 52),
+               "8737bf7e888d53c5476e1befdb136fac2b6e7294f2c4622447c8ed10968c4d18": (1267, 53)}
+    expected = samples.get(hashlib.sha256(path.read_bytes()).hexdigest())
+    if expected is None:
+        raise RuntimeError("calibration check requires an archived f0d or cc1 Kitty listing.png sample")
     metadata = json.loads(path.with_suffix(".json").read_text())
     rows, _, grid_width, grid_height = metadata["pty_rows_columns_pixels"]
     width, height = dimensions
@@ -105,7 +116,7 @@ def calibration_check(path, dimensions, pixels):
     padding = height - grid_height
     old_anchor = round((padding + 2 * cell_height) / 2)
     assert not padding <= old_anchor < 2 * cell_height
-    assert separator_pixel(pixels, width, height, grid_width, grid_height, rows) == (1267, 52)
+    assert separator_pixel(pixels, width, height, grid_width, grid_height, rows) == expected
     background = bytes((20, 24, 26))
     blank = background * width * height
     ambiguous = bytearray(blank)
@@ -476,10 +487,11 @@ class Native:
             self.wait("sort-" + label + "-persisted", lambda: json.loads((self.case / "state/flea/ui.json").read_text())["sort"]
                       == {"key": "name", "reverse": label == "reverse"})
         self.key(".")
-        self.snapshot("hidden-shown", lambda text: ".hidden-proof" in text and "6 items" in text)
+        self.snapshot("hidden-shown", lambda text: ".hidden-proof" in text and "6 items" in text and self.cursor_is("charlie.txt"))
         self.key(".")
-        self.snapshot("hidden-restored", lambda text: ".hidden-proof" not in text and "5 items" in text)
+        self.snapshot("hidden-restored", lambda text: ".hidden-proof" not in text and "5 items" in text and self.cursor_is("charlie.txt"))
         self.key("-k", "Home")
+        self.snapshot("rename-target-ready", lambda text: self.cursor_is("amber"))
         for label, args in [("r", ("r",)), ("f2", ("-k", "F2"))] + ([("enter", ("-k", "Return"))] if self.preset == "mac" else []):
             self.key(*args)
             self.snapshot("rename-" + label, lambda text: "Enter saves" in text)

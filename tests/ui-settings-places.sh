@@ -262,18 +262,18 @@ places_concurrent() (
     places_use "$first_id" "$first_pid"
     settings_open_key; settle
     settings_section places
-    settings_focus_row favourite:0
+    settings_focus_row "favourite:$(jq 'length - 1' <<< "$expected")"
     settings_focus_row favouriteActions
     key l >/dev/null; settle
     places_use "$second_id" "$second_pid"
     settings_open_key; settle
     settings_section places
-    settings_focus_row favourite:0
+    settings_focus_row "favourite:$(jq 'length - 1' <<< "$expected")"
     settings_focus_row favouriteActions
     key l >/dev/null
     places_require_store
     key -k Return >/dev/null; settle
-    expected=$(jq -c 'del(.[0])' <<< "$expected")
+    expected=$(jq -c '.[0:-1]' <<< "$expected")
     places_wait_records "$expected"
     places_use "$first_id" "$first_pid"
     places_wait_records "$expected"
@@ -537,12 +537,22 @@ case_settingsplaces() {
     places_drag_row 2 1
     expected=$(jq -c '.[1:3] |= reverse' <<< "$expected")
     places_wait_records "$expected"
-    settings_focus_row favourite:1
+    settings_focus_row "favourite:$(jq 'length - 1' <<< "$expected")"
     settings_focus_row favouriteActions
     key l >/dev/null; key -k Space >/dev/null; settle
     places_wait_records "$expected"
     places_require_store
     key -k Return >/dev/null; settle
+    expected=$(jq -c '.[0:-1]' <<< "$expected")
+    places_wait_records "$expected"
+    settings_focus_row favourite:1
+    local remove_x remove_y wx wy ww wh
+    read -r remove_x remove_y <<< "$(ipc settingsFavouriteControlCentre favouriteActions remove)"
+    read -r wx wy ww wh < <(window_box) || fail "places: native window coordinates unavailable"
+    [[ "$remove_x" =~ ^[0-9]+$ && "$remove_y" =~ ^[0-9]+$ ]] || fail "places: Remove has no actual control centre"
+    (( remove_x > 0 && remove_y > 0 && remove_x < ww && remove_y < wh )) || fail "places: Remove is outside the viewport"
+    places_require_store
+    omarchy-drive click "$((wx + remove_x))" "$((wy + remove_y))" left >/dev/null
     expected=$(jq -c 'del(.[1])' <<< "$expected")
     places_wait_records "$expected"
     key -k Escape >/dev/null; settle

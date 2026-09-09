@@ -3,9 +3,8 @@
 .import "Filter.js" as Filter
 .import "Format.js" as Format
 
-// Directory tabs in one window. The pane and the backend still hold one listing: a hidden tab is a
-// snapshot, not a second view, because a hidden view is not a free view. t, w and 1-9 are already
-// in keys.toml; this file is what they do. Nine is the cap because those digits are the jump keys.
+// Hidden tabs are snapshots, so the pane and backend still own only one listing.
+// The nine-tab cap matches TUI's direct digit selection; GUI shortcuts cycle through the same state.
 
 var MAX = 9
 
@@ -263,6 +262,12 @@ function closeAt(pane, i) {
 }
 
 function act(action, pane) {
+    if (action === "tabNext" || action === "tabPrevious") {
+        var total = count(pane)
+        var direction = action === "tabNext" ? 1 : -1
+        selectAt(pane, (currentIndex(pane) + total + direction) % total)
+        return
+    }
     if (action === "tabNew") {
         openNew(pane)
         return

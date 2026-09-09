@@ -590,6 +590,9 @@ impl Model {
                     {
                         self.cursor = i;
                         self.restore_path = None;
+                        if self.cursor < self.top || self.cursor >= self.top + self.height {
+                            self.window(wire)?;
+                        }
                     }
                 }
             }

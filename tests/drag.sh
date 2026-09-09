@@ -265,6 +265,18 @@ screen_tab_centre() {
   printf '%s %s\n' "$((WX + x))" "$((WY + y))"
 }
 
+native_tab() {
+  local index="$1" point x y
+  expect_ipc listInFlight false
+  point=$(screen_tab_centre "$index") || die "tab $index has no visible native target"
+  read -r x y <<< "$point"
+  warp "$x" "$y"
+  press
+  release
+  expect_ipc tabIndex "$index"
+  expect_ipc listInFlight false
+}
+
 # The active listing's empty tail, including Columns' narrower floor, measured before any release.
 floor_centre() {
   local x y width height rx ry rw rh total bottom
@@ -420,9 +432,9 @@ expect_ipc pathBarOpen false
 expect_ipc path "$HOMEDIR/bbb"
 expect_ipc listInFlight false
 check "the second tab shows bbb" "$(ipc path)" "$HOMEDIR/bbb"
-r5_state before-1
-native_key 1
-r5_state after-1
+r5_state before-tab-click
+native_tab 0
+r5_state after-tab-click
 expect_ipc tabIndex 0
 expect_ipc path "$HOMEDIR"
 expect_ipc listInFlight false
@@ -454,7 +466,7 @@ echo "== R6: a tab on the same directory re-lists under the drag, and the drop s
 # R5 left bbb's tab current, so the home tab is selected first and a third tab is opened from it; that
 # tab shows hidden files, where .local, aaa and bbb sort ahead of .r0hidden and every text row shifts.
 # A drop resolved by the lifted index would move the row now sitting there; by path it moves r1b.txt.
-native_key 1; sleep 0.6
+native_tab 0
 check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
 native_key t; sleep 0.8
 native_key .
@@ -464,10 +476,32 @@ hidden_row=$(rowidx .r0hidden || echo none)
 check "the third tab lists the hidden file" "$([ "$hidden_row" != none ] && echo listed || echo missing)" "listed"
 check "and every folder sorts ahead of it" "$([ "$(rowidx aaa)" -lt "$hidden_row" ] && [ "$(rowidx bbb)" -lt "$hidden_row" ] && echo yes || echo no)" "yes"
 check "so aaa is no longer row 0 on this tab" "$([ "$(rowidx aaa)" -gt 0 ] && echo shifted || echo same)" "shifted"
+# Three tabs distinguish direction from wraparound; a two-tab toggle could pass with reversed keys.
+expect_ipc keymapPreset default
+expect_ipc tabCount 3
+native_key -M ctrl -k Page_Down -m ctrl
+expect_ipc tabIndex 0
+expect_ipc path "$HOMEDIR"
+expect_ipc listInFlight false
+expect_ipc showHidden false
+native_key -M ctrl -k Page_Down -m ctrl
+expect_ipc tabIndex 1
+expect_ipc path "$HOMEDIR/bbb"
+expect_ipc listInFlight false
+native_key -M ctrl -k Page_Up -m ctrl
+expect_ipc tabIndex 0
+expect_ipc path "$HOMEDIR"
+expect_ipc listInFlight false
+native_key -M ctrl -k Page_Up -m ctrl
+expect_ipc tabIndex 2
+expect_ipc path "$HOMEDIR"
+expect_ipc listInFlight false
+expect_ipc showHidden true
+printf 'GUI_TAB_KEYS preset=default context=listing next=wrap,forward previous=backward,wrap retained-hidden=true\n'
 # aaa's centre is read here, on the tab the drop lands on, under whatever dotdirs sort ahead of it.
 point=$(screen_centre aaa) || die "R6 destination aaa is not visible"
 read -r fx fy <<< "$point"
-native_key 1; sleep 0.8
+native_tab 0
 check "and the home tab does not" "$(rowidx .r0hidden || echo none)" "none"
 # Escape drops the restored selection; aaa already holds R3's copy, so the drop is judged by its delta.
 native_key -k Escape; sleep 0.3
@@ -508,7 +542,7 @@ native_key "$XDEV/big"; sleep 0.2
 native_key -k Return
 for i in $(seq 1 40); do [ "$(ipc path)" = "$XDEV/big" ] && [ "$(ipc listInFlight)" = false ] && break; sleep 0.25; done
 check "the third tab lists the tmpfs directory" "$(ipc path)" "$XDEV/big"
-native_key 1; sleep 0.8
+native_tab 0
 check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
 for i in $(seq 1 40); do rowidx r7.txt >/dev/null 2>&1 && break; sleep 0.25; done
 # The one backend this suite owns: the instance's child running FLEA_BIN --backend, ui/Backend.qml's command.
@@ -547,7 +581,7 @@ echo "== R8: the line over a folder on another filesystem says copy, and the dro
 # switch the pane's own dirDev is the destination's, and read from there the line said move over a
 # folder the drop would copy into. The same dragCopy drives the row's "copy here" badge.
 printf 'r8 payload\n' > "$HOMEDIR/r8.txt"
-native_key 1; sleep 0.8
+native_tab 0
 check "the home tab is current" "$(ipc path)" "$HOMEDIR"
 for i in $(seq 1 40); do rowidx r8.txt >/dev/null 2>&1 && break; sleep 0.25; done
 point=$(screen_centre r8.txt) || die "R8 source r8.txt is not visible"
@@ -708,10 +742,10 @@ cross_view_pair() {
   make_pair "$source" "$name"
   owned_path "$destination/folder"
   mkdir -p "$destination/folder" || die "could not create cross-view target"
-  native_key 1; navigate "$source"; choose_view "$source_mode"
-  native_key 2; navigate "$destination"; choose_view "$target_mode"
+  native_tab 0; navigate "$source"; choose_view "$source_mode"
+  native_tab 1; navigate "$destination"; choose_view "$target_mode"
   for phase in cancel commit; do
-    native_key 1
+    native_tab 0
     expect_ipc path "$source"; expect_ipc viewMode "$source_mode"; expect_ipc listInFlight false
     point=$(ipc tabCentre 1) || die "destination tab is unavailable"
     [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "destination tab has no valid geometry"
@@ -753,7 +787,7 @@ left="$HOMEDIR/aaa/feedback-dual-left"; right="$HOMEDIR/bbb/feedback-dual-right"
 make_pair "$left" feedback-left
 make_pair "$right" feedback-right
 mkdir "$left/folder" "$right/folder" || die "could not create dual target folders"
-native_key 1
+native_tab 0
 choose_view list
 point=$(ipc chromeButtonCentre dual) || die "dual control is unavailable"
 [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "dual control has no valid geometry"
