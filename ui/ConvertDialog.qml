@@ -87,7 +87,7 @@ Item {
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: Theme.space(root.dialogWidth)
+        width: Math.max(0, Math.min(Theme.space(root.dialogWidth) * Theme.dialogWidthRatio, root.width - 2 * root.clampMargin))
         // Clamped to the window; the body scrolls whatever the clamp cut, see ui/CardScroll.qml.
         height: Math.min(body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * root.clampMargin)
         color: Theme.color.surface

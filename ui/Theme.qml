@@ -174,12 +174,15 @@ Singleton {
         readonly property int minCellWidth: root.space(125)
     }
 
+    // GM's September 8 sizing override gives dialog cards more room without enlarging context menus.
+    readonly property real dialogWidthRatio: 9 / 8
+
     // The Settings board's anatomy, resolved at base-size 14: a border-box panel 560 wide whose two
     // outer hairlines leave 558 inside, split into a 150 rail and a 408 pane. 480 and 350 are those
     // two at the OEM's own 12 anchor, so the pair scales once and the rail is what is left over.
     readonly property QtObject settings: QtObject {
-        readonly property int panelWidth: root.space(480)
-        readonly property int paneWidth: root.space(350)
+        readonly property int panelWidth: Math.round(root.space(480) * root.dialogWidthRatio)
+        readonly property int paneWidth: Math.round(root.space(350) * root.dialogWidthRatio)
         readonly property int railWidth: root.settings.panelWidth - root.settings.paneWidth
                                          - 2 * root.spacing.hairline
         // A row's continuation line, its hint and the Display ruler, indents 52 on five settings boards; those are resolved pixels at base-size 14, whose bodySmall is 13, so space() would scale them twice.

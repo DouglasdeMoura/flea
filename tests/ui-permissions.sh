@@ -58,15 +58,18 @@ permissions_control() {
 
 permissions_viewport() {
     local target_width="${1:-1100}" target_height="${2:-800}"
-    local address result wx wy width height end=$((SECONDS + 20))
-    address=$(hyprctl clients -j | jq -er --argjson pid "$(flea_pid)" '.[] | select(.pid == $pid) | .address') \
+    local client address result wx wy width height end=$((SECONDS + 20))
+    client=$(hyprctl clients -j | jq -ec --argjson pid "$(flea_pid)" '.[] | select(.pid == $pid)') \
         || fail "permissions: owned window unavailable"
+    address=$(jq -er '.address' <<< "$client") || fail "permissions: owned window has no address"
     [[ "$address" =~ ^0x[0-9a-fA-F]+$ ]] || fail "permissions: invalid owned window address"
-    omarchy-drive window float "$address" >/dev/null || fail "permissions: owned window could not float"
+    if ! jq -e '.floating' <<< "$client" >/dev/null; then
+        omarchy-drive window float "$address" >/dev/null || fail "permissions: owned window could not float"
+    fi
     result=$(hyprctl dispatch "hl.dsp.window.resize({ x = $target_width, y = $target_height, exact = true, window = \"address:$address\" })") \
         || fail "permissions: compositor resize failed"
     [[ "$result" == ok* ]] || fail "permissions: compositor refused resize: $result"
-    omarchy-drive window center "$address" >/dev/null || fail "permissions: owned window could not center"
+    omarchy-drive window center "$address" || fail "permissions: owned window could not center"
     while (( SECONDS < end )); do
         read -r wx wy width height < <(window_box)
         [[ "$width" == "$target_width" && "$height" == "$target_height" ]] && return
@@ -569,7 +572,8 @@ if [[ "$#" != 2 || "$1" != -p || "$2" != "$PERMISSIONS_UI" ]]; then exec "$PERMI
 [[ -n "$PERMISSIONS_BIND_FILE" && "$PERMISSIONS_BIND_FILE" == "$PERMISSIONS_BIND_ROOT/"* ]] || exit 82
 [[ -f "$PERMISSIONS_BIND_FILE" && ! -L "$PERMISSIONS_BIND_FILE" ]] || exit 83
 [[ "$(realpath -e -- "$PERMISSIONS_BIND_FILE")" == "$PERMISSIONS_BIND_FILE" ]] || exit 84
-exec bwrap --die-with-parent --unshare-user --bind / / --ro-bind "$PERMISSIONS_BIND_FILE" "$PERMISSIONS_BIND_FILE" -- "$PERMISSIONS_REAL_QS" "$@"
+# A plain bind is nodev; retain the native GPU while making only the fixture file read-only.
+exec bwrap --die-with-parent --unshare-user --bind / / --dev-bind /dev/dri /dev/dri --ro-bind "$PERMISSIONS_BIND_FILE" "$PERMISSIONS_BIND_FILE" -- "$PERMISSIONS_REAL_QS" "$@"
 SH
     chmod 0700 "$permissions_box/bin/qs" || fail "permissions: could not make the owned launcher executable"
     export PERMISSIONS_REAL_QS="$real_qs" PERMISSIONS_UI="$flea_ui"
@@ -623,6 +627,108 @@ PY
     printf 'PERMISSIONS_RECOVERY same candidate and fixture, reopened outside the failed read-only mount\n'
 }
 
+permissions_backend_owned() {
+    local pid="$1"
+    [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/environ" ]] || return 1
+    [[ "$(readlink "/proc/$pid/exe")" == "$(realpath -e "$flea_bin")" \
+        && "$(stat -c '%u' "/proc/$pid")" == "$(id -u)" ]] || return 1
+    backend_pids | grep -Fx "$pid" >/dev/null || return 1
+    tr '\0' '\n' < "/proc/$pid/environ" | grep -Fx "FLEA_BIN=$flea_bin" >/dev/null || return 1
+    tr '\0' '\n' < "/proc/$pid/environ" | grep -Fx "FLEA_PATH=$permissions_listing" >/dev/null || return 1
+    tr '\0' '\n' < "/proc/$pid/environ" | grep -Fx "XDG_STATE_HOME=$XDG_STATE_HOME" >/dev/null
+}
+
+permissions_resume_stopped() {
+    local pid="$1"
+    [[ -n "$pid" ]] || return 0
+    if permissions_backend_owned "$pid"; then
+        kill -CONT "$pid" || { printf 'FAIL: permissions: could not resume owned backend %s\n' "$pid" >&2; return 1; }
+    elif [[ -d "/proc/$pid" ]]; then
+        printf 'FAIL: permissions: paused backend %s changed identity; no signal sent\n' "$pid" >&2
+        return 1
+    fi
+}
+
+permissions_backenddeath() {
+    local phase pid before contents wanted original end status expected wanted_key permissions_stopped=""
+    local -a pids
+    for phase in completing idle applying; do
+        permissions_open notes.md
+        before=$(stat -c '%d:%i:%u:%g:%a:%s' "$permissions_listing/notes.md")
+        contents=$(sha256sum < "$permissions_listing/notes.md")
+        original=$(ipc permissionsState | jq -r '.mode')
+        if [[ "$original" == 0600 ]]; then wanted=0640; else wanted=0600; fi
+        permissions_octal "$wanted"
+        permissions_guard "$permissions_listing/notes.md"
+        mapfile -t pids < <(backend_pids)
+        [[ "${#pids[@]}" == 1 ]] || fail "permissions: backend-death case requires one attributable backend"
+        pid="${pids[0]}"
+        permissions_backend_owned "$pid" || fail "permissions: backend belongs to another candidate, fixture, or session"
+        if [[ "$phase" != idle ]]; then
+            permissions_stopped="$pid"
+            trap 'permissions_resume_stopped "$permissions_stopped"' EXIT
+            kill -STOP "$pid" || fail "permissions: could not pause the owned backend"
+            end=$((SECONDS + 20))
+            while (( SECONDS < end )); do
+                # Sample process state: "Tsl", whose initial T confirms SIGSTOP took effect.
+                status=$(ps -o stat= -p "$pid") || fail "permissions: paused backend disappeared"
+                [[ "$status" == T* ]] && break
+                sleep 0.05
+            done
+            [[ "$status" == T* ]] || fail "permissions: owned backend did not stop"
+            permissions_control Apply
+            permissions_wait '.opened and .busy and (.editable == false) and (.displayedError | startswith("Applying permissions"))' 'real Apply waits for the paused backend'
+            for wanted_key in Escape Return space; do
+                key -k "$wanted_key" >/dev/null
+                permissions_wait '.opened and .busy' "pending Apply survives $wanted_key until its result arrives"
+            done
+            permissions_control Cancel
+            permissions_control Close
+            permissions_wait '.opened and .busy and all(.controls[] | select(.name == "Close" or .name == "Cancel"); .enabled == false)' 'pending Apply cannot discard its result through dismissal'
+        fi
+        if [[ "$phase" == completing ]]; then
+            permissions_resume_stopped "$pid"
+            permissions_stopped=""
+            trap - EXIT
+            permissions_wait '.opened == false' 'resumed Apply delivers its result before closing'
+            [[ "$(stat -c '%a' "$permissions_listing/notes.md")" == "${wanted#0}" \
+                && "$(sha256sum < "$permissions_listing/notes.md")" == "$contents" ]] \
+                || fail "permissions: resumed Apply did not commit only the requested mode"
+            continue
+        fi
+        permissions_backend_owned "$pid" || fail "permissions: backend identity changed before the failure signal"
+        kill -KILL "$pid" || fail "permissions: could not terminate the owned backend"
+        permissions_stopped=""
+        trap - EXIT
+        if [[ "$phase" == applying ]]; then
+            expected='(.displayedError | contains("outcome is unknown") and contains("check the current mode"))'
+        else
+            expected='(.displayedError | contains("Permissions is unavailable") and contains("restart Flea"))'
+        fi
+        permissions_wait ".opened and (.busy == false) and (.editable == false) and .mode == \"$wanted\" and $expected" "$phase backend death retains the draft and reports the actual failure"
+        permissions_wait 'all(.controls[] | select(.bit != null or .name == "Octal" or .name == "Apply"); .enabled == false)' 'lost descriptor disables every mutation control'
+        shot "permissions-$permissions_group-backend-dead-$phase"
+        permissions_control Apply
+        permissions_wait ".opened and (.busy == false) and $expected" 'disabled Apply cannot erase the failure or reuse the lost descriptor'
+        [[ "$(stat -c '%d:%i:%u:%g:%a:%s' "$permissions_listing/notes.md")" == "$before" \
+            && "$(sha256sum < "$permissions_listing/notes.md")" == "$contents" ]] \
+            || fail "permissions: controlled backend death changed the paused fixture"
+        printf 'PERMISSIONS_BACKEND_DEATH phase=%s pid=%s source=%s path=%s\n' "$phase" "$pid" "$flea_bin" "$permissions_listing/notes.md"
+        permissions_control Cancel
+        permissions_wait '(.opened == false)'
+        launch "$permissions_listing"
+        wait_listing 6
+        permissions_viewport
+        permissions_open notes.md keyboard
+        permissions_mode "$original"
+        permissions_wait '.editable and .displayedError == ""' 'restarted candidate obtains a new valid descriptor'
+        shot "permissions-$permissions_group-backend-reopened-$phase"
+        permissions_octal "$wanted"
+        permissions_apply "$permissions_listing/notes.md" "${wanted#0}"
+        [[ "$(sha256sum < "$permissions_listing/notes.md")" == "$contents" ]] || fail "permissions: recovered mode write changed contents"
+    done
+}
+
 case_permissionsbaseline() { case_permissions baseline; }
 case_permissionsfile() { case_permissions file; }
 case_permissionsdirectory() { case_permissions directory; }
@@ -632,6 +738,7 @@ case_permissionskeys() { case_permissions keys; }
 case_permissionseligibility() { case_permissions eligibility; }
 case_permissionsoverlay() { case_permissions overlay; }
 case_permissionsfailure() { case_permissions failure; }
+case_permissionsbackenddeath() { case_permissions backenddeath; }
 
 case_permissionsnonowner() {
     local external="${FLEA_PERMISSIONS_NONOWNER_ROOT:-}" session root before contents uid gid
@@ -699,7 +806,8 @@ case_permissions() {
         eligibility) permissions_eligibility ;;
         overlay) permissions_overlay ;;
         failure) permissions_failure ;;
-        full) permissions_directory; permissions_readonly; permissions_keys; permissions_eligibility; permissions_failure; permissions_stale; permissions_overlay ;;
+        backenddeath) permissions_backenddeath ;;
+        full) permissions_directory; permissions_readonly; permissions_keys; permissions_eligibility; permissions_failure; permissions_backenddeath; permissions_stale; permissions_overlay ;;
         *) fail "permissions: unknown focused group $permissions_group" ;;
     esac
     printf 'PERMISSIONS_NATIVE group=%s checks=%s root=%s; screenshots require separate inspection.\n' "$permissions_group" "$permissions_checks" "$permissions_box"

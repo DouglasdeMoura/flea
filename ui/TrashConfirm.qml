@@ -57,7 +57,7 @@ FocusScope {
         id: card
         anchors.centerIn: parent
         // TrashSidebar's 340px content width excludes its two 16px paddings and hairlines.
-        width: Math.max(0, Math.min(Math.round(340 * root.referenceScale) + 2 * root.cardPadding + 2 * Theme.spacing.hairline, root.width - 2 * Theme.spacing.gap))
+        width: Math.max(0, Math.min(Math.round(340 * root.referenceScale * Theme.dialogWidthRatio) + 2 * root.cardPadding + 2 * Theme.spacing.hairline, root.width - 2 * Theme.spacing.gap))
         height: Math.max(0, Math.min(body.wanted + root.cardPadding + root.cardBottomPadding + 2 * Theme.spacing.hairline, root.height - 2 * Theme.spacing.gap))
         color: Theme.color.surface
         border.color: Theme.color.muted

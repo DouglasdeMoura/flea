@@ -11,6 +11,7 @@ Item {
     property bool active: false
     property bool keyboardFocused: false
     property color restingColor: Theme.color.muted
+    property real glyphSize: Theme.chromeMarkSize
 
     signal activated()
 
@@ -59,8 +60,8 @@ Item {
 
     Flea.Glyph {
         anchors.centerIn: parent
-        width: Theme.chromeMarkSize
-        height: Theme.chromeMarkSize
+        width: root.glyphSize
+        height: root.glyphSize
         name: root.glyph
         color: !root.enabled ? Theme.color.muted : root.active || root.keyboardFocused ? Theme.color.accent : root.restingColor
         opacity: root.enabled ? 1 : root.disabledOpacity

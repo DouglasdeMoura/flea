@@ -31,7 +31,7 @@ menus_equal() {
 menus_error() {
     local text="$1" label="$2" observed deadline=$((SECONDS + 15))
     while (( SECONDS < deadline )); do
-        observed=$(ipc statusDetail) || fail "menus: error detail observer failed"
+        observed="$(ipc statusPrimary) $(ipc statusDetail)" || fail "menus: error observer failed"
         if [[ "$(ipc statusError)" == true && "$observed" == *"$text"* ]]; then
             menus_checks=$((menus_checks + 1))
             printf 'MENUS_CHECK %s %s error=%q\n' "$menus_checks" "$label" "$observed"

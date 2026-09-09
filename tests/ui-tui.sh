@@ -335,7 +335,8 @@ class Native:
         self.key("/")
         self.snapshot("filter-editor", lambda text: "filter:" in text)
         self.key("charlie")
-        self.snapshot("filter-live", lambda text: "1 matches in 5 loaded rows" in text)
+        self.snapshot("filter-live", lambda text: "filter: charlie" in text.splitlines()[-1]
+                      and "4 rows hidden by the filter" in text and self.cursor_is("charlie.txt"))
         self.key("-k", "Return")
         self.snapshot("filter-accepted", lambda text: "filter:" not in text and "1 matches in 5 loaded rows" in text)
         self.key("-k", "Escape")

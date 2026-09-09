@@ -220,7 +220,7 @@ Item {
     // The house dialog shape read off ConfirmDialog.qml: BorderSurface, an accent border, cornerRadius.
     BorderSurface {
         id: card
-        width: Theme.space(380)
+        width: Math.max(0, Math.min(Theme.space(380) * Theme.dialogWidthRatio, root.width - 2 * root.clampMargin))
         // Clamped to the window; the body scrolls whatever the clamp cut, see ui/CardScroll.qml.
         height: Math.min(body.wanted + contentTopInset + contentBottomInset, root.height - 2 * root.clampMargin)
         anchors.centerIn: parent

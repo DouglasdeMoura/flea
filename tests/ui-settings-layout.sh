@@ -32,7 +32,8 @@ case_settingscompact() {
             || fail "settingscompact: stable height is not measured View content"
         if [[ "$viewport" == 1100x800 ]]; then
             scroll=$(ipc settingsScrollState)
-            jq -e '.pane.height == .compactHeight' <<< "$scroll" >/dev/null \
+            # Border subtraction can differ by one floating-point rounding step, never a pixel tolerance.
+            jq -e '((.pane.height - .compactHeight) | fabs) <= (.compactHeight * pow(2; -52))' <<< "$scroll" >/dev/null \
                 || fail "settingscompact: View has unused space or unexpected scrolling: $scroll"
         fi
         shot "settings-view-$viewport"

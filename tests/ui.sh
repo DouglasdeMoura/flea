@@ -489,7 +489,7 @@ click_row() {
 # Steps the menu cursor onto a row by its label rather than by a hardcoded number of Downs, so a
 # case survives the operations design's own rows landing between the ones it cares about.
 menu_seek() {
-    local want="$1" entries target i cursor
+    local want="$1" entries target i cursor steps step
     entries=$(ipc contextMenuEntries)
     target=-1
     i=0
@@ -500,7 +500,8 @@ menu_seek() {
     done
     unset IFS
     [[ "$target" -ge 0 ]] || fail "menu_seek: no row labelled $want in $entries"
-    for _ in $(seq 1 12); do
+    steps=$(ipc contextMenuModel | jq -er 'length') || fail "menu_seek: could not read menu inventory"
+    for ((step = 0; step <= steps; step++)); do
         cursor=$(ipc contextMenuCursor)
         [[ "$cursor" == "$target" ]] && return 0
         key -k Down >/dev/null

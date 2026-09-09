@@ -338,6 +338,9 @@ ShellRoot {
                 function onPermissionsResult(message) {
                     if (permissionsDialog.item) permissionsDialog.item.receive(message)
                 }
+                function onFailed(where, input, message, mode) {
+                    if (where === "backend" && permissionsDialog.item) permissionsDialog.item.backendFailed(message)
+                }
             }
 
             // The keymap sheet ? opens, over the whole window as the convert popup is.

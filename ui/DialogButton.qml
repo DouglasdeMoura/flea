@@ -1,13 +1,13 @@
 import QtQuick
 import qs.Commons
 
-// A text row with a hairline frame, not filled button chrome: the canvas draws every dialog button
-// this way, and the accent one is the action the dialog is for.
+// Dialog actions share a hairline frame; each surface supplies its specified fill.
 Item {
     id: root
 
     property string label: ""
     property bool primary: false
+    property color fillColor: "transparent"
     // An action this dialog cannot take right now. ui/PickerChrome.qml's Framed is the in-tree model:
     // the ink says so and the press does nothing, rather than a live control that answers nothing.
     property bool available: true
@@ -35,7 +35,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "transparent"
+        color: root.fillColor
         border.width: Theme.spacing.hairline
         border.color: root.frame
     }

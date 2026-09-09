@@ -15,17 +15,20 @@ FocusScope {
     property string modeText: ""
     property string errorText: ""
     property bool busy: false
+    property bool transportFailed: false
     property Item focusHolder: null
-    readonly property bool editable: facts.ok === true && !facts.reason && !busy
+    readonly property bool editable: facts.ok === true && !facts.reason && !busy && !transportFailed
     readonly property int modeValue: Permissions.parse(modeText)
+    readonly property bool applying: busy && facts.ok === true
+    readonly property color focusFill: Qt.rgba(Theme.color.accent.r, Theme.color.accent.g, Theme.color.accent.b, 0.14)
     readonly property real labelWidth: Math.round(86 * Theme.font.bodySmall / 13)
     readonly property var cardItem: card
     readonly property var bodyItem: body
     readonly property string displayedError: errorLabel.text
     readonly property string displayedSummary: changeSummary.text + "\n" + scopeLabel.text
     function controls() {
-        var result = [{name: "Close", item: closeMark}, {name: "Octal", item: octal, enabled: editable},
-            {name: "Cancel", item: cancelFocus}, {name: "Apply", item: applyFocus, enabled: editable && modeValue >= 0}]
+        var result = [{name: "Close", item: closeMark, enabled: !applying}, {name: "Octal", item: octal, enabled: editable},
+            {name: "Cancel", item: cancelFocus, enabled: !applying}, {name: "Apply", item: applyFocus, enabled: editable && modeValue >= 0}]
         for (var row = 0; row < permissionRows.count; row++) {
             var group = permissionRows.itemAt(row)
             for (var column = 0; column < group.checks.count; column++) {
@@ -49,6 +52,7 @@ FocusScope {
         facts = ({})
         modeText = ""
         errorText = ""
+        transportFailed = false
         busy = true
         opened = true
         body.contentY = 0
@@ -56,15 +60,28 @@ FocusScope {
         requested({ c: "permissions", op: "inspect", id: requestId, path: path })
     }
     function receive(message) {
-        if (!opened || message.id !== requestId || message.op === "close") return
+        if (!opened || transportFailed || message.id !== requestId || message.op === "close") return
         busy = false
+        cancelFocus.forceActiveFocus()
         if (!message.ok) { errorText = message.error || "Could not change permissions."; return }
         if (message.op === "apply") { changed(); close(); return }
         facts = message
         modeText = message.mode
     }
+    function backendFailed(message) {
+        if (!opened || transportFailed) return
+        var applying = busy && facts.ok === true
+        transportFailed = true
+        busy = false
+        cancelFocus.forceActiveFocus()
+        var reason = message || "the backend stopped"
+        errorText = applying
+            ? "Permission change outcome is unknown because " + reason + "; restart Flea and reopen Permissions to check the current mode."
+            : "Permissions is unavailable because " + reason + "; restart Flea and reopen Permissions."
+    }
     function close() {
-        if (!opened) return
+        // An issued fchmod cannot be cancelled; retain its result before allowing dismissal.
+        if (!opened || applying) return
         requested({ c: "permissions", op: "close", id: requestId })
         opened = false
         closed()
@@ -72,7 +89,7 @@ FocusScope {
     }
     function apply() {
         if (!editable || modeValue < 0) return
-        cancelFocus.forceActiveFocus()
+        root.forceActiveFocus()
         busy = true
         errorText = ""
         requested({ c: "permissions", op: "apply", id: requestId, mode: modeText })
@@ -152,6 +169,9 @@ FocusScope {
                 anchors.rightMargin: Theme.spacing.rowPaddingX
                 anchors.verticalCenter: parent.verticalCenter
                 glyph: "x"
+                glyphSize: Theme.font.bodySmall
+                restingColor: Theme.color.foreground
+                enabled: !root.applying
                 accessName: "Close permissions"
                 activeFocusOnTab: true
                 keyboardFocused: activeFocus
@@ -218,18 +238,20 @@ FocusScope {
                                 Accessible.role: Accessible.CheckBox
                                 Accessible.name: permissionRow.modelData + " " + ["read", "write", root.facts.directory ? "enter" : "execute"][index]
                                 Accessible.checked: checked
+                                Accessible.onPressAction: toggle()
+                                Accessible.onToggleAction: toggle()
                                 function toggle() { if (root.editable) { root.modeText = Permissions.toggle(root.modeText, bit); forceActiveFocus() } }
                                 Keys.onSpacePressed: toggle()
                                 Keys.onTabPressed: root.stepFocus(false)
                                 Keys.onBacktabPressed: root.stepFocus(true)
                                 Rectangle {
                                     anchors.centerIn: parent
-                                    width: Theme.font.bodySmall
+                                    width: Theme.font.bodySmall * 14 / 13 + 4 * Theme.spacing.hairline
                                     height: width
                                     color: "transparent"
                                     border.width: Theme.spacing.hairline * 2
                                     border.color: checkbox.checked || checkbox.activeFocus ? Theme.color.accent : Theme.color.muted
-                                    Flea.Glyph { anchors.fill: parent; name: "check"; visible: checkbox.checked; color: Theme.color.accent }
+                                    Flea.Glyph { anchors.centerIn: parent; width: Theme.font.bodySmall * 9 / 13; height: width; name: "check"; visible: checkbox.checked; color: Theme.color.accent }
                                 }
                                 TapHandler { onTapped: checkbox.toggle() }
                             }
@@ -323,8 +345,8 @@ FocusScope {
                     Rectangle { y: Theme.settings.railPaddingY; width: parent.width; height: Theme.spacing.hairline; color: Theme.color.muted; opacity: 0.4 }
                 }
                 Text { text: "WILL CHANGE"; bottomPadding: Theme.spacing.rowPaddingY / 2; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption; letterSpacing: Theme.font.caption / 10 } }
-                Text { id: changeSummary; width: parent.width; text: (root.editable && root.modeValue >= 0 ? "Requested mode " + Permissions.octal(root.modeValue) : "No changes available") + "\nPath " + root.path + (root.facts.reason ? "\nCurrent mode " + root.facts.mode : ""); textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: root.editable ? Theme.color.accent : Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-                Text { id: scopeLabel; width: parent.width; text: root.scopeText; wrapMode: Text.Wrap; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { id: changeSummary; width: parent.width; text: (root.facts.ok && !root.facts.reason && root.modeValue >= 0 ? "Requested mode " + Permissions.octal(root.modeValue) : "No changes available") + "\nPath " + root.path + (root.facts.reason ? "\nCurrent mode " + root.facts.mode : ""); textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; lineHeightMode: Text.FixedHeight; lineHeight: Theme.font.caption * 1.6; color: root.facts.ok && !root.facts.reason ? Theme.color.accent : Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text { id: scopeLabel; width: parent.width; text: root.scopeText; wrapMode: Text.Wrap; lineHeightMode: Text.FixedHeight; lineHeight: Theme.font.caption * 1.6; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
                 Item { width: parent.width; height: Theme.settings.railPaddingY + Theme.spacing.hairline }
                 Row {
                     anchors.right: parent.right
@@ -333,11 +355,12 @@ FocusScope {
                         id: cancelFocus
                         width: cancelButton.implicitWidth; height: cancelButton.implicitHeight
                         activeFocusOnTab: true
+                        enabled: !root.applying
                         Keys.onTabPressed: root.stepFocus(false)
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
-                        Flea.DialogButton { id: cancelButton; label: "Cancel"; primary: parent.activeFocus; onActivated: root.close() }
+                        Flea.DialogButton { id: cancelButton; label: "Cancel"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: !root.applying; onActivated: root.close() }
                     }
                     FocusScope {
                         id: applyFocus
@@ -348,7 +371,7 @@ FocusScope {
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.apply()
                         Keys.onSpacePressed: root.apply()
-                        Flea.DialogButton { id: applyButton; label: "Apply"; primary: parent.activeFocus; available: root.editable && root.modeValue >= 0; onActivated: root.apply() }
+                        Flea.DialogButton { id: applyButton; label: "Apply"; primary: parent.activeFocus; fillColor: primary ? root.focusFill : "transparent"; available: root.editable && root.modeValue >= 0; onActivated: root.apply() }
                     }
                 }
             }

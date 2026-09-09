@@ -173,7 +173,7 @@ FocusScope {
         id: card
         visible: !confirmation.opened
         anchors.centerIn: parent
-        width: Math.max(0, Math.min(Theme.space(420), root.width - 2 * Theme.spacing.gap))
+        width: Math.max(0, Math.min(Theme.space(420) * Theme.dialogWidthRatio, root.width - 2 * Theme.spacing.gap))
         height: Math.max(0, Math.min(body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * Theme.spacing.gap))
         color: Theme.color.surface
         border.color: Theme.color.muted
