@@ -114,7 +114,7 @@ mod tests {
                 .expect("TUI did not request the expected listing window")
                 .unwrap()
         };
-        let row = |name| Json::Obj(vec![("n".into(), word(name))]);
+        let row = |name: &str| Json::Obj(vec![("n".into(), word(name))]);
         let rows = |start, names: &[&str]| {
             Json::Obj(vec![
                 ("t".into(), word("rows")),
