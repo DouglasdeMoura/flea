@@ -73,6 +73,21 @@ pub fn panes(columns: usize, preview: bool) -> (usize, usize, usize) {
         },
     )
 }
+pub const BODY_ROW: usize = 3;
+pub const CHROME_ROWS: usize = 4;
+pub fn body_height(lines: usize) -> usize {
+    lines.saturating_sub(CHROME_ROWS)
+}
+pub fn pane_padding(columns: usize) -> usize {
+    const MIN_CONTENT: usize = 5; // A focused PDF control and both overflow arrows must remain visible.
+    (columns.saturating_sub(MIN_CONTENT) / 2).min(1)
+}
+pub fn preview_area(columns: usize, quicklook: bool) -> (usize, usize) {
+    let (left, middle, right) = panes(columns, true);
+    let (start, width) = if quicklook { (0, columns) } else { (left + middle + 2, right) };
+    let padding = pane_padding(width);
+    (start + padding, width - padding * 2)
+}
 pub fn fit(text: &str, limit: usize) -> String {
     let mut result = String::new();
     let mut used = 0;
@@ -221,17 +236,22 @@ pub fn draw(
     map: &Map,
     columns: usize,
     lines: usize,
+    cell_pixels: Option<(usize, usize)>,
     elapsed: std::time::Duration,
     last: &mut String,
 ) -> io::Result<bool> {
-    if columns < 12 || lines < 4 {
+    if columns < 12 || lines <= CHROME_ROWS {
         print!("\x1b[H\x1b[2J{}", fit("Window too small", columns));
         io::stdout().flush()?;
         return Ok(true);
     }
     let (left, middle, right) = panes(columns, m.preview_visible);
+    let left_padding = pane_padding(left);
+    let middle_padding = pane_padding(middle);
+    let preview_padding = pane_padding(if m.quicklook { columns } else { right });
+    let (_, preview_width) = preview_area(columns, m.quicklook);
     let filtered = (!m.filter.is_empty()).then(|| m.shown());
-    let body = lines - 2;
+    let body = body_height(lines);
     let graphical = m.player.is_some() || m.pdf.is_some() || m.image_file.is_some();
     let details = m.preview_metadata.len().min(3);
     let details_start = body.saturating_sub(2 + details + usize::from(m.pdf.is_some()));
@@ -239,9 +259,11 @@ pub fn draw(
     let mut out = format!("\x1b[H{}", base);
     let path = display_path(m);
     let title = header_title(m);
-    let title_width = text_width(&title).min(columns / 2);
+    let header_width = columns.saturating_sub(2);
+    let title_width = text_width(&title).min(header_width / 2);
     let mut used = 0;
-    for (i, label) in tab_layout(m, columns) {
+    out.push(' ');
+    for (i, label) in tab_layout(m, header_width) {
         let width = text_width(&label);
         out.push_str(if i == m.tab {
             &theme.accent
@@ -252,18 +274,20 @@ pub fn draw(
         used += width;
     }
     out.push_str(&base);
-    out.push_str(&" ".repeat(columns.saturating_sub(used + title_width)));
+    out.push_str(&" ".repeat(header_width.saturating_sub(used + title_width)));
     out.push_str(&fit(&title, title_width));
+    out.push(' ');
+    out.push_str(&format!("\x1b[2;1H{}{}{}", theme.border, "─".repeat(columns), base));
     for y in 0..body {
-        out.push_str(&format!("\x1b[{};1H{}", y + 2, base));
+        out.push_str(&format!("\x1b[{};1H{}", y + BODY_ROW, base));
         if m.quicklook {
             let content = if m.selected.len() > 1 {
-                selection_line(m, y, columns)
+                selection_line(m, y, preview_width)
             } else if y == body.saturating_sub(2) {
                 m.player
                     .as_ref()
-                    .map(|p| p.line(columns))
-                    .or_else(|| m.pdf.as_ref().map(|p| p.line(true, columns)))
+                    .map(|p| p.line(preview_width))
+                    .or_else(|| m.pdf.as_ref().map(|p| p.line(true, preview_width)))
                     .unwrap_or_default()
             } else if m.pdf.is_some() && y == body.saturating_sub(3) {
                 m.pdf.as_ref().unwrap().prefix()
@@ -274,7 +298,9 @@ pub fn draw(
             } else {
                 m.preview_display.get(y).cloned().unwrap_or_default()
             };
-            out.push_str(&fit(&content, columns));
+            out.push_str(&" ".repeat(preview_padding));
+            out.push_str(&fit(&content, preview_width));
+            out.push_str(&" ".repeat(preview_padding));
             continue;
         }
         if let Some(parent) = m.parents.get(y) {
@@ -289,7 +315,9 @@ pub fn draw(
                 if parent.directory { "›" } else { "□" },
                 parent.name
             );
-            out.push_str(&fit(&label, left));
+            out.push_str(&" ".repeat(left_padding));
+            out.push_str(&fit(&label, left - left_padding * 2));
+            out.push_str(&" ".repeat(left_padding));
         } else {
             out.push_str(&" ".repeat(left));
         }
@@ -309,11 +337,13 @@ pub fn draw(
                 theme.executable.clone()
             } else { theme.foreground.clone() };
             out.push_str(&row_color);
+            out.push_str(&" ".repeat(middle_padding));
+            let content_width = middle - middle_padding * 2;
             if let Some(editor) = m.editor.as_ref().filter(|e| e.kind == "rename" && e.path == m.row_path(entry)) {
                 out.push_str(&base);
-                out.push_str(&editor.line(&format!("{} ", mark(entry)), "", middle, &base, &theme.muted));
+                out.push_str(&editor.line(&format!("{} ", mark(entry)), "", content_width, &base, &theme.muted, &theme.accent));
             } else {
-                let (label, metadata) = row(entry, middle);
+                let (label, metadata) = row(entry, content_width);
                 if let Some((start, end)) = (index != m.cursor).then(|| match_range(&label, &m.filter)).flatten() {
                     out.push_str(&label[..start]);
                     out.push_str(&theme.accent);
@@ -324,18 +354,21 @@ pub fn draw(
                 if index != m.cursor { out.push_str(&theme.foreground); }
                 out.push_str(&metadata);
             }
+            out.push_str(&" ".repeat(middle_padding));
             out.push_str(&base);
         } else if m.total == 0 {
             if m.pending.is_some() {
                 out.push_str(&fit(if y == body / 2 { "Loading…" } else { "" }, middle));
             } else {
-                out.push_str(&super::empty::line(y, body, middle, elapsed));
+                out.push_str(&super::empty::line(y, body, middle, cell_pixels, elapsed));
             }
         } else if filtered.as_ref().is_some_and(|rows| y == rows.len()) {
             let count = filtered.as_ref().unwrap().len();
             let note = if count == 0 { format!("Nothing matches {}", m.filter) }
                 else { format!("{} rows hidden by the filter", m.rows.len() - count) };
-            out.push_str(&fit(&note, middle));
+            out.push_str(&" ".repeat(middle_padding));
+            out.push_str(&fit(&note, middle - middle_padding * 2));
+            out.push_str(&" ".repeat(middle_padding));
         } else {
             out.push_str(&" ".repeat(middle));
         }
@@ -348,13 +381,13 @@ pub fn draw(
         let preview = if y == body.saturating_sub(2) && (m.player.is_some() || m.pdf.is_some()) {
             m.player
                 .as_ref()
-                .map(|p| p.line(right))
-                .or_else(|| m.pdf.as_ref().map(|p| p.line(false, right)))
+                .map(|p| p.line(preview_width))
+                .or_else(|| m.pdf.as_ref().map(|p| p.line(false, preview_width)))
                 .unwrap_or_default()
         } else if m.pdf.is_some() && y == body.saturating_sub(3) {
             m.pdf.as_ref().unwrap().prefix()
         } else if m.selected.len() > 1 {
-            selection_line(m, y, right)
+            selection_line(m, y, preview_width)
         } else if graphical && y >= details_start && y < details_start + details {
             m.preview_metadata[y - details_start].clone()
         } else if graphical && y >= 2 {
@@ -369,17 +402,20 @@ pub fn draw(
         } else {
             &theme.foreground
         });
-        out.push_str(&fit(&preview, right));
+        out.push_str(&" ".repeat(preview_padding));
+        out.push_str(&fit(&preview, preview_width));
+        out.push_str(&" ".repeat(preview_padding));
         out.push_str(&base);
     }
-    out.push_str(&format!("\x1b[{};1H{}", lines, base));
+    out.push_str(&format!("\x1b[{};1H{}{}{}", lines - 1, theme.border, "─".repeat(columns), base));
+    out.push_str(&format!("\x1b[{};1H{} ", lines, base));
     if let Some(editor) = &m.editor {
         if editor.kind == "rename" {
             let notice = if !editor.error.is_empty() { editor.error.as_str() }
                 else if editor.pending { "Renaming…" }
                 else { "Enter saves · Escape cancels · Ctrl+A selects the full name" };
             if !editor.error.is_empty() { out.push_str(&theme.error); }
-            out.push_str(&fit(notice, columns));
+            out.push_str(&fit(notice, header_width));
         } else {
         let prefix = if editor.kind == "path" {
             ": ".into()
@@ -405,11 +441,12 @@ pub fn draw(
         } else {
             String::new()
         };
-        out.push_str(&editor.line(&prefix, &suffix, columns, &base, &theme.muted));
+        out.push_str(&editor.line(&prefix, &suffix, header_width, &base, &theme.muted, &theme.accent));
         }
     } else {
-        out.push_str(&footer(m, theme, columns, elapsed));
+        out.push_str(&footer(m, theme, header_width, elapsed));
     }
+    out.push(' ');
     if m.sheet {
         let sheet = panel_rows(m, map);
         overlay(
@@ -477,7 +514,7 @@ pub fn deletion_buttons(m: &Model) -> Vec<(bool, usize, usize)> {
     let rows = deletion_rows(m);
     let Some(deletion) = &m.deletion else { return Vec::new(); };
     let scroll = deletion.scroll.min(rows.len().saturating_sub(1));
-    let (x, y, width, count) = overlay_rect(&rows[scroll..], m.columns, m.height + 2);
+    let (x, y, width, count) = overlay_rect(&rows[scroll..], m.columns, m.height + CHROME_ROWS);
     let stacked = m.columns < 30;
     [false, true].into_iter().filter_map(|destructive| {
         let row = rows.len() - 1 - usize::from(stacked && !destructive);
@@ -637,6 +674,21 @@ fn overlay(
 mod tests {
     use super::*;
     #[test]
+    fn chrome_and_pane_insets_preserve_body_and_minimum_pdf_space() {
+        assert_eq!(body_height(67), 63);
+        assert_eq!(BODY_ROW + body_height(67), 66);
+        assert_eq!(preview_area(277, false), (171, 105));
+        assert_eq!(preview_area(277, true), (1, 275));
+        for columns in 12..=277 {
+            for quicklook in [false, true] {
+                let (start, width) = preview_area(columns, quicklook);
+                assert!(width >= 5 && start + width <= columns);
+                let outer = if quicklook { columns } else { panes(columns, true).2 };
+                assert_eq!(start + width + pane_padding(outer), columns);
+            }
+        }
+    }
+    #[test]
     fn scrolled_root_menu_renders_the_selected_action() {
         let mut model = Model::new(std::path::PathBuf::from("/"), &crate::jsondoc::Json::Null);
         model.columns = 80;
@@ -645,9 +697,9 @@ mod tests {
         model.menu_cursor = 2;
         let rows = menu_rows(&model);
         assert_eq!(rows, ["show hidden", "taildrop  ▶"]);
-        assert_eq!(overlay_rect(&rows, model.columns, model.height + 2).3, 2);
+        assert_eq!(overlay_rect(&rows, model.columns, model.height + CHROME_ROWS).3, 2);
         let mut output = String::new();
-        overlay(&mut output, &rows, model.columns, model.height + 2, "",
+        overlay(&mut output, &rows, model.columns, model.height + CHROME_ROWS, "",
             Some(model.menu_cursor - model.menu_top), "open", None);
         assert!(output.contains("\x1b[7m taildrop  ▶ │"));
         assert!(!output.contains("\x1b[7m show hidden"));
@@ -664,13 +716,13 @@ mod tests {
             for height in [4, 20] {
                 model.columns = columns;
                 model.height = height;
-                let scroll = deletion_rows(&model).len().saturating_sub(height - 2);
+                let scroll = deletion_rows(&model).len().saturating_sub(height);
                 model.deletion.as_mut().unwrap().scroll = scroll;
                 let buttons = deletion_buttons(&model);
                 assert_eq!(buttons.len(), 2);
                 for (_, x, y) in &buttons {
                     assert!(*x > 0 && x + 9 <= columns);
-                    assert!(*y > 0 && *y <= height + 2);
+                    assert!(*y > 0 && *y <= height + CHROME_ROWS);
                 }
                 assert_ne!((buttons[0].1, buttons[0].2), (buttons[1].1, buttons[1].2));
             }

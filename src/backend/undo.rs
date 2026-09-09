@@ -291,6 +291,7 @@ mod tests {
         let copy = d.file("doc copy.txt", "original");
         let mut j = Journal::new();
         j.push(entry("duplicate", vec![Step::Created { path: copy.clone() }]));
+        d.assert_contains(&copy);
         j.undo().expect("undo");
         assert!(!copy.exists(), "the copy is gone");
         assert!(original.exists(), "the file it was copied from is untouched");
@@ -303,6 +304,7 @@ mod tests {
         std::fs::write(made.join("inside.txt"), "body").unwrap();
         let mut j = Journal::new();
         j.push(entry("copy", vec![Step::Created { path: made.clone() }]));
+        d.assert_contains(&made);
         j.undo().expect("undo");
         assert!(!made.exists());
     }
@@ -320,6 +322,7 @@ mod tests {
                 Step::Created { path: d.file("second.txt", "s") },
             ],
         ));
+        d.assert_contains(&d.join("second.txt"));
         j.undo().expect("undo");
         assert!(!d.join("second.txt").exists(), "the newest step reversed");
         assert!(d.join("first.txt").exists(), "the oldest step reversed too");
@@ -337,6 +340,8 @@ mod tests {
                 Step::Created { path: d.join("never-existed.txt") },
             ],
         ));
+        d.assert_contains(&d.join("keeper.txt"));
+        d.assert_contains(&d.join("never-existed.txt"));
         let e = j.undo().expect_err("the missing path must fail");
         assert_eq!(e.where_, "undo");
         assert!(d.join("keeper.txt").exists(), "the step behind the failure was not reversed");
@@ -348,6 +353,7 @@ mod tests {
         let made = d.dir("fresh");
         let mut j = Journal::new();
         j.push(entry("mkdir", vec![Step::MadeDir { path: made.clone(), identity: ItemIdentity::inspect(&made).unwrap() }]));
+        d.assert_contains(&made);
         assert_eq!(j.undo().expect("undo"), "mkdir");
         assert!(!made.exists());
     }
@@ -359,6 +365,7 @@ mod tests {
         std::fs::write(made.join("theirs.txt"), "not ours to remove").unwrap();
         let mut j = Journal::new();
         j.push(entry("mkdir", vec![Step::MadeDir { path: made.clone(), identity: ItemIdentity::inspect(&made).unwrap() }]));
+        d.assert_contains(&made);
         let e = j.undo().expect_err("must refuse rather than delete what the operation did not put there");
         assert_eq!(e.where_, "undo");
         assert_eq!(e.msg, "the new folder has been filled since, so undo left it in place");

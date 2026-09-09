@@ -15,8 +15,10 @@ ListView {
     property var backend: null
 
     readonly property int visibleRows: Math.max(1, Math.ceil(root.height / Theme.rowHeight))
-    // Wide enough that a row's box is a check and not a chip; the board's own is one pixel over bodySmall.
-    readonly property int checkSize: Theme.font.bodySmall + Theme.spacing.hairline
+    // The board's content-box dimensions exclude the border; QML Rectangle dimensions include it.
+    readonly property int checkInnerSize: Theme.font.bodySmall + Theme.spacing.hairline
+    readonly property int checkBorderWidth: Theme.spacing.hairline * 2
+    readonly property int checkSize: root.checkInnerSize + root.checkBorderWidth * 2
 
     model: root.picker.shownTotal
     clip: true
@@ -85,14 +87,14 @@ ListView {
             width: root.checkSize
             height: root.checkSize
             color: "transparent"
-            border.width: Theme.spacing.hairline * 2
+            border.width: root.checkBorderWidth
             border.color: cell.isMarked ? Theme.color.accent : Theme.color.muted
 
             Flea.Glyph {
                 anchors.fill: parent
                 visible: cell.isMarked
                 name: "check"
-                maxSize: root.checkSize
+                maxSize: root.checkInnerSize - root.checkBorderWidth * 2
                 color: Theme.color.accent
             }
         }

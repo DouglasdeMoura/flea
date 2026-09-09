@@ -213,10 +213,11 @@ class Native:
     def cursor_is(self, name):
         # The listing cursor is reverse video; marked rows use a background without reverse video.
         runs = re.findall(rb"\x1b\[7m([^\x1b]*)", self.raw)
-        return any(name in run.decode("utf-8", errors="replace") and run.startswith((b"\xe2\x80\xba ", b"\xe2\x96\xa1 ", b"@ ", b"* ")) for run in runs)
+        return any(name in run.decode("utf-8", errors="replace") and run.lstrip().startswith((b"\xe2\x80\xba ", b"\xe2\x96\xa1 ", b"@ ", b"* ")) for run in runs)
 
     def geometry(self, label, preview):
-        row = self.text.splitlines()[1]
+        lines = self.text.splitlines()
+        row = lines[2]
         columns = self.size[1]
         borders = [index for index, char in enumerate(row) if char == "\u2502"]
         expected = [columns * 22 // 100 - 1]
@@ -224,8 +225,45 @@ class Native:
             expected.append(columns * 22 // 100 + columns * 40 // 100 - 1)
         if len(row) != columns or borders != expected:
             raise RuntimeError(f"TUI {label} geometry differs from Tui.html 22:40:38: columns={columns}, row={len(row)}, borders={borders}, expected={expected}")
+        if lines[1] != "\u2500" * columns or lines[-2] != "\u2500" * columns:
+            raise RuntimeError("TUI header/footer separator is missing or clipped")
+        if not (lines[0].startswith(" ") and lines[0].endswith(" ")
+                and lines[-1].startswith(" ") and lines[-1].endswith(" ")):
+            raise RuntimeError("TUI header/footer horizontal padding is missing")
+        for pane in row.split("\u2502"):
+            if len(pane) >= 7 and not (pane.startswith(" ") and pane.endswith(" ")):
+                raise RuntimeError("TUI pane content touches its separator")
         self.checks += 1
         print(f"TUI_PASS {label} geometry columns={columns} borders={borders}", flush=True)
+
+    def layout_pointer(self):
+        middle = self.size[1] * 22 // 100 + 1
+        self.click_cell(middle, 4, "padded-second-row")
+        self.snapshot("padded-second-row", lambda text: self.cursor_is("bronze"))
+        self.click_cell(middle, 2, "header-rule-inert")
+        self.key("-k", "Down")
+        self.snapshot("header-rule-inert", lambda text: self.cursor_is("charlie.txt"))
+        self.click_cell(middle, self.size[0] - 1, "footer-rule-inert")
+        self.key("-k", "Up")
+        self.snapshot("footer-rule-inert", lambda text: self.cursor_is("bronze"))
+        self.click_cell(middle, 3, "padded-first-row")
+        self.snapshot("padded-first-row", lambda text: self.cursor_is("amber"))
+
+    def spiral_geometry(self):
+        rows, columns, pixels_x, pixels_y = self.size
+        if min(pixels_x, pixels_y) <= 0:
+            raise RuntimeError("native terminal has no measured cells for spiral aspect proof")
+        marks = []
+        for line in self.text.splitlines()[2:-2]:
+            pane = line.split("\u2502")[1]
+            cells = [index for index, char in enumerate(pane) if char in "\u2580\u2584\u2588"]
+            if cells:
+                marks.append(cells[-1] - cells[0] + 1)
+        cell_x, cell_y = pixels_x // columns, pixels_y // rows
+        if not marks or abs(max(marks) * cell_x * 10 - len(marks) * cell_y * 11) > cell_x * 10 / 2:
+            raise RuntimeError("TUI spiral does not preserve its board aspect within one-half measured cell")
+        self.checks += 1
+        print(f"TUI_PASS spiral measured_cell={cell_x},{cell_y} mark_cells={max(marks)},{len(marks)}", flush=True)
 
     def navigate(self, path, label, expected):
         guard(self.case, path)
@@ -260,9 +298,11 @@ class Native:
         self.start()
         self.snapshot("listing", lambda text: "5 items" in text and "charlie.txt" in text)
         self.geometry("listing", True)
+        self.layout_pointer()
         self.key("-k", "Down")
         self.key("-k", "Right" if self.preset == "mac" else "Return")
         self.snapshot("empty-navigation", lambda text: "1 bronze" in text and "0 items" in text)
+        self.spiral_geometry()
         self.key("-k", "BackSpace")
         self.snapshot("parent-navigation", lambda text: "1 listing" in text and "5 items" in text)
         self.key("-k", "Home")
@@ -378,7 +418,12 @@ class Native:
             self.snapshot("rename-" + label + "-cancelled", lambda text: "Enter saves" not in text and self.cursor_is("amber"))
         self.key(":")
         self.key("am")
-        self.snapshot("path-completion", lambda text: text.splitlines()[-1].startswith(": am\u258fber/"))
+        self.snapshot("path-completion", lambda text: text.splitlines()[-1].startswith(" : am\u258fber/"))
+        accent = re.search(rb"(\x1b\[38;2;\d+;\d+;\d+m)1 listing", self.raw)
+        if not accent or accent[1] + b": " not in self.raw or accent[1] + "\u258f".encode() not in self.raw:
+            raise RuntimeError("TUI path prompt/caret does not use the active-tab accent")
+        self.checks += 1
+        print("TUI_PASS path prompt and caret share accent role", flush=True)
         self.key("-k", "Tab")
         self.key("-k", "Return")
         self.snapshot("path-completion-opened", lambda text: "1 amber" in text and "1 items" in text)
@@ -393,13 +438,14 @@ class Native:
         self.chord("l", "ctrl")
         self.key(str(guard(self.case, self.case / "missing-directory")))
         self.key("-k", "Return")
-        self.snapshot("missing-path-error", lambda text: "Esc dismisses" in text and "5 items" in text)
+        self.snapshot("missing-path-error", lambda text: "Esc dismisses" in text and "5 items" in text and self.cursor_is("amber"))
         self.key("s")
-        self.snapshot("missing-path-persists", lambda text: "Esc dismisses" in text and "\u00b7 size" in text.splitlines()[0])
+        self.snapshot("missing-path-persists", lambda text: "Esc dismisses" in text and "\u00b7 size" in text.splitlines()[0]
+                      and "charlie.txt" in text and self.cursor_is("amber"))
         self.key("-k", "Escape")
         self.snapshot("missing-path-acknowledged", lambda text: "Esc dismisses" not in text)
         self.key("sss")
-        self.snapshot("sort-restored-after-error", lambda text: "\u00b7 name" in text.splitlines()[0])
+        self.snapshot("sort-restored-after-error", lambda text: "\u00b7 name" in text.splitlines()[0] and self.cursor_is("amber"))
         self.rename_changed_identity()
         self.menu_and_panel()
 
@@ -607,6 +653,23 @@ class Native:
         self.snapshot("tab-next-wrap", lambda text: "tab-1.txt" in text)
         self.chord("Page_Up", "ctrl")
         self.snapshot("tab-previous-wrap", lambda text: "tab-9.txt" in text)
+        self.key("-k", "space")
+        self.snapshot("tab-quicklook-open", lambda text: "\u2502" not in text and "independent tab fixture" in text)
+        header = self.raw.split(b"\x1b[2;1H", 1)[0]
+        column = self.text.splitlines()[0].index("1 t1") + 1
+        next_line = self.text.splitlines()[3]
+        if next_line == self.text.splitlines()[2]:
+            raise RuntimeError("Quick Look fixture cannot demonstrate the preview scroll barrier")
+        self.click_cell(column, 1, "tab-quicklook-header-inert")
+        self.key("-k", "Down")
+        self.snapshot("tab-quicklook-header-inert", lambda text: "\u2502" not in text
+                      and text.splitlines()[2] == next_line and self.raw.split(b"\x1b[2;1H", 1)[0] == header)
+        self.key("-k", "Escape")
+        self.snapshot("tab-quicklook-closed", lambda text: "\u2502" in text and self.cursor_is("tab-9.txt"))
+        self.click_cell(column, 1, "tab-header-active-after-close")
+        self.snapshot("tab-header-active-after-close", lambda text: self.cursor_is("tab-1.txt"))
+        self.key("9")
+        self.snapshot("tab-header-restored", lambda text: self.cursor_is("tab-9.txt"))
         for index in range(9, 1, -1):
             self.chord("w", "ctrl")
             self.snapshot("tab-close-" + str(index), lambda text: "tab-" + str(index - 1) + ".txt" in text)
@@ -754,18 +817,19 @@ class Native:
         original, cells, (cell_x, _) = self.cell_geometry()
         inline_width = len("  ".join(controls)) + 2
         inline_columns = max(columns for columns in range(12, cells[1])
-                             if columns - columns * 22 // 100 - columns * 40 // 100 < inline_width)
-        quick_columns = len("  ".join(controls + ("\u00d7",))) + 1
+                             if columns - columns * 22 // 100 - columns * 40 // 100 - 2 < inline_width)
+        quick_columns = len("  ".join(controls + ("\u00d7",))) + 3
 
         def resize(columns, label):
             self.resize_window(round(original["size"][0] + (columns - cells[1]) * cell_x), original["size"][1], label)
             self.wait(label + "-cells", lambda: self.terminal_size()[:2] == (cells[0], columns))
 
         def toolbar(quicklook):
-            line = self.text.splitlines()[self.size[0] - 3]
+            line = self.text.splitlines()[self.size[0] - 4]
             if len(line) != self.size[1]:
                 raise RuntimeError("PDF toolbar row escaped the measured terminal columns")
-            return line if quicklook else line.rsplit("\u2502", 1)[-1]
+            pane = line if quicklook else line.rsplit("\u2502", 1)[-1]
+            return pane[1:-1] if len(pane) >= 7 else pane
 
         def focused(index, quicklook):
             labels = controls + (("\u00d7",) if quicklook else ())
@@ -780,11 +844,14 @@ class Native:
 
         def click(glyph, quicklook, label):
             line = toolbar(quicklook)
-            self.click_cell(self.size[1] - len(line) + line.index(glyph) + 1, self.size[0] - 2, label)
+            outer = self.size[1] if quicklook else self.size[1] - self.size[1] * 22 // 100 - self.size[1] * 40 // 100
+            padding = int(outer >= 7)
+            self.click_cell(self.size[1] - padding - len(line) + line.index(glyph) + 1, self.size[0] - 3, label)
 
         def facts(quicklook):
-            line = self.text.splitlines()[self.size[0] - 4]
-            return line if quicklook else line.rsplit("\u2502", 1)[-1]
+            line = self.text.splitlines()[self.size[0] - 5]
+            pane = line if quicklook else line.rsplit("\u2502", 1)[-1]
+            return pane[1:-1] if len(pane) >= 7 else pane
 
         def pointer_controls(quicklook, label):
             for glyph, control, page, zoom, action in [
@@ -829,10 +896,10 @@ class Native:
             self.snapshot("pdf-narrow-quicklook", lambda text: focused(0, True) and "\u2192" in toolbar(True))
             cycle(True, "pdf-narrow-quicklook")
             pointer_controls(True, "pdf-narrow-quicklook-pointer")
-            inert_cell(1, self.size[0] - 2, "pdf-narrow-inert-left-gutter")
-            inert_cell(toolbar(True).index("]") + 2, self.size[0] - 2, "pdf-narrow-inert-control-gap")
-            inert_cell(self.size[1], self.size[0] - 3, "pdf-narrow-inert-above-toolbar")
-            inert_cell(self.size[1], self.size[0] - 1, "pdf-narrow-inert-below-toolbar")
+            inert_cell(1, self.size[0] - 3, "pdf-narrow-inert-left-gutter")
+            inert_cell(toolbar(True).index("]") + 3, self.size[0] - 3, "pdf-narrow-inert-control-gap")
+            inert_cell(self.size[1], self.size[0] - 4, "pdf-narrow-inert-above-toolbar")
+            inert_cell(self.size[1], self.size[0] - 2, "pdf-narrow-inert-below-toolbar")
             minimum_label = "pdf-minimum-window"
             try:
                 resize(12, minimum_label)

@@ -233,6 +233,14 @@ function run(check) {
     var ctrl = Qt.ControlModifier
     Keymap.setPreset("mac")
     check("ctrl k connects to a server from the list", Focus.lookup(key(Qt.Key_K, "\u000b", ctrl), pane(closed())), "addNetwork")
+    check("Mac List Right still opens the cursor", Focus.lookup(right, pane(closed())), "open")
+    check("Mac List Left still opens the parent", Focus.lookup(left, pane(closed())), "parent")
+    for (var preset of Keymap.PRESETS) {
+        Keymap.setPreset(preset)
+        check(preset + " Grid Left moves between tiles", Focus.lookup(left, pane(closed(), "grid")), "cursorLeft")
+        check(preset + " Grid Right moves between tiles", Focus.lookup(right, pane(closed(), "grid")), "cursorRight")
+        check(preset + " Grid PDF Right keeps page navigation", Focus.lookup(right, pane(pdfOpen(), "grid")), "seekForward")
+    }
     Keymap.setPreset("default")
     check("bare a is still nothing in the list", Focus.lookup(key(Qt.Key_A, "a", none), pane(closed())), "")
     var dialled = listPane(true)

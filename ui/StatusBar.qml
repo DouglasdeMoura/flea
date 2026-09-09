@@ -38,6 +38,7 @@ Item {
     readonly property bool searching: root.searchLine.length > 0
     readonly property int spiralSize: Style.font.body
     readonly property int messageMs: 4000
+    readonly property real ruleOpacity: 0.12
     readonly property bool hasUndo: !root.transientIsError && !root.stickyHere && !root.searching
                                     && root.notice.indexOf(Ops.UNDO_HINT) >= 0
     readonly property string secondaryText: [root.transientIsError && root.stickyHere ? root.sticky : "",
@@ -120,8 +121,16 @@ Item {
         width: parent.width
         height: Theme.chromeHeight
         color: Theme.color.surface
-        border.width: Theme.spacing.hairline
-        border.color: root.transientIsError ? Theme.color.error : Theme.color.muted
+        border.width: root.transientIsError ? Theme.spacing.hairline : 0
+        border.color: Theme.color.error
+    }
+
+    Rectangle {
+        width: parent.width
+        height: Theme.spacing.hairline
+        visible: !root.transientIsError
+        color: Theme.color.foreground
+        opacity: root.ruleOpacity
     }
 
     Text {

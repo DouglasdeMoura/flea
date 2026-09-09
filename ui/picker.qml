@@ -353,7 +353,9 @@ ShellRoot {
                     win.acceptMarks = false
                     if (!message.ok) { win.say(message.error, true); return }
                     win.marks = Picker.reviewedMarks(win.marks, message.marks)
-                    if (message.removed) win.say(message.removed + " selected items moved or changed; select them again.", true)
+                    if (message.removed) win.say(message.removed === 1
+                        ? "1 selected item moved or changed; select it again."
+                        : message.removed + " selected items moved or changed; select them again.", true)
                     else if (accepting && win.marks.length) { win.finish(Picker.RESPONSE_OK, win.marks); return }
                     if (win.marksDirty) { win.marksDirty = false; win.validateMarks(false) }
                 } else if (message.id === win.saveRequest) {
@@ -521,7 +523,7 @@ ShellRoot {
                     anchors.rightMargin: Theme.spacing.rowPaddingX
                     width: Math.min(implicitWidth, parent.width / 2)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: Picker.hints(win.req)
+                    text: win.backendUnavailable ? "Esc cancel" : Picker.hints(win.req)
                     color: Theme.color.foreground
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.caption
@@ -592,7 +594,7 @@ ShellRoot {
                     marks: win.marks, state: win.listingState, filter: win.filterIndex, history: win.history,
                     marksBusy: win.markRequest > 0, saveBusy: win.saveRequest > 0, submitting: win.submitting, backendUnavailable: win.backendUnavailable,
                     canAccept: win.canAccept, saveReady: win.saveReady, collision: win.saveCollision,
-                    saveName: win.saveName, saveError: win.saveError, message: win.message, messageError: win.messageError,
+                    saveName: win.saveName, saveError: win.saveError, message: win.message, messageError: win.messageError, hints: statusHints.text,
                     controls: chrome.controls().concat(save.controls(), places.controls()), listFocus: list.activeFocus,
                     railFocus: places.focusItem.activeFocus, preset: Flea.ViewState.keysPreset,
                     bodySmall: Theme.font.bodySmall, body: Theme.font.body, width: win.width, height: win.height,

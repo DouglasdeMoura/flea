@@ -2583,12 +2583,16 @@ case_grid() {
 case_gridnavigation() {
     local dir="$fixture_root/grid-navigation" preset i columns next_columns edge selected_name
     local start_x start_y target_x target_y caption
+    local opener="$fixture_root/grid-opener"
     sandbox_scratch "$dir"
+    sandbox_scratch "$opener"
+    printf '#!/bin/sh\n[ "$1" = open ] || exec /usr/bin/gio "$@"\nexit 1\n' > "$opener/$open_handoff"
+    chmod +x "$opener/$open_handoff"
     for i in $(seq -w 1 60); do printf 'grid navigation %s\n' "$i" > "$dir/file-$i.txt"; done
     printf 'grid caption\n' > "$dir/long-grid-caption-with-enough-words-to-wrap-and-truncate-after-two-complete-lines.txt"
     for preset in default vim mac windows; do
         seed_ui_state "$fixture_root/grid-state" "{\"keys\":\"$preset\",\"view\":\"list\",\"wrapAtEnds\":true,\"preview\":{\"thumbnails\":\"off\"}}"
-        launch "$dir"
+        PATH="$opener:$PATH" launch "$dir"
         wait_listing 61
         click_chrome grid
         cardsize_expect viewMode grid
@@ -3981,11 +3985,13 @@ EOS
 
     network_click_favourite "Late retry"
     wait_marker "$fake_root/late-started" "network: late retry did not reach its mount barrier"
-    [[ "$(ipc keymapPreset)" == default && "$(ipc focusView)" == rail && "$(ipc networkResult)" == mounting ]] \
+    [[ "$(ipc keymapPreset)" == default && "$(ipc networkResult)" == mounting ]] \
         || fail "network: direct mount context differs: preset=$(ipc keymapPreset) focus=$(ipc focusView) result=$(ipc networkResult)"
     key -M ctrl -k k -m ctrl >/dev/null
     settle
     [[ "$(ipc dialogOpen)" == false ]] || fail "network: Mac-only Ctrl+K opened a draft in the Default preset"
+    if [[ "$(ipc focusView)" == list ]]; then key -k Tab >/dev/null; fi
+    [[ "$(ipc focusView)" == rail ]] || fail "network: native Tab did not focus the rail during mounting"
     key a >/dev/null
     settle
     [[ "$(ipc dialogOpen)" == true ]] \

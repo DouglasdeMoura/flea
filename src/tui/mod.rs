@@ -45,7 +45,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
         let theme = theme::Theme::load();
         let mut decoder = input::Decoder::default();
         let mut size = terminal::size();
-        model.height = size.1.saturating_sub(2).max(1);
+        model.height = render::body_height(size.1).max(1);
         model.columns = size.0;
         model.restore_path = select.map(PathBuf::from);
         model.open(path, &mut wire)?;
@@ -126,25 +126,13 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             let current = model.current_path();
             let preview_allowed =
                 model.preview_loaded && current.as_ref() == Some(&model.preview_path);
-            let reserved = 7 + model.preview_metadata.len().min(3)
+            const PREVIEW_RESERVED_ROWS: usize = 5;
+            let reserved = PREVIEW_RESERVED_ROWS + model.preview_metadata.len().min(3)
                 + usize::from(model.rows.get(&model.cursor).is_some_and(|row| row.icon.contains("pdf")));
-            let (left, middle, right) = render::panes(size.0, model.preview_visible);
-            let geometry = if model.quicklook {
-                (
-                    size.0.saturating_sub(2),
-                    size.1.saturating_sub(reserved),
-                    2,
-                    4,
-                )
-            } else {
-                (
-                    right,
-                    size.1.saturating_sub(reserved),
-                    left + middle + 3,
-                    4,
-                )
-            };
-            let pixels = terminal::cell_pixels()
+            let (preview_start, preview_width) = render::preview_area(size.0, model.quicklook);
+            let geometry = (preview_width, model.height.saturating_sub(reserved), preview_start + 1, render::BODY_ROW + 2);
+            let cell_pixels = terminal::cell_pixels();
+            let pixels = cell_pixels
                 .map(|cell| (geometry.0 * cell.0, geometry.1 * cell.1))
                 .filter(|pixels| pixels.0 > 0 && pixels.1 > 0);
             let graphics_ready = pixels.is_some() || graphics.protocol == graphics::Protocol::None;
@@ -306,6 +294,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 &map,
                 size.0,
                 size.1,
+                cell_pixels,
                 started.elapsed(),
                 &mut frame,
             )?;
@@ -343,7 +332,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             let next = terminal::size();
             if next != size {
                 size = next;
-                model.height = size.1.saturating_sub(2).max(1);
+                model.height = render::body_height(size.1).max(1);
                 model.columns = size.0;
                 model.window(&mut wire)?;
             }

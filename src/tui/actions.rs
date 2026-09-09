@@ -58,7 +58,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                     if model.menu_enabled(model.menu_cursor) { break; }
                 }
                 model.menu_top = model.menu_top.min(model.menu_cursor);
-                let visible = model.height.saturating_sub(2).max(1);
+                let visible = model.height.max(1);
                 if model.menu_cursor >= model.menu_top + visible { model.menu_top = model.menu_cursor + 1 - visible; }
             }
             "open" | "preview" | "menuRight" => {
@@ -599,7 +599,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
 fn deletion_key(m: &mut Model, key: &Key, wire: &mut Wire) -> io::Result<()> {
     let rows = super::render::deletion_rows(m);
     let scroll = m.deletion.as_ref().unwrap().scroll.min(rows.len().saturating_sub(1));
-    let (x, y, width, count) = super::render::overlay_rect(&rows[scroll..], m.columns, m.height + 2);
+    let (x, y, width, count) = super::render::overlay_rect(&rows[scroll..], m.columns, m.height + super::render::CHROME_ROWS);
     let mut activate = false;
     let mut cancel = key.name == "Escape";
     if let Some(pointer) = &key.pointer {
@@ -672,7 +672,7 @@ fn pointer_key(
         } else {
             super::render::menu_rows(m)
         };
-        let (x, y, width, count) = super::render::overlay_rect(&rows, m.columns, m.height + 2);
+        let (x, y, width, count) = super::render::overlay_rect(&rows, m.columns, m.height + super::render::CHROME_ROWS);
         if scroll != 0 {
             return self::key(
                 m,
@@ -702,6 +702,20 @@ fn pointer_key(
     }
     if pointer.motion && pointer.button == 3 { return Ok(()); }
     let (left, middle, _) = super::render::panes(m.columns, m.preview_visible);
+    if !m.quicklook && pointer.y == 1 && pointer.button == 0 && !pointer.motion {
+        let mut x = 2;
+        for (i, label) in super::render::tab_layout(m, m.columns.saturating_sub(2)) {
+            let width = super::render::text_width(&label);
+            if pointer.x >= x && pointer.x < x + width {
+                return tab(m, i, w);
+            }
+            x += width;
+        }
+        return Ok(());
+    }
+    if pointer.y < super::render::BODY_ROW || pointer.y >= m.height + super::render::BODY_ROW {
+        return Ok(());
+    }
     if m.quicklook || (m.preview_visible && pointer.x > left + middle + 2) {
         m.preview_focus = true;
         if scroll != 0 {
@@ -712,12 +726,12 @@ fn pointer_key(
                 w,
             );
         }
-        if pointer.button == 0 && pointer.y == m.height {
-            let cell = pointer
-                .x
-                .saturating_sub(if m.quicklook { 1 } else { left + middle + 3 });
+        let (start, columns) = super::render::preview_area(m.columns, m.quicklook);
+        if pointer.button == 0 && pointer.y == super::render::BODY_ROW + m.height.saturating_sub(2)
+            && pointer.x > start && pointer.x <= start + columns
+        {
+            let cell = pointer.x - start - 1;
             if let Some(pdf) = &mut m.pdf {
-                let columns = if m.quicklook { m.columns } else { super::render::panes(m.columns, true).2 };
                 if let Some((control, activate)) = pdf.control_at(cell, m.quicklook, columns) {
                     pdf.control = control;
                     if activate && !pointer.motion {
@@ -730,30 +744,12 @@ fn pointer_key(
                     return player.toggle();
                 }
                 player.control = 1;
-                return player.seek_at(
-                    cell,
-                    if m.quicklook {
-                        m.columns
-                    } else {
-                        super::render::panes(m.columns, true).2
-                    },
-                );
+                return player.seek_at(cell, columns);
             }
         }
         return Ok(());
     }
-    if pointer.y == 1 && pointer.button == 0 && !pointer.motion {
-        let mut x = 1;
-        for (i, label) in super::render::tab_layout(m, m.columns) {
-            let width = super::render::text_width(&label);
-            if pointer.x >= x && pointer.x < x + width {
-                return tab(m, i, w);
-            }
-            x += width;
-        }
-        return Ok(());
-    }
-    if pointer.y < 2 || pointer.y > m.height + 1 || m.pending.is_some() {
+    if m.pending.is_some() {
         return Ok(());
     }
     if scroll != 0 {
@@ -762,7 +758,7 @@ fn pointer_key(
     }
     if pointer.x <= left {
         if pointer.button == 0 && !pointer.motion {
-            if let Some(row) = m.parents.get(pointer.y - 2) {
+            if let Some(row) = m.parents.get(pointer.y - super::render::BODY_ROW) {
                 let path = m.path.parent().unwrap_or(&m.path).join(&row.name);
                 if row.directory {
                     navigate(m, path, w)?;
@@ -775,9 +771,9 @@ fn pointer_key(
         return Ok(());
     }
     let index = if m.filter.is_empty() {
-        m.top + pointer.y - 2
+        m.top + pointer.y - super::render::BODY_ROW
     } else {
-        m.shown().get(pointer.y - 2).copied().unwrap_or(usize::MAX)
+        m.shown().get(pointer.y - super::render::BODY_ROW).copied().unwrap_or(usize::MAX)
     };
     if !m.rows.contains_key(&index) {
         return Ok(());

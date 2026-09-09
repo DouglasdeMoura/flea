@@ -252,6 +252,7 @@ mod tests {
         let src = d.file("big.bin", &"x".repeat(CHUNK * 3));
         let flag = AtomicBool::new(true);
         let mut sink = |_: u64, _: u64| {};
+        d.assert_contains(&d.join("partial.bin"));
         let e = copy_any(&src, &d.join("partial.bin"), &mut quiet(&flag, &mut sink)).expect_err("cancelled");
         assert_eq!(e.msg, "cancelled");
         assert!(!d.join("partial.bin").exists(), "a half-written destination is not a result");
@@ -280,6 +281,7 @@ mod tests {
                     .collect();
             }
         };
+        d.assert_contains(&clone);
         let e = copy_any(&src, &clone, &mut quiet(&flag, &mut sink)).expect_err("cancelled");
         assert_eq!(e.msg, "cancelled");
         assert_eq!(

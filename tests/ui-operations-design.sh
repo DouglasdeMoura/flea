@@ -54,9 +54,10 @@ operations_missing_footer() {
 }
 
 operations_loading_footer() (
-    local permissions_listing="$1" total="$2" operations_stopped="" pid end state
+    local permissions_listing="$1" total="$2" destination="$3" operations_stopped="" pid end state
     local -a pids
     menus_guard "$permissions_listing"
+    menus_guard "$destination"
     mapfile -t pids < <(backend_pids)
     [[ "${#pids[@]}" == 1 ]] || fail "operations: loading proof requires one owned backend"
     pid="${pids[0]}"
@@ -72,11 +73,13 @@ operations_loading_footer() (
         sleep 0.05
     done
     [[ "$state" == T* ]] || fail "operations: listing backend did not stop"
-    key -M ctrl -k l -m ctrl "$permissions_listing" -k Return >/dev/null
+    key -M ctrl -k l -m ctrl "$destination" -k Return >/dev/null
     menus_expect statusFooterState '.listingState == "loading" and .filesystem != "" and (.countsLeft | not) and .left.visible and .left.width > 0 and .left.text == .path and (.selection.visible | not)' "native refresh preserves its path while the backend cannot reply"
     shot operations-loading-footer
     permissions_resume_stopped "$operations_stopped" || fail "operations: listing backend could not resume"
     operations_stopped=""
+    wait_listing 1
+    key -M ctrl -k l -m ctrl "$permissions_listing" -k Return >/dev/null
     wait_listing "$total"
     operations_idle_footer "$total" 0 "resumed listing restores idle counts and filesystem"
 )
@@ -105,7 +108,7 @@ operations_mixed() {
     permissions_viewport 920 600
     operations_secondary "" "no retry claim exists before an attributed failure"
     operations_idle_footer 5 0 "idle footer shows all five items and actual filesystem"
-    operations_loading_footer "$source" 5
+    operations_loading_footer "$source" 5 "$destination" || fail "operations: paused navigation proof failed"
     key v >/dev/null
     operations_idle_footer 5 1 "native selection adds the separate one-selected label"
     shot operations-idle-selected
@@ -168,60 +171,174 @@ operations_mixed() {
     kill_flea
 }
 
+operations_copy_gate() {
+    python3 - "$1" "$flea_bin" "$3" "$XDG_STATE_HOME" "$menu_box" "$2" "$operations_bytes" 3<&0 <<'PY'
+import ctypes, json, os, select, signal, stat, struct, sys, time
+from pathlib import Path
+
+pid = int(sys.argv[1])
+binary, source, state_home, root, destination = map(Path, sys.argv[2:7])
+total = int(sys.argv[7])
+timeout_seconds = 15
+
+def guard(path):
+    if not path.is_absolute() or not root.is_absolute() or root.resolve() != root or not (root / ".flea-test-sandbox").is_file():
+        raise RuntimeError(f"operations: copy gate needs an absolute owned sandbox: {path}")
+    if path.resolve() == root or not path.resolve().is_relative_to(root):
+        raise RuntimeError(f"operations: copy gate path escaped its sandbox: {path}")
+    return path
+
+for path in (source, state_home, destination):
+    guard(path)
+partial = guard(destination / "a-large.bin")
+later = guard(destination / "b-after.txt")
+if os.path.lexists(partial) or os.path.lexists(later):
+    raise RuntimeError("operations: copy gate destination is not empty")
+
+process = Path("/proc", str(pid))
+pidfd = os.pidfd_open(pid)
+watchfd = None
+stopped = False
+commands = os.fdopen(3)
+def interrupted(number, frame):
+    raise RuntimeError(f"operations: copy gate interrupted by signal {number}")
+
+try:
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    # Sample argv: /owned/target/release/flea NUL --backend NUL.
+    argv = (process / "cmdline").read_bytes().rstrip(b"\0").split(b"\0")
+    # Sample environment entry: FLEA_PATH=/tmp/owned/cancel-source NUL.
+    environment = dict(item.split(b"=", 1) for item in (process / "environ").read_bytes().split(b"\0") if b"=" in item)
+    expected = {b"FLEA_BIN": os.fsencode(binary), b"FLEA_PATH": os.fsencode(source), b"XDG_STATE_HOME": os.fsencode(state_home)}
+    if process.stat().st_uid != os.getuid() or (process / "exe").resolve() != binary.resolve() or argv != [os.fsencode(binary), b"--backend"] or any(environment.get(key) != value for key, value in expected.items()):
+        raise RuntimeError(f"operations: copy gate backend {pid} ownership differs")
+    if select.select([pidfd], [], [], 0)[0]:
+        raise RuntimeError(f"operations: copy gate backend {pid} already exited")
+    libc = ctypes.CDLL(None, use_errno=True)
+    watchfd = libc.inotify_init1(os.O_CLOEXEC | os.O_NONBLOCK)
+    if watchfd < 0:
+        raise OSError(ctypes.get_errno(), "operations: inotify_init1 failed")
+    create_mask, overflow_mask = 0x100, 0x4000
+    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    watched = libc.inotify_add_watch(watchfd, os.fsencode(destination), create_mask)
+    if watched < 0:
+        raise OSError(ctypes.get_errno(), f"operations: cannot watch {destination}")
+    print(json.dumps({"state": "armed", "pid": pid, "destination": str(destination)}), flush=True)
+    deadline = time.monotonic() + timeout_seconds
+    while not stopped:
+        ready, _, _ = select.select([watchfd, commands, pidfd], [], [], max(0, deadline - time.monotonic()))
+        if not ready:
+            raise RuntimeError("operations: real copy did not create its destination before the gate timeout")
+        if commands in ready:
+            if commands.readline() == "":
+                raise SystemExit(0)
+            raise RuntimeError("operations: copy gate received a command before the real copy began")
+        if pidfd in ready:
+            raise RuntimeError("operations: backend exited before the real copy began")
+        # Sample inotify event: wd:i32, mask:u32, cookie:u32, name_len:u32, NUL-padded filename.
+        events = os.read(watchfd, 4096)
+        offset = 0
+        while offset < len(events):
+            watch, mask, _, length = struct.unpack_from("iIII", events, offset)
+            offset += struct.calcsize("iIII")
+            name = events[offset:offset + length].rstrip(b"\0")
+            offset += length
+            if mask & overflow_mask:
+                raise RuntimeError("operations: copy gate lost inotify events")
+            if watch == watched and mask & create_mask and name == os.fsencode(partial.name):
+                stopped = True
+                signal.pidfd_send_signal(pidfd, signal.SIGSTOP)
+                break
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        # Sample task status line: State: T (stopped); every thread must have reached the stop.
+        states = [next(line.split()[1] for line in task.read_text().splitlines() if line.startswith("State:")) for task in (process / "task").glob("*/status")]
+        if states and all(state == "T" for state in states):
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError("operations: copy backend did not stop all threads")
+        time.sleep(0.01)
+    metadata = partial.lstat()
+    if not stat.S_ISREG(metadata.st_mode) or not 0 <= metadata.st_size < total or os.path.lexists(later):
+        raise RuntimeError(f"operations: copy completed before interruption; partial bytes={metadata.st_size}, total={total}")
+    print(json.dumps({"state": "stopped", "pid": pid, "bytes": metadata.st_size, "total": total, "threads": len(states)}), flush=True)
+    ready, _, _ = select.select([commands, pidfd], [], [], timeout_seconds)
+    if pidfd in ready:
+        raise RuntimeError("operations: interrupted backend exited before cancellation resumed it")
+    if commands not in ready:
+        raise RuntimeError("operations: native cancellation did not release the copy gate")
+    command = commands.readline()
+    if command not in ("resume\n", ""):
+        raise RuntimeError(f"operations: unknown copy gate command: {command!r}")
+finally:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if stopped:
+        try:
+            signal.pidfd_send_signal(pidfd, signal.SIGCONT)
+        except ProcessLookupError:
+            pass
+    if watchfd is not None and watchfd >= 0:
+        os.close(watchfd)
+    os.close(pidfd)
+PY
+}
+
+operations_close_gate() {
+    local result=0
+    if [[ -n "$gate_input" ]]; then exec {gate_input}>&-; gate_input=""; fi
+    if [[ -n "$gate_pid" ]]; then wait "$gate_pid" || result=1; gate_pid=""; fi
+    if [[ -n "$gate_output" ]]; then exec {gate_output}<&-; gate_output=""; fi
+    return "$result"
+}
+
 operations_cancel() (
-    local variant="$1" source="$menu_box/cancel-source" destination="$menu_box/cancel-$1"
-    local permissions_listing="$source" operations_stopped="" pid ui_pid state end
+    local source="$menu_box/cancel-source" destination="$menu_box/cancel-interrupted"
+    local permissions_listing="$source" pid gate_pid="" gate_input="" gate_output="" receipt
     local -a pids
     menus_guard "$destination"
-    mkdir "$destination"
+    mkdir "$destination" || fail "operations: cancellation destination could not be created"
     launch "$source"
     wait_listing 2
     permissions_viewport 920 600
     hotkey --global ctrl a flea >/dev/null
-    menus_expect selectionCount '. == 2' "$variant cancellation selects two real files"
+    menus_expect selectionCount '. == 2' "interrupted cancellation selects two real files"
+    mapfile -t pids < <(backend_pids)
+    [[ "${#pids[@]}" == 1 ]] || fail "operations: cancellation needs one owned backend"
+    pid="${pids[0]}"
+    permissions_backend_owned "$pid" || fail "operations: backend executable, fixture or session identity differs"
+    coproc OPERATIONS_GATE { operations_copy_gate "$pid" "$destination" "$source"; }
+    gate_pid="$OPERATIONS_GATE_PID" gate_input="${OPERATIONS_GATE[1]}" gate_output="${OPERATIONS_GATE[0]}"
+    trap 'operations_close_gate || { printf "FAIL: operations: copy gate teardown failed\n" >&2; exit 1; }' EXIT
+    read -r -t 15 -u "$gate_output" receipt || fail "operations: copy gate did not arm"
+    jq -e '.state == "armed"' <<< "$receipt" >/dev/null || fail "operations: invalid copy gate readiness: $receipt"
+    printf 'OPERATIONS_GATE %s\n' "$receipt"
     operations_copy_to "$destination"
-    menus_expect statusActivityState '.activities[0].running and .cancel.enabled' "$variant transfer is running through the actual copy path"
-    operations_path_footer "$variant transfer"
-    if [[ "$variant" == paused ]]; then
-        ui_pid=$(flea_pid)
-        mapfile -t pids < <(pgrep -P "$ui_pid" -x flea)
-        [[ "${#pids[@]}" == 1 ]] || fail "operations: paused test needs one owned backend child"
-        pid="${pids[0]}"
-        permissions_backend_owned "$pid" || fail "operations: backend executable, fixture or session identity differs"
-        operations_stopped="$pid"
-        trap 'permissions_resume_stopped "$operations_stopped"' EXIT
-        kill -STOP "$pid" || fail "operations: owned backend could not pause"
-        end=$((SECONDS + 15))
-        while (( SECONDS < end )); do
-            # Sample process state: Tsl; its leading T proves the owned backend stopped.
-            state=$(ps -o stat= -p "$pid") || fail "operations: paused backend disappeared"
-            [[ "$state" == T* ]] && break
-            sleep 0.05
-        done
-        [[ "$state" == T* ]] || fail "operations: owned backend did not stop"
-        menus_expect statusActivityState '.activities[0].running and .cancel.enabled' "paused transfer remains cancellable"
-        key -k Escape >/dev/null
-        menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "Escape leaves the named transfer running"
-        shot operations-transfer-paused
-    fi
+    read -r -t 15 -u "$gate_output" receipt || fail "operations: real copy was not interrupted"
+    jq -e '.state == "stopped" and .bytes < .total and .threads > 0' <<< "$receipt" >/dev/null || fail "operations: invalid interruption receipt: $receipt"
+    printf 'OPERATIONS_GATE %s\n' "$receipt"
+    menus_expect statusActivityState '.activities[0].running and .cancel.enabled' "real in-flight transfer remains cancellable while interrupted"
+    operations_path_footer "interrupted transfer"
+    key -k Escape >/dev/null
+    menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "Escape leaves the named transfer running"
+    shot operations-transfer-paused
     menus_guard "$destination/a-large.bin"
     menus_guard "$destination/b-after.txt"
     operations_status_control cancel
-    if [[ "$variant" == paused ]]; then
-        menus_expect statusActivityState '.activities[0].cancelling and .cancel.visible and (.cancel.enabled | not)' "Cancel disables immediately while the backend is interrupted"
-        operations_path_footer "pending cancellation"
-        operations_status_control cancel
-        menus_expect statusActivityState '.activities[0].cancelling and (.cancel.enabled | not)' "repeated pointer Cancel cannot resubmit"
-        shot operations-cancelling
-        permissions_resume_stopped "$operations_stopped" || fail "operations: owned backend did not resume"
-        operations_stopped=""
-    fi
-    menus_expect statusActivityState '(.activities | length) == 0 and .errors == 0 and (.notice | contains("Copied 0 of 2") and contains("2 skipped") and contains("cancelled") and (contains("failed") | not))' "$variant cancellation reports skipped work without a false write error"
+    menus_expect statusActivityState '.activities[0].cancelling and .cancel.visible and (.cancel.enabled | not)' "Cancel disables immediately while the backend is interrupted"
+    operations_path_footer "pending cancellation"
+    operations_status_control cancel
+    menus_expect statusActivityState '.activities[0].cancelling and (.cancel.enabled | not)' "repeated pointer Cancel cannot resubmit"
+    shot operations-cancelling
+    printf 'resume\n' >&"$gate_input" || fail "operations: copy gate could not resume the owned backend"
+    operations_close_gate || fail "operations: interrupted copy gate failed"
+    menus_expect statusActivityState '(.activities | length) == 0 and .errors == 0 and (.notice | contains("Copied 0 of 2") and contains("2 skipped") and contains("cancelled") and (contains("failed") | not))' "interrupted cancellation reports skipped work without a false write error"
     [[ ! -e "$destination/a-large.bin" && ! -e "$destination/b-after.txt" ]] || fail "operations: cancellation retained a partial copy or started a later item"
     [[ "$(stat -c '%s' "$source/a-large.bin")" == "$operations_bytes" && "$(cat "$source/b-after.txt")" == 'after cancellation' ]] \
         || fail "operations: cancellation changed source data"
-    shot "operations-cancelled-$variant"
-    printf 'OPERATIONS_CANCEL variant=%s native=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok\n' "$variant"
+    shot operations-cancelled-interrupted
+    printf 'OPERATIONS_CANCEL variant=interrupted native=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok unpaused_live=not_run\n'
     kill_flea
 )
 
@@ -235,14 +352,13 @@ case_operationsdesign() (
     for path in state config cache data cancel-source; do menus_guard "$menu_box/$path"; mkdir "$menu_box/$path"; done
     export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config" XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
     "$flea_bin" --ui-state '{"view":"list","keys":"default","menu":{"hidden":[]}}' >/dev/null || fail "operations: fixture settings failed"
-    operations_missing_footer
-    operations_mixed
+    operations_missing_footer || fail "operations: missing-filesystem proof failed"
+    operations_mixed || fail "operations: mixed-outcome proof failed"
     menus_guard "$menu_box/cancel-source/a-large.bin"
     truncate -s "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
     menus_guard "$menu_box/cancel-source/b-after.txt"
     printf 'after cancellation\n' > "$menu_box/cancel-source/b-after.txt"
     printf 'OPERATIONS_WORKLOAD bytes=%s source=%q\n' "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
-    operations_cancel live
-    operations_cancel paused
-    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok live_cancel=ok interrupted_cancel=ok\n'
+    operations_cancel || fail "operations: interrupted cancellation proof failed"
+    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok interrupted_cancel=ok unpaused_live=not_run\n'
 )

@@ -179,11 +179,7 @@ pub fn request(m: &mut Model, wire: &mut super::wire::Wire) -> std::io::Result<(
     Ok(())
 }
 pub fn layout(m: &mut Model) {
-    let columns = if m.quicklook {
-        m.columns
-    } else {
-        super::render::panes(m.columns, m.preview_visible).2
-    };
+    let columns = if m.quicklook || m.preview_visible { super::render::preview_area(m.columns, m.quicklook).1 } else { 0 };
     let changed = m.preview_width != columns || m.preview_layout_generation != m.preview_generation;
     if !changed
         && m.preview_layout_scroll == m.preview_scroll

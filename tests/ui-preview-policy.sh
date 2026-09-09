@@ -109,7 +109,7 @@ case_thumbnailpolicy() (
         menus_guard "$menu_box/sources/image.png"
         magick -size 64x48 xc:steelblue "$menu_box/sources/image.png" || fail "thumbnailpolicy: image creation failed"
         menus_guard "$menu_box/sources/video.mp4"
-        ffmpeg -nostdin -v error -f lavfi -i 'testsrc2=size=64x48:rate=2' -t 1 -pix_fmt yuv420p "$menu_box/sources/video.mp4" \
+        ffmpeg -nostdin -v error -f lavfi -i 'testsrc2=size=64x48:rate=24' -t 1 -pix_fmt yuv420p "$menu_box/sources/video.mp4" \
             || fail "thumbnailpolicy: video creation failed"
         menus_guard "$menu_box/listing/a-ready.png"
         cp "$menu_box/sources/image.png" "$menu_box/listing/a-ready.png" || fail "thumbnailpolicy: warm image setup failed"

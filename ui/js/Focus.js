@@ -31,6 +31,11 @@ function shareBrowserHere(root) {
 function lookup(event, root) {
     var context = root.preview.active ? (root.preview.isPdf ? "pdf" : root.preview.isMedia ? "media" : "preview")
                   : shareBrowserHere(root) ? "menu" : root.focusView === RAIL ? "rail" : "listing"
+    // Grid arrows address visual neighbours even when the preset uses them to open folders in List.
+    if (context === "listing" && root.viewMode === "grid" && event.modifiers === Qt.NoModifier) {
+        if (event.key === Qt.Key_Left) return "cursorLeft"
+        if (event.key === Qt.Key_Right) return "cursorRight"
+    }
     var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
     // Only the bare a is rail-only; Ctrl+K is scoped to neither view and opens the dialog anywhere.
     if (action === "addNetwork" && root.focusView !== RAIL && !(event.modifiers & Qt.ControlModifier))

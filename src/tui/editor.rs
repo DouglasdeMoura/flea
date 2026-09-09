@@ -154,6 +154,7 @@ impl Editor {
         columns: usize,
         base: &str,
         muted: &str,
+        accent: &str,
     ) -> String {
         let prefix = render::fit(prefix, render::text_width(prefix).min(columns));
         let available = columns.saturating_sub(render::text_width(&prefix));
@@ -163,13 +164,13 @@ impl Editor {
         {
             first += self.value[first..].chars().next().map_or(0, char::len_utf8);
         }
-        let mut out = prefix;
+        let mut out = if self.kind == "path" { format!("{accent}{prefix}{base}") } else { prefix };
         let mut used = 0;
         let (start, end) = (self.cursor.min(self.anchor), self.cursor.max(self.anchor));
         for (offset, c) in self.value[first..].char_indices() {
             let offset = first + offset;
             if offset == self.cursor && start == end && used < available {
-                out.push('▏');
+                out.push_str(&format!("{accent}▏{base}"));
                 used += 1;
             }
             let cells = render::text_width(&c.to_string());
@@ -188,7 +189,7 @@ impl Editor {
             used += cells;
         }
         if self.cursor == self.value.len() && start == end && used < available {
-            out.push('▏');
+            out.push_str(&format!("{accent}▏{base}"));
             used += 1;
         }
         out.push_str(muted);
@@ -207,6 +208,12 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+    #[test]
+    fn path_prompt_and_caret_use_accent_without_coloring_typed_text() {
+        let editor = Editor::new("path", "am".into(), "/".into());
+        assert_eq!(editor.line(": ", "ber/", 12, "BASE", "MUTED", "ACCENT"),
+            "ACCENT: BASEamACCENT▏BASEMUTEDber/   BASE");
+    }
     #[test]
     fn rename_preserves_extension_unicode_and_changed_identity() {
         let sandbox = TestDir::new("tui-editor");

@@ -82,7 +82,7 @@ convert_backend_death() {
 }
 
 case_convertdesign() (
-    local menu_box menus_checks=0 permissions_listing convert_stopped="" path source jpeg webp contents state pid ui_pid request format cx cy wx wy ww wh
+    local menu_box menus_checks=0 permissions_listing convert_stopped="" path source jpeg webp contents state pid ui_pid request format cx cy wx wy ww wh row_width before_motion after_motion
     local -a pids
     sandbox_require "$fixture_root"
     menu_box=$(mktemp -d "$fixture_root/convert-design.XXXXXXXX") || fail "convert: fixture creation failed"
@@ -116,6 +116,7 @@ case_convertdesign() (
     menus_expect convertState '.opened and .collision and (.busy | not)' 'disabled Convert cannot activate'
     request=$(ipc convertState | jq -er .requestId)
     read -r cx cy < <(ipc convertState | jq -er '.formats[] | select(.name == "webp") | .centre')
+    row_width=$(ipc convertState | jq -er '.formats[] | select(.name == "webp") | .rect | split(" ")[2] | tonumber')
     read -r wx wy ww wh < <(window_box)
     (( cx > 1 && cy > 0 && cx < ww && cy < wh )) || fail "convert: hover target is outside the owned viewport"
     assert_focus
@@ -123,13 +124,17 @@ case_convertdesign() (
     convert_pointer_state before-warp
     omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null || fail "convert: hover entry failed"
     convert_pointer_state after-warp
-    # A compositor warp sends no Qt pointer frame; two real moves arm entry, then select the row.
+    # A compositor warp needs a native frame; the second position stays inside the measured row.
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1 \
         || fail "convert: native hover entry failed"
     settle
     convert_pointer_state after-entry
+    before_motion=$(hyprctl cursorpos -j | jq -c '{x,y}') || fail "convert: cannot observe resting pointer"
+    omarchy-drive move "$((wx + cx + row_width / 4))" "$((wy + cy))" >/dev/null || fail "convert: within-row motion failed"
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1 \
         || fail "convert: actual pointer movement failed"
+    after_motion=$(hyprctl cursorpos -j | jq -c '{x,y}') || fail "convert: cannot observe moved pointer"
+    [[ "$after_motion" != "$before_motion" ]] || fail "convert: native pointer did not move"
     convert_pointer_state after-motion
     menus_expect convertState ".requestId == $request and .format == \"jpg\" and .collision and any(.formats[]; .name == \"webp\" and .current and (.selected | not))" 'actual pointer motion highlights a format without changing the draft or probing'
     key -k Up >/dev/null
