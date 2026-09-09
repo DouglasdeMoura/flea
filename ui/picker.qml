@@ -395,8 +395,8 @@ ShellRoot {
                 picker: win
                 onCancelRequested: win.cancel()
                 onAcceptRequested: win.accept()
-                onBackRequested: win.goBack()
-                onUpRequested: win.goUp()
+                onBackRequested: { list.forceActiveFocus(); win.goBack() }
+                onUpRequested: { list.forceActiveFocus(); win.goUp() }
                 onChipChosen: function (index) { win.filterIndex = index }
             }
 

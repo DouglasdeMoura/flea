@@ -189,10 +189,25 @@ class Native:
         self.wait("pty-input-" + str(self.checks), lambda: (self.case / "input.bin").stat().st_size > before)
 
     def chord(self, key, *modifiers):
-        self.identity()
-        before = (self.case / "input.bin").stat().st_size
-        self.drive("hotkey", "+".join(modifiers) or "none", key.lower() if len(key) == 1 else key, self.address)
-        self.wait("pty-input-" + str(self.checks), lambda: (self.case / "input.bin").stat().st_size > before)
+        if modifiers == ("shift",) and len(key) == 1:
+            self.identity()
+            self.drive("focus", self.address)
+            active = json.loads(command(["hyprctl", "activewindow", "-j"]))
+            if active.get("address") != self.address or not self.owned_process(active.get("pid", 0)):
+                raise RuntimeError("shifted terminal input requires the owned window to hold focus")
+            before = (self.case / "input.bin").stat().st_size
+            self.drive("hotkey", "--global", "shift", key.lower())
+            self.wait("pty-shift-" + key, lambda: (self.case / "input.bin").stat().st_size > before)
+            if (self.case / "input.bin").read_bytes()[before:] != key.upper().encode():
+                raise RuntimeError("native Shift chord did not reach the PTY as the expected uppercase byte")
+            return
+        args = []
+        for modifier in modifiers:
+            args.extend(["-M", modifier])
+        args.extend(["-k", key])
+        for modifier in reversed(modifiers):
+            args.extend(["-m", modifier])
+        self.key(*args)
 
     def cursor_is(self, name):
         # The listing cursor is reverse video; marked rows use a background without reverse video.
