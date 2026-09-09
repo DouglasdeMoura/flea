@@ -1,5 +1,5 @@
 // The operations request layer: the response lines, and the one thread an operation runs on.
-use crate::backend::copyfile::{copy_any, move_any, Progress};
+use crate::backend::copyfile::{copy_any, move_any, remove_any, Progress};
 use crate::backend::ops;
 use crate::backend::trash;
 use crate::backend::undo::{Entry, Step};
@@ -20,6 +20,9 @@ pub enum OpMsg {
     Item { id: usize, index: usize, name: String, ok: bool, err: String },
     TransferDone { id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool, entry: Entry },
     Trashed { ok: usize, failed: usize, entry: Entry },
+    // The delete's terminal line: counts only, and no entry, because a permanent delete is the one
+    // operation no Step shape can reverse.
+    Deleted { ok: usize, failed: usize },
     Duplicated { ok: bool, path: String, err: String, entry: Entry },
     // Not an operation: meta rides this channel because a media probe is a subprocess and the loop
     // must not wait on one. Nothing about it claims the one-at-a-time slot.
@@ -63,6 +66,10 @@ pub fn transferdone_line(id: usize, ok: usize, failed: usize, skipped: usize, ca
 
 pub fn trashed_line(ok: usize, failed: usize) -> String {
     format!(r#"{{"t":"trashed","ok":{},"failed":{}}}"#, ok, failed)
+}
+
+pub fn deleted_line(ok: usize, failed: usize) -> String {
+    format!(r#"{{"t":"deleted","ok":{},"failed":{}}}"#, ok, failed)
 }
 
 pub fn renamed_line(ok: bool, path: &str) -> String {
@@ -218,6 +225,24 @@ pub fn run_trash(paths: Vec<String>, tx: Sender<OpMsg>) {
     let steps = entries.into_iter().map(Step::Trashed).collect();
     let entry = Entry { op: "trash".to_string(), steps };
     let _ = tx.send(OpMsg::Trashed { ok, failed, entry });
+}
+
+// The severe sibling of run_trash: every path comes straight off the disk, the trash never sees
+// it, and nothing is journaled, because there is nothing to restore. Which paths actually went is
+// read off the filesystem afterwards, the same way trash reads its own, so a path still present
+// afterwards is the one failure and one already gone is the state the request was asking for.
+pub fn run_delete(paths: Vec<String>, tx: Sender<OpMsg>) {
+    let (mut ok, mut failed) = (0usize, 0usize);
+    for raw in paths.iter() {
+        let p = PathBuf::from(raw);
+        let _ = remove_any(&p);
+        if p.symlink_metadata().is_ok() {
+            failed += 1;
+        } else {
+            ok += 1;
+        }
+    }
+    let _ = tx.send(OpMsg::Deleted { ok, failed });
 }
 
 pub fn run_duplicate(path: String, tx: Sender<OpMsg>) {

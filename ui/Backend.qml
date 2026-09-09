@@ -22,6 +22,9 @@ Item {
     signal transferItem(int id, int index, string name, bool ok, string err)
     signal transferDone(int id, int ok, int failed, int skipped, bool cancelled)
     signal trashed(int ok, int failed)
+    // Shift+Delete's own write: the one operation nothing reverses, so the status line this feeds
+    // must not offer an undo.
+    signal deleted(int ok, int failed)
     signal renamed(bool ok, string path)
     signal made(bool ok, string path)
     signal duplicated(bool ok, string path)
@@ -138,6 +141,15 @@ Item {
         root.send({ c: "trash", rows: rows })
     }
 
+    // Rows, not paths, for the same reason trash names rows: the backend resolves them against the
+    // listing it still holds. Named del because delete is a JavaScript keyword.
+    function del(rows) {
+        if (rows.length === 0) {
+            return
+        }
+        root.send({ c: "delete", rows: rows })
+    }
+
     function rename(path, to) {
         root.send({ c: "rename", path: path, to: to })
     }
@@ -252,6 +264,7 @@ Item {
     // Sample input: {"t":"transferitem","id":12,"index":1,"name":"photos","ok":false,"err":"permission denied"}
     // Sample input: {"t":"transferdone","id":12,"ok":1,"failed":1,"skipped":0,"cancelled":false}
     // Sample input: {"t":"trashed","ok":1,"failed":0}
+    // Sample input: {"t":"deleted","ok":1,"failed":0}
     // Sample input: {"t":"made","ok":true,"path":"/home/gm/Pictures/New Folder"}
     // Sample input: {"t":"undone","op":"move","ok":true}
     function receive(line) {
@@ -291,6 +304,8 @@ Item {
             root.transferDone(message.id, message.ok, message.failed, message.skipped, message.cancelled)
         } else if (message.t === "trashed") {
             root.trashed(message.ok, message.failed)
+        } else if (message.t === "deleted") {
+            root.deleted(message.ok, message.failed)
         } else if (message.t === "renamed") {
             root.renamed(message.ok, message.path)
         } else if (message.t === "made") {

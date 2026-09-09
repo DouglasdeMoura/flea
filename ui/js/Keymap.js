@@ -87,6 +87,7 @@ function lookup(key, text, modifiers) {
     if (modifiers & Qt.ShiftModifier) {
         if (key === Qt.Key_Down) return "extendDown"
         if (key === Qt.Key_Up) return "extendUp"
+        if (key === Qt.Key_Delete) return "delete"
     }
 
     switch (key) {

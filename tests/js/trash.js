@@ -1,21 +1,26 @@
 .import "../../ui/js/Trash.js" as Trash
 .import "../../ui/js/Ops.js" as Ops
 
-// The dd pair, issue 7. A single d used to trash and sat among the letters a name is typed with, so
-// the third keystroke of "Vid" trashed the row. These drive Trash.arm directly, because the stamp
-// and the window are the whole of the policy and neither needs a window to be true.
+// The dd pair, issue 7, and the permanent delete beside it. A single d used to trash and sat among
+// the letters a name is typed with, so the third keystroke of "Vid" trashed the row. These drive
+// Trash.arm and Trash.del directly, because the stamp and the window are the whole of the policy
+// and neither needs a window to be true.
 
-// What Ops.trash reaches for, plus the stamp Trash.arm reads and writes.
+// What Ops.trash and Trash.del reach for, plus the stamp Trash.arm reads and writes.
 function pane() {
     var p = {
         trashArmedAt: 0,
         cursorIndex: 3,
         trashedIdx: [],
+        deletedIdx: [],
         said: "",
         selectedIndices: function () { return [] }
     }
     p.message = function (text, isError) { p.said = text }
-    p.backend = { trash: function (idx) { p.trashedIdx = idx } }
+    p.backend = {
+        trash: function (idx) { p.trashedIdx = idx },
+        del: function (idx) { p.deletedIdx = idx }
+    }
     return p
 }
 
@@ -51,4 +56,28 @@ function run(check) {
     picked.trashArmedAt = Date.now()
     Trash.arm(picked)
     check("the pair trashes the selection when there is one", picked.trashedIdx.join(","), "1,4")
+
+    // Shift+Delete goes through the same target rule with no arming step, because a chord is
+    // deliberate by construction; it sends the backend's delete, never the trash.
+    var permanent = pane()
+    Trash.del(permanent)
+    check("Shift+Delete sends the cursor row on one press, with no arming", permanent.deletedIdx.join(","), "3")
+    check("and it trashed nothing on the way", permanent.trashedIdx.length, 0)
+    check("and it leaves no arm behind it either", permanent.trashArmedAt, 0)
+
+    var pickedDel = pane()
+    pickedDel.selectedIndices = function () { return [1, 4] }
+    Trash.del(pickedDel)
+    check("the selection wins for the delete, as it does for the trash", pickedDel.deletedIdx.join(","), "1,4")
+
+    // The deleted line is trashed's shape with "permanently" where the undo hint goes, so the two
+    // can never be confused at a glance.
+    check("a delete says permanently, where trash offers the undo", Trash.deleted(4, 0),
+          "Deleted 4 items permanently.")
+    check("a partly failed delete reports both halves", Trash.deleted(3, 1),
+          "Deleted 3 items permanently, 1 failed.")
+    check("a delete that failed outright offers neither undo nor a plural of nothing", Trash.deleted(0, 1),
+          "That item could not be deleted.")
+    check("and its failure plural walks like trash's", Trash.deleted(0, 2),
+          "2 items could not be deleted.")
 }

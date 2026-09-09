@@ -101,7 +101,8 @@ key = "Period"
 action = "toggleHidden"
 
 # Shift falls through instead of returning, because shift-modified letters already carry their
-# own capital text (see G below); this table only covers the arrow keys, which carry no text.
+# own capital text (see G below); this table only covers the keys that carry no text: the arrows
+# extend the selection, and Delete below deletes for good.
 # The preset overlay, the four-value chooser the Keys settings section walks: default, vim, mac and
 # windows, in SettingsKeys.html's own order. It is consulted before every table above, so a preset
 # can claim a chord the shared tables also bind, and a chord listed here is live only while its own
@@ -267,6 +268,15 @@ action = "extendDown"
 [[shift]]
 key = "Up"
 action = "extendUp"
+
+# The file manager's own severe chord beside Delete's trash: the rows go straight off the disk, the
+# trash never sees them, and no journal entry records them, because there is nothing to restore.
+# ui/js/Trash.js carries the action and a status line without the z-undoes hint. No preset overlay
+# can take it, because every [[preset]] row carries ctrl and the overlay only fires on a ctrl chord;
+# mac's ctrl-delete stays the trash beside it, which is Finder's own Cmd+Delete.
+[[shift]]
+key = "Delete"
+action = "delete"
 
 # Bindings on the key code, for the keys that carry no printable character.
 [[code]]

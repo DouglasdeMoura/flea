@@ -1,9 +1,9 @@
-// Dispatch for the five write operations: one runs at a time, because the status bar has one sticky slot for it.
+// Dispatch for the six write operations: one runs at a time, because the status bar has one sticky slot for it.
 use crate::backend::ops;
 use crate::backend::opsreq::{
-    duplicated_line, made_line, op_err, renamed_line, run_duplicate, run_transfer, run_trash, trashed_line,
-    transferdone_line, transferitem_line, transferprogress_line, transferstarted_line, undone_line, usable_dest,
-    OpMsg,
+    deleted_line, duplicated_line, made_line, op_err, renamed_line, run_delete, run_duplicate, run_transfer, run_trash,
+    trashed_line, transferdone_line, transferitem_line, transferprogress_line, transferstarted_line, undone_line,
+    usable_dest, OpMsg,
 };
 use crate::backend::listing::Listing;
 use crate::backend::proto::error_line;
@@ -108,6 +108,19 @@ pub(crate) fn start_trash(out: &mut impl Write, ops: &mut Ops, paths: Vec<String
     thread::spawn(move || run_trash(paths, tx));
 }
 
+// The delete takes the same one-at-a-time slot trash does, because remove_dir_all over a large
+// tree is exactly the unbounded work the slot exists to serialise. Unlike trash it journals
+// nothing: there is no Step shape that can put a permanently removed path back.
+pub(crate) fn start_delete(out: &mut impl Write, ops: &mut Ops, paths: Vec<String>) {
+    if ops.running.is_some() {
+        busy(out, "delete");
+        return;
+    }
+    ops.claim();
+    let tx = ops.tx.clone();
+    thread::spawn(move || run_delete(paths, tx));
+}
+
 pub(crate) fn start_duplicate(out: &mut impl Write, ops: &mut Ops, path: &str) {
     if ops.running.is_some() {
         busy(out, "duplicate");
@@ -173,6 +186,12 @@ pub(crate) fn report_op(out: &mut impl Write, ops: &mut Ops, msg: OpMsg) {
             ops.journal.push(entry);
             ops.running = None;
             writeln!(out, "{}", trashed_line(ok, failed)).ok();
+        }
+        // No journal push: the paths are off the disk, so an undo after a delete must undo the
+        // operation before it, and the status line the client builds carries no undo hint.
+        OpMsg::Deleted { ok, failed } => {
+            ops.running = None;
+            writeln!(out, "{}", deleted_line(ok, failed)).ok();
         }
         // Meta never claims the operation slot, so it does not clear it either.
         OpMsg::Meta { line } => {
@@ -357,5 +376,21 @@ mod tests {
         assert!(text(&buf).contains(r#""t":"error","where":"mkdir""#), "the refusal is an error line, not a silent no-op");
         assert!(o.journal.is_empty(), "a folder that was not made must not be undoable");
         assert_eq!(std::fs::read_to_string(d.join("taken")).unwrap(), "t");
+    }
+
+    #[test]
+    fn a_delete_takes_the_slot_and_its_terminal_message_clears_it_without_journaling() {
+        let d = TestDir::new("dispatchdelete");
+        let mut o = ops();
+        o.claim();
+        let mut buf = out();
+        start_delete(&mut buf, &mut o, vec![d.file("gone.txt", "g").to_string_lossy().to_string()]);
+        assert!(text(&buf).contains("an operation is already running"), "{}", text(&buf));
+        assert!(d.join("gone.txt").exists(), "the refused delete touched nothing");
+        let mut buf = out();
+        report_op(&mut buf, &mut o, OpMsg::Deleted { ok: 1, failed: 0 });
+        assert!(o.running.is_none(), "the cap would otherwise refuse every operation for the rest of the session");
+        assert!(o.journal.is_empty(), "nothing is journaled, because nothing can be restored");
+        assert_eq!(text(&buf).trim(), r#"{"t":"deleted","ok":1,"failed":0}"#);
     }
 }

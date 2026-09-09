@@ -151,7 +151,7 @@ Press **?** for the full keymap, or **,** to change settings.
 | Quick Look | `Space` |
 | Select / extend selection | `v` / `Shift` + arrows |
 | Copy / cut / paste | `y` `x` `p`, or `Ctrl+C` `Ctrl+X` `Ctrl+V` |
-| Rename / trash / undo | `r` or `F2` / `dd` or `Delete` / `z` |
+| Rename / trash / delete / undo | `r` or `F2` / `dd` or `Delete` / `Shift+Delete` / `z` |
 | New folder | `Ctrl+Shift+N` |
 | Search / filter the list | `f` / `/` |
 | Enter a path | `:` or `Ctrl+L` |

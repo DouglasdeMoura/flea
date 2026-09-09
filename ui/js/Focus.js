@@ -105,6 +105,9 @@ function act(action, root) {
     case "duplicate": Ops.duplicate(root); return
     case "trash": Ops.trash(root); return
     case "trashArm": Trash.arm(root); return
+    // Shift+Delete is the one write this table routes that nothing can reverse, which is why its
+    // status line carries no undo hint: Trash.js owns it beside the pair it arms.
+    case "delete": Trash.del(root); return
     case "copy": Ops.clip(root, false); return
     case "copydirpath": root.copyDirPath(); return
     case "cut": Ops.clip(root, true); return

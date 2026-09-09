@@ -286,3 +286,54 @@ fn a_cancelled_transfer_skips_the_rest_and_says_so() {
     assert_eq!((ok, skipped, cancelled), (0, 2, true));
     assert!(!dest.join("a.txt").exists(), "a cancel before the first item copies nothing");
 }
+
+#[test]
+fn a_delete_takes_each_path_off_the_disk_and_counts_what_stayed() {
+    let d = TestDir::new("rundelete");
+    let file = d.file("gone.txt", "body");
+    let tree = d.dir("tree");
+    std::fs::write(tree.join("inside.txt"), "body").unwrap();
+    let target = d.file("target.txt", "the target survives");
+    let link = d.join("link.txt");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let (tx, rx) = channel();
+    run_delete(
+        vec![
+            file.to_string_lossy().to_string(),
+            tree.to_string_lossy().to_string(),
+            link.to_string_lossy().to_string(),
+            d.join("already-gone.txt").to_string_lossy().to_string(),
+        ],
+        tx,
+    );
+    let mut msg = None;
+    for m in rx.iter() {
+        if let OpMsg::Deleted { ok, failed } = m {
+            msg = Some((ok, failed));
+        }
+    }
+    assert_eq!(msg, Some((4, 0)), "a path already gone is the state the request asked for, not a failure");
+    assert!(!file.exists());
+    assert!(!tree.exists(), "a directory goes with everything inside it");
+    assert!(!link.exists(), "a symlink is removed as the link itself");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "the target survives", "the link's target is untouched");
+}
+
+#[test]
+fn a_path_that_cannot_be_removed_is_counted_failed_and_stays() {
+    let d = TestDir::new("rundeletefail");
+    let tree = d.dir("locked");
+    std::fs::write(tree.join("stuck.txt"), "body").unwrap();
+    std::fs::set_permissions(&tree, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let (tx, rx) = channel();
+    run_delete(vec![tree.to_string_lossy().to_string()], tx);
+    let mut msg = None;
+    for m in rx.iter() {
+        if let OpMsg::Deleted { ok, failed } = m {
+            msg = Some((ok, failed));
+        }
+    }
+    std::fs::set_permissions(&tree, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(msg, Some((0, 1)), "a path still on disk afterwards is the failure");
+    assert_eq!(std::fs::read_to_string(tree.join("stuck.txt")).unwrap(), "body");
+}

@@ -4,6 +4,7 @@ import "js/DirSizes.js" as DirSizes
 import "js/Errors.js" as Errors
 import "js/Nav.js" as Nav
 import "js/Ops.js" as Ops
+import "js/Trash.js" as Trash
 import "js/Search.js" as Search
 import "js/Tabs.js" as Tabs
 import "js/Thumbs.js" as Thumbs
@@ -263,6 +264,16 @@ Item {
         function onTrashed(ok, failed) {
             pane.sticky("")
             pane.message(Ops.trashed(ok, failed), ok === 0)
+            pane.clearSelection()
+            pane.refresh("")
+        }
+
+        // The deleted line reads like the trash's, minus the one thing a delete cannot offer: the
+        // refresh is the only thing that can show what it left behind, because nothing is coming
+        // back from the trash.
+        function onDeleted(ok, failed) {
+            pane.sticky("")
+            pane.message(Trash.deleted(ok, failed), ok === 0)
             pane.clearSelection()
             pane.refresh("")
         }

@@ -18,10 +18,13 @@ pub enum Request {
     DirSize { rows: Vec<usize> },
     // Unlike thumbcancel, there is no rows form: it always cancels everything in flight, see docs/protocol.md "dirsizecancel".
     DirSizeCancel,
-    // The five write operations and their cancel, per the operations design's own wire.
+    // The six write operations and their cancel, per the operations design's own wire.
     Transfer { op: String, paths: Vec<String>, rows: Vec<usize>, dest: String },
     TransferCancel { id: usize },
     Trash { paths: Vec<String>, rows: Vec<usize> },
+    // Shift+Delete's own write: the paths go straight off the disk, the trash never sees them, and
+    // no journal entry is recorded, because there is nothing to restore; see docs/protocol.md "delete".
+    Delete { paths: Vec<String>, rows: Vec<usize> },
     Rename { path: String, to: String },
     Duplicate { path: String },
     // One new empty directory inside parent path; an empty name asks for the first free "New Folder".
@@ -83,6 +86,10 @@ pub fn parse_request(line: &str) -> Request {
         },
         Some("transfercancel") => Request::TransferCancel { id: field_usize(line, "id").unwrap_or(0) },
         Some("trash") => Request::Trash {
+            paths: field_str_array(line, "paths"),
+            rows: field_usize_array(line, "rows"),
+        },
+        Some("delete") => Request::Delete {
             paths: field_str_array(line, "paths"),
             rows: field_usize_array(line, "rows"),
         },
@@ -262,4 +269,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_delete_request_carries_the_same_two_forms_trash_does() {
+        match parse_request(r#"{"c":"delete","paths":["/home/gm/a.txt"]}"#) {
+            Request::Delete { paths, rows } => {
+                assert_eq!(paths, vec!["/home/gm/a.txt".to_string()]);
+                assert!(rows.is_empty());
+            }
+            _ => panic!("expected Delete"),
+        }
+        match parse_request(r#"{"c":"delete","rows":[4,9]}"#) {
+            Request::Delete { paths, rows } => {
+                assert!(paths.is_empty());
+                assert_eq!(rows, vec![4, 9]);
+            }
+            _ => panic!("expected Delete"),
+        }
+        // A delete with neither form resolves against the listing to nothing, which start_delete
+        // answers as no work; it is still a delete request, never an unknown line.
+        assert!(matches!(parse_request(r#"{"c":"delete"}"#), Request::Delete { .. }));
+    }
 }

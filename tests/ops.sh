@@ -114,6 +114,36 @@ check "undo names trash as what it reversed" "1" "$(seen '"t":"undone","op":"tra
 check "the file is back with its bytes" "trash me" "$(cat "$D/doomed.txt" 2>/dev/null)"
 stop_backend
 
+echo "--- permanent delete takes the paths straight off the disk ---"
+# The whole point of the request: nothing is journaled, so undo after it answers nothing to undo,
+# and the trash never sees the file. A symlink is removed as the link, and its target survives.
+start_backend
+printf 'gone for good' > "$D/perm-doomed.txt"
+mkdir -p "$D/perm-tree"; printf 'inside' > "$D/perm-tree/inner.txt"
+printf 'the target survives' > "$D/perm-target.txt"; ln -s "$D/perm-target.txt" "$D/perm-link.txt"
+send "{\"c\":\"delete\",\"paths\":[\"$D/perm-doomed.txt\",\"$D/perm-tree\",\"$D/perm-link.txt\"]}"
+await '"t":"deleted"' || fail=1
+check "delete reports three ok and no failures" "1" "$(seen '"t":"deleted","ok":3,"failed":0')"
+check "the file is gone" "no" "$([ -e "$D/perm-doomed.txt" ] && echo yes || echo no)"
+check "the directory went with everything inside it" "no" "$([ -e "$D/perm-tree" ] && echo yes || echo no)"
+check "the symlink went as the link" "no" "$([ -e "$D/perm-link.txt" ] && echo yes || echo no)"
+check "and the link's target survived" "the target survives" "$(cat "$D/perm-target.txt" 2>/dev/null)"
+check "the trash never saw any of it" "0" "$(gio trash --list 2>/dev/null | grep -c 'perm-doomed\|perm-tree' || true)"
+send '{"c":"undo"}'
+await '"msg":"there is nothing to undo"' || fail=1
+check "a delete journaled nothing to undo" "1" "$(seen 'there is nothing to undo')"
+stop_backend
+
+echo "--- a delete that cannot finish is counted failed and leaves the tree ---"
+start_backend
+mkdir -p "$D/perm-locked"; printf 'stuck' > "$D/perm-locked/inner.txt"; chmod 555 "$D/perm-locked"
+send "{\"c\":\"delete\",\"paths\":[\"$D/perm-locked\"]}"
+await '"t":"deleted"' || fail=1
+check "the directory that could not be emptied is one failure" "1" "$(seen '"t":"deleted","ok":0,"failed":1')"
+chmod 755 "$D/perm-locked"
+check "what could not be removed is still there" "stuck" "$(cat "$D/perm-locked/inner.txt" 2>/dev/null)"
+stop_backend
+
 echo "--- copy transfer, and undo removes what it created ---"
 start_backend
 printf 'one' > "$D/c1.txt"; printf 'two' > "$D/c2.txt"; mkdir -p "$D/dest"

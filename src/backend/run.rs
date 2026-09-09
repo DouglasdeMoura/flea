@@ -7,7 +7,7 @@ use crate::backend::archivereq::{formats_line, start_archive, start_convert};
 use crate::backend::convert;
 use crate::backend::peek::peek_line;
 use crate::backend::metareq::spawn as spawn_meta;
-use crate::backend::opsdispatch::{cancel_transfer, do_mkdir, do_rename, do_undo, report_op, resolve_rows, start_duplicate, start_trash, start_transfer, Ops};
+use crate::backend::opsdispatch::{cancel_transfer, do_mkdir, do_rename, do_undo, report_op, resolve_rows, start_delete, start_duplicate, start_trash, start_transfer, Ops};
 use crate::backend::opsreq::OpMsg;
 use crate::backend::mime::Db;
 use crate::backend::dirsizereq::{queue_dirsizes, walk_one_dirsize};
@@ -271,6 +271,10 @@ fn handle_line(
         Request::Trash { paths, rows } => {
             let named = resolve_rows(paths, &rows, &st.base, &st.listing);
             start_trash(out, ops, named)
+        }
+        Request::Delete { paths, rows } => {
+            let named = resolve_rows(paths, &rows, &st.base, &st.listing);
+            start_delete(out, ops, named)
         }
         Request::Rename { path, to } => do_rename(out, ops, &path, &to),
         Request::MkDir { path, name } => do_mkdir(out, ops, &path, &name),

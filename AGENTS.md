@@ -1007,7 +1007,11 @@ this coverage needed no new entry there.
 - `backend/child.rs` runs one argv under a deadline and says whether it succeeded, failed or
   never started, which is the whole of what decides a `fail/` marker, see "Thumbnail pool".
 - `backend/thumbs.rs` the bounded, cancellable thumbnail pool, see "Thumbnail pool".
-- `backend/proto.rs` the wire types, the request dispatch and the one-line responses.
+- `backend/request.rs` the wire's requests: the one `Request` enum and its parser, moved out of
+  proto.rs when the `delete` request pushed it past the 400 hard cap; see "Write operations and the
+  undo journal".
+- `backend/proto.rs` the wire's one-line responses, each a single `format!` line: listed, the
+  search pair, the thumbnail and dirsize replies, the paths reply and the error line.
 - `backend/rows.rs` serialises one window of rows and its per-response Kind dictionary.
 - `backend/thumbreq.rs` the thumbnail request policy: cache lookup, queueing, cancel and
   result reporting, see "Thumbnail requests".
@@ -1305,7 +1309,7 @@ beneath it, which is why this one states the failure rather than repeating the i
 
 `src/backend/proto.rs` was 241 lines when this was written, under both budgets: 71 are the wire types,
 the request dispatch and the four one-line responses, the other 170 the test module. It has
-been split twice, each time at the seam that leaves each file a single job. **At 399 of the
+been split three times, each time at the seam that leaves each file a single job. **At 399 of the
 400 hard cap** `src/json.rs` took the whole of what this tree's JSON then was, the field scanner as
 well as the escaper: the scanner is protocol-agnostic by construction, the decoding half of the
 encoder already living there, and the same mutations still redden the four tests that moved
@@ -1319,7 +1323,15 @@ The old rule that every consumer imports the wire layer from `proto` alone went 
 `run.rs` and `prewarm.rs` now import `rows_line` from `rows` and everything else from
 `proto`, the same shape as the `thumbspec`/`thumbargv` split. Ten serialiser tests and the
 literal-database `dbs()` helper moved with `rows_line` unchanged; the request and one-line
-response tests stayed.
+response tests stayed. **The third split took the request side out**, to
+`src/backend/request.rs`, when the `delete` request pushed the file past the 400 hard cap:
+the `Request` enum and `parse_request` are one job and their tests went with them, leaving
+`proto.rs` the one-line responses alone, and the sweep was one import line in `run.rs`,
+because `run.rs` is the only consumer of the request half.
+
+`src/backend/request.rs` is 292 lines by `wc -l`, over the soft budget and 108 under the hard
+cap. `src/backend/proto.rs` is 149 after the cut, inside both budgets. Re-derive both with
+`wc -l` rather than trusting this paragraph.
 
 `src/backend/rows.rs` is 251 lines by `wc -l`, one over the soft budget and well under the
 hard cap: 88 are `rows_line` and its Kind dictionary, the other 163 the test module. It is
@@ -3397,7 +3409,8 @@ here only as the control that proves this box reads `GLIBC_TUNABLES` at all.
 
 ## Write operations and the undo journal
 
-Seven requests write: `transfer`, `transfercancel`, `trash`, `rename`, `duplicate`, `mkdir` and `undo`.
+Eight requests write: `transfer`, `transfercancel`, `trash`, `delete`, `rename`, `duplicate`, `mkdir` and
+`undo`.
 `docs/protocol.md` carries the wire; this is the part a reader of the code needs that the wire does not
 say.
 
@@ -3407,14 +3420,21 @@ listing it started from: a copy of a large tree is still running when the user n
 index would name a different file by then. So the write requests take absolute paths and the backend
 never consults the listing to serve one.
 
-**One of `transfer`, `trash` or `duplicate` runs at a time.** `opsdispatch.rs` holds `Ops::running`, and a second `transfer`,
-`trash` or `duplicate` while one is live answers an `error` line rather than queueing. The reason is the
+**One of `transfer`, `trash`, `delete` or `duplicate` runs at a time.** `opsdispatch.rs` holds `Ops::running`, and a second `transfer`,
+`trash`, `delete` or `duplicate` while one is live answers an `error` line rather than queueing. The reason is the
 surface, not the backend: the operations design gives transfers the status bar's single transient slot,
 so a second concurrent operation would have nowhere to report itself. `rename` and `mkdir` are exempt because
 neither spawns at all. An `archive` or a `convert` never claims the slot either: `Ops::claim_id` numbers them
-and they run alongside by design, so the cap was never one write of any kind.
+and they run alongside by design, so the cap was never one write of any kind. `delete` takes the
+slot the way trash does, because `remove_dir_all` over a large tree is exactly the unbounded work
+the slot serialises, and **it is the one operation that journals nothing**: `undo.rs`'s four `Step`
+shapes can put a moved, created, made or trashed path back, and none of them can put a
+permanently removed one there, so `report_op`'s `Deleted` arm clears `running` and records
+nothing, and the client's status line for it carries no undo hint. `ui/js/Trash.js` owns the
+action beside the dd pair it arms, and the wording pins the difference: `Deleted 4 items
+permanently.` where trash answers `Moved 4 items to Trash · z undoes`.
 
-**`rename` and `mkdir` run on the loop's thread, the other three spawn.** Both normally take one
+**`rename` and `mkdir` run on the loop's thread, the other four spawn.** Both normally take one
 syscall, but neither compatibility path below is one: an rclone directory rename copies the whole
 tree and a GVFS WebDAV rename copies whatever the path is, file or tree, before removing the source,
 inline on the loop's thread. That is an unbounded network transfer in the one place nothing else can
@@ -3791,6 +3811,11 @@ says so, a second inside `Trash.ARM_MS` trashes, and `Focus.handleKey` clears
 `pane.trashArmedAt` for every other action so an arm never survives the key after it. `Delete`
 and `Ctrl+Delete` still go on one press, because neither is a letter a name is typed with. The
 sheet draws `dd`, and `tests/js/keymap.js` resolves a doubled cap as that one character.
+`Shift+Delete` is the severe sibling: `keys.toml`'s `[[shift]]` Delete row names a `delete`
+action `ui/js/Trash.js` `del` sends, the same rows the trash takes and nothing journalable, and
+`tests/js/keymap-presets.js` pins it preset-proof, because every `[[preset]]` row carries ctrl
+and the overlay only fires on a ctrl chord, so no preset can take or shadow a shift-only one;
+mac's `ctrl-delete` stays the trash beside it, which is Finder's own `Cmd+Delete`.
 
 ### Theme roles and sources
 

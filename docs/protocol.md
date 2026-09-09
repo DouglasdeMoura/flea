@@ -2,7 +2,8 @@
 
 One JSON object per line, newline-delimited, over the `flea --backend` child's stdin
 and stdout. No batching, no length prefix: `Quickshell.Io.Process` reads with a
-`SplitParser` on `\n`. Implemented in `src/backend/proto.rs` over the field scanner and
+`SplitParser` on `\n`. The requests parse in `src/backend/request.rs` and the one-line responses
+serialise in `src/backend/proto.rs` and `src/backend/rows.rs`, over the field scanner and
 escaper in `src/json.rs`, dispatched by `src/backend/run.rs`.
 
 ## Invariants
@@ -316,7 +317,7 @@ indices are resolved against the listing at request time and the operation runs 
 so it still owns a snapshot that outlives whatever the listing does next. `paths` wins when both are
 present, and an index past the end of the listing is dropped in silence.
 
-**One of `transfer`, `trash` or `duplicate` runs at a time.** One of those arriving while another is
+**One of `transfer`, `trash`, `delete` or `duplicate` runs at a time.** One of those arriving while another is
 still running answers an `error` line saying so and touches nothing. The cap is one because the status
 bar carries one transient slot for the running operation, so a second concurrent operation would have
 nowhere to report. `rename` and `mkdir` never take that slot, and an `archive` or a `convert` is keyed by its own
@@ -380,6 +381,25 @@ the URI later is ambiguous. The backend therefore reads `gio trash --list` immed
 the call and keeps the entries that are new, which is what makes the operation reversible.
 
 There is no confirmation step anywhere in this request, because the undo journal is the safety.
+
+### delete
+
+`{"c":"delete","paths":["<string>",...],"rows":[<uint>,...]}`
+
+Example: `{"c":"delete","paths":["/home/gm/old.txt"]}`
+Example: `{"c":"delete","rows":[4,9]}`
+
+`rows` is the same alternative to `paths` that `trash` documents above, resolved the same way.
+
+Removes each path from the filesystem outright — `remove_dir_all` for a directory, one `remove_file`
+for everything else, a symlink removed as the link with its target untouched — and answers one
+`deleted` line. **Nothing is journaled**, because there is nothing to restore: this is the one write
+operation no `undo` can reverse, and the client's status line carries no undo hint for it. A path
+still on disk afterwards is counted in `failed`, read off the filesystem the same way `trash` reads
+its own; a path already gone counts as done, because gone is the state the request asked for.
+
+There is no confirmation step here either, and this time no undo journal behind it: the client owns
+the severity in the chord, `Shift+Delete` beside `Delete`'s trash, and the answer says so.
 
 ### rename
 
@@ -838,6 +858,16 @@ Example: `{"t":"trashed","ok":1,"failed":0}`
 Counts only. Unlike `transferitem` there is no per-path error text, because trash is one `gio` call for
 the batch and its exit status cannot attribute a failure to a single path; a path that is still on disk
 afterwards is counted in `failed`.
+
+### deleted
+
+`{"t":"deleted","ok":<uint>,"failed":<uint>}`
+
+Example: `{"t":"deleted","ok":1,"failed":0}`
+
+Counts only, the same shape as `trashed`: a path still on disk afterwards is counted in `failed`, and
+one already gone is counted in `ok`. **No undo journal entry is recorded for any of it**, so this line
+never offers a reversal and a later `undo` reverses the operation before it.
 
 ### renamed
 
