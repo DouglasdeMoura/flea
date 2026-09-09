@@ -3414,11 +3414,19 @@ Eight requests write: `transfer`, `transfercancel`, `trash`, `delete`, `rename`,
 `docs/protocol.md` carries the wire; this is the part a reader of the code needs that the wire does not
 say.
 
-**They name paths, not row indices.** Every read request on this wire (`window`, `thumb`, `dirsize`)
-names a row of the current listing, because a viewport is a fact about the listing. A write outlives the
-listing it started from: a copy of a large tree is still running when the user navigates away, and a row
-index would name a different file by then. So the write requests take absolute paths and the backend
-never consults the listing to serve one.
+**They carry both `paths` and `rows`, and `resolve_rows` prefers the paths.** Every read request on this
+wire (`window`, `thumb`, `dirsize`) names a row of the current listing, because a viewport is a fact about
+the listing. A write outlives the listing it started from: a copy of a large tree is still running when the
+user navigates away, and a row index read mid-operation would name a different file. The batch writers
+`transfer`, `trash` and `delete` nevertheless carry both fields: `resolve_rows` returns the caller's paths
+verbatim when any were sent, and resolves row indices against `st.listing` only when a client names rows
+alone, at the moment the request is served. The shipped clients name rows (`ui/Backend.qml` `trash()` and
+`del()` send `rows` and no paths), and that is safe for the one ordered client because requests are served
+in arrival order — the listing `resolve_rows` meets is the one the client read its rows from, and no request
+in between can change it — while the one listing change a client did not ask for, a watch re-read, is
+deferred by `ui/PaneWire.qml`'s `watchBusy` for exactly as long as the selection those rows came from
+stands. The wire's `paths` form is for a client that cannot hold that contract; `docs/protocol.md`
+"transfer" carries the same statement. Once an operation is started it consults the listing for nothing.
 
 **One of `transfer`, `trash`, `delete` or `duplicate` runs at a time.** `opsdispatch.rs` holds `Ops::running`, and a second `transfer`,
 `trash`, `delete` or `duplicate` while one is live answers an `error` line rather than queueing. The reason is the
