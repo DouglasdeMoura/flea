@@ -219,7 +219,9 @@ Item {
 
             // The canvas's PdfViewer draws "3 / 51" and a chevron each side; a column that showed
             // page one of fifty-one with no way past it would be pretending the document is one page.
-            Row {
+            Flow {
+                width: Math.min(pagePrev.width * root.pdfControls.length + pageLabel.width + spacing * root.pdfControls.length,
+                    parent.width - Theme.spacing.gap * 2)
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Theme.spacing.gap
@@ -235,7 +237,9 @@ Item {
                 }
 
                 Text {
-                    anchors.verticalCenter: parent.verticalCenter
+                    id: pageLabel
+                    height: pagePrev.height
+                    verticalAlignment: Text.AlignVCenter
                     text: (root.pdfPage() + 1) + " / " + root.pdfPages
                     color: Theme.color.muted
                     font.family: Theme.font.family

@@ -12,12 +12,16 @@ FocusScope {
     property bool opened: false
     property var snapshot: ({})
     property bool destructiveFocus: false
+    property string scopeName: "Trash items"
     readonly property real referenceScale: Theme.font.bodySmall / 13
     readonly property real cardPadding: Math.round(16 * referenceScale)
     readonly property real cardBottomPadding: Theme.spacing.rowPaddingX
     signal confirmed(int token)
     signal cancelled()
     readonly property var cardItem: card
+    readonly property var cancelItem: cancelButton
+    readonly property var dangerItem: dangerButton
+    readonly property string titleText: title.text
     function open(value) { snapshot = value; destructiveFocus = false; body.contentY = 0; opened = true; forceActiveFocus() }
     function close() { opened = false }
     function cancel() { close(); cancelled() }
@@ -93,7 +97,7 @@ FocusScope {
                     width: parent.width
                     text: root.snapshot.all
                         ? root.snapshot.count + (root.snapshot.count === 1 ? " item, " : " items, ") + Format.size(root.snapshot.bytes || 0) + ". This deletes them from disk. " + Keymap.hintFor("undo") + " cannot undo it and the undo journal does not cover it."
-                        : "These Trash items are deleted from disk. This cannot be undone."
+                        : "These " + root.scopeName + " are deleted from disk. This cannot be undone."
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
                     lineHeight: 1.6

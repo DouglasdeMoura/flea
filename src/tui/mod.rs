@@ -1,4 +1,5 @@
 mod actions;
+mod batch;
 mod completion;
 mod editor;
 mod empty;
@@ -38,7 +39,7 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
             std::env::current_dir()?.join(path)
         };
         let mut wire = wire::Wire::start()?;
-        let terminal = terminal::Terminal::enter()?;
+        let mut terminal = terminal::Terminal::enter()?;
         let mut model = model::Model::new(path.clone(), &settings);
         let map = keymap::Map::load();
         let theme = theme::Theme::load();
@@ -60,6 +61,37 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                     Ok(value) => model.receive(value, &mut wire)?,
                     Err(e) => return Err(io::Error::other(e)),
                 }
+            }
+            let mut launch_errors = Vec::new();
+            model.launches.retain_mut(|(name, child)| match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() { launch_errors.push(format!("{} failed ({})", name, status)); }
+                    false
+                }
+                Ok(None) => true,
+                Err(error) => { launch_errors.push(format!("Could not observe {}: {}", name, error)); false }
+            });
+            for error in launch_errors { model.fail(error); }
+            if model.menu_action == "bulkEditor" {
+                graphics.clear();
+                model.player = None;
+                model.pdf = None;
+                let mut batch = model.bulk.take().unwrap();
+                match batch.edit(&mut terminal) {
+                    Ok(()) => {
+                        model.bulk = Some(batch);
+                        model.next_rename(&mut wire)?;
+                    }
+                    Err(error) => {
+                        if !terminal.ready() { return Err(error); }
+                        model.fail(error.to_string());
+                        model.menu_action.clear();
+                        wire.send(vec![("c", wire::word("menuaction")), ("op", wire::word("close")), ("id", wire::number(model.action_id))])?;
+                    }
+                }
+                frame.clear();
+                thumbnail.clear();
+                decoder = input::Decoder::default();
             }
             if model.menu_action == "openWaiting" && model.pending.is_none() {
                 model.menu_action = "open".into();
@@ -85,9 +117,9 @@ pub fn run(path: Option<&str>, select: Option<&str>) -> i32 {
                 model.message.clear();
             }
             let visible = (model.preview_visible || model.quicklook) && model.selected.len() < 2;
-            let overlay = model.menu || model.sheet || model.editor.is_some();
-            if model.menu != menu_tracking {
-                menu_tracking = model.menu;
+            let overlay = model.menu || model.sheet || model.editor.is_some() || model.deletion.is_some();
+            if (model.menu || model.deletion.is_some()) != menu_tracking {
+                menu_tracking = model.menu || model.deletion.is_some();
                 print!("{}", if menu_tracking { "\x1b[?1003h" } else { "\x1b[?1003l\x1b[?1002h" });
                 std::io::Write::flush(&mut std::io::stdout())?;
             }

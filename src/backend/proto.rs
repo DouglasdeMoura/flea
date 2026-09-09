@@ -30,6 +30,7 @@ pub enum Request {
     // selection wider than the window it renders; see docs/protocol.md "paths".
     Paths { rows: Vec<usize> },
     Locate { path: String },
+    LocateMany { paths: Vec<String>, id: usize, menu_id: usize },
     // The preview column's own extras for one row: pixels, line count, symlink target.
     Meta { row: usize, text: bool, media: bool, archive: bool, token: usize },
     // The status bar's filesystem line for the directory the pane is on.
@@ -111,7 +112,11 @@ pub fn parse_request(line: &str) -> Request {
         Some("undo") => Request::Undo,
         Some("redo") => Request::Redo,
         Some("paths") => Request::Paths { rows: field_usize_array(line, "rows") },
-        Some("locate") => Request::Locate { path: field_str(line, "path").unwrap_or_default() },
+        Some("locate") => match field_str(line, "path") {
+            Some(path) => Request::Locate { path },
+            None => Request::LocateMany { paths: field_str_array(line, "paths"),
+                id: field_usize(line, "id").unwrap_or(0), menu_id: field_usize(line, "menuId").unwrap_or(0) },
+        },
         Some("fsinfo") => Request::FsInfo,
         Some("archive") => Request::Archive {
             // Anything that is not "compress" is an extract, so a malformed op never writes an archive.
@@ -149,6 +154,13 @@ pub fn located_line(directory: &str, path: &str, index: Option<usize>) -> String
     let index = index.map(|value| value.to_string()).unwrap_or_else(|| "-1".into());
     format!(r#"{{"t":"located","directory":"{}","path":"{}","index":{}}}"#,
         escape(directory), escape(path), index)
+}
+
+pub fn located_many_line(directory: &str, id: usize, matches: &[(&str, usize)], error: Option<&str>) -> String {
+    let matches: Vec<_> = matches.iter().map(|(path, index)|
+        format!(r#"{{"path":"{}","index":{}}}"#, escape(path), index)).collect();
+    format!(r#"{{"t":"located","directory":"{}","id":{},"matches":[{}],"ok":{},"error":"{}"}}"#,
+        escape(directory), id, matches.join(","), error.is_none(), escape(error.unwrap_or_default()))
 }
 
 pub fn listed_line(n: usize, read_ms: f64, sort_ms: f64, dev: u64) -> String {
@@ -230,6 +242,10 @@ mod tests {
         assert!(matches!(parse_request(r#"{"c":"locate","path":"/a/file"}"#), Request::Locate { path } if path == "/a/file"));
         assert_eq!(located_line("/a", "/a/file", Some(3)), r#"{"t":"located","directory":"/a","path":"/a/file","index":3}"#);
         assert_eq!(located_line("/a", "/a/\"\n", None), r#"{"t":"located","directory":"/a","path":"/a/\"\n","index":-1}"#);
+        assert!(matches!(parse_request(r#"{"c":"locate","paths":["/a/file"],"id":2,"menuId":7}"#),
+            Request::LocateMany { paths, id: 2, menu_id: 7 } if paths == ["/a/file"]));
+        assert_eq!(located_many_line("/a", 2, &[("/a/\"\n", 3)], None),
+            r#"{"t":"located","directory":"/a","id":2,"matches":[{"path":"/a/\"\n","index":3}],"ok":true,"error":""}"#);
     }
 
     #[test]

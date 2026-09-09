@@ -103,8 +103,16 @@ case_pdffocus() {
         pdf_expect false '.pages == 3' "inline document loaded"
         key -M ctrl -k Tab -m ctrl >/dev/null
         pdf_controls false
+        pdf_expect false '.control == 4 and .page == 1' "inline Expand retains focus"
+        key '+' >/dev/null
+        key -k Return >/dev/null
+        pdf_expect true '.focused and .page == 1 and .zoom == 1.25' "inline expansion keeps page and zoom"
+        [[ "$(ipc previewExpanded)" == true ]] || fail "PDF inline Expand did not fill the window"
+        key e >/dev/null
+        pdf_expect true '.page == 1 and .zoom == 1.25' "collapse retains page and zoom"
+        [[ "$(ipc previewExpanded)" == false ]] || fail "PDF expanded view did not collapse"
         key -k Escape >/dev/null
-        pdf_expect false '(.focused | not)' "inline Escape returns focus"
+        pdf_expect false '(.focused | not)' "expanded Escape returns focus"
         key -M ctrl -k Tab -m ctrl >/dev/null
         pdf_expect false '.focused' "Ctrl+Tab enters inline PDF"
         key -M ctrl -k Tab -m ctrl >/dev/null
@@ -139,6 +147,7 @@ case_pdffocus() {
         pdf_expect false '.pages == 3' "$mode inline document"
         key -M ctrl -k Tab -m ctrl >/dev/null
         pdf_expect false '.focused' "$mode inline focus entry"
+        shot "pdf-inline-$mode-800x480"
         key -k Escape >/dev/null
         pdf_expect false '(.focused | not)' "$mode inline focus return"
         printf 'PDF view=%s native_entry=ok pointer=ok viewport=%sx%s\n' "$mode" "$ww" "$wh"

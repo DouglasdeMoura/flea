@@ -54,6 +54,11 @@ Item {
     }
 
     function toggleExpand() { root.expanded = !root.expanded }
+    function expandFrom(page, zoom) {
+        pdf.page = Math.max(0, pdf.pageCount > 0 ? Math.min(pdf.pageCount - 1, page) : page)
+        root.zoom = Math.max(root.minZoom, Math.min(root.maxZoom, zoom))
+        root.expanded = true
+    }
 
     // A test drives these by coordinate, the same seam ChromeBar.buttonFor already opens.
     function buttonFor(glyph) {

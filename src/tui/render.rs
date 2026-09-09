@@ -441,6 +441,18 @@ pub fn draw(
             Some((&theme.muted, &disabled)),
         );
     }
+    if let Some(deletion) = &m.deletion {
+        let rows = deletion_rows(m);
+        let scroll = deletion.scroll.min(rows.len().saturating_sub(1));
+        let shown = &rows[scroll..];
+        overlay(&mut out, shown, columns, lines, &base, None, "Delete permanently?", None);
+        for (destructive, x, y) in deletion_buttons(m) {
+            let color = if destructive { if deletion.token == 0 { &theme.muted } else { &theme.error } } else { &theme.accent };
+            out.push_str(&format!("\x1b[{};{}H{}{}{}{}{}", y, x, base, color,
+                if deletion.destructive == destructive { "\x1b[7m" } else { "" },
+                if destructive { "[ Delete ]" } else { "[ Cancel ]" }, base));
+        }
+    }
     if *last != out {
         print!("{}\x1b[0m", out);
         io::stdout().flush()?;
@@ -448,6 +460,31 @@ pub fn draw(
         return Ok(true);
     }
     Ok(false)
+}
+pub fn deletion_rows(m: &Model) -> Vec<String> {
+    let Some(deletion) = &m.deletion else { return Vec::new(); };
+    let width = m.columns.saturating_sub(if m.columns < 30 { 4 } else { 8 }).max(1);
+    let summary = if deletion.token == 0 { "Inspecting selected items…".into() }
+        else { format!("{} {}, {}", deletion.count, if deletion.count == 1 { "item" } else { "items" }, bytes(deletion.bytes)) };
+    let mut rows: Vec<String> = Wrapped::new(&summary, width).map(str::to_owned).collect();
+    rows.extend(Wrapped::new("This deletes them from disk. This cannot be undone.", width).map(str::to_owned));
+    rows.push(String::new());
+    if m.columns < 30 { rows.extend([" ".repeat(10), " ".repeat(10)]); }
+    else { rows.push(" ".repeat(22)); }
+    rows
+}
+pub fn deletion_buttons(m: &Model) -> Vec<(bool, usize, usize)> {
+    let rows = deletion_rows(m);
+    let Some(deletion) = &m.deletion else { return Vec::new(); };
+    let scroll = deletion.scroll.min(rows.len().saturating_sub(1));
+    let (x, y, width, count) = overlay_rect(&rows[scroll..], m.columns, m.height + 2);
+    let stacked = m.columns < 30;
+    [false, true].into_iter().filter_map(|destructive| {
+        let row = rows.len() - 1 - usize::from(stacked && !destructive);
+        if row < scroll || row >= scroll + count || width < 10 { return None; }
+        let offset = if stacked { width - 10 } else { width.saturating_sub(22) + if destructive { 12 } else { 0 } };
+        Some((destructive, x + 2 + offset, y + 2 + row - scroll))
+    }).collect()
 }
 fn footer(m: &Model, theme: &Theme, columns: usize, elapsed: std::time::Duration) -> String {
     let base = format!("\x1b[0m{}{}", theme.background, theme.foreground);
@@ -544,7 +581,7 @@ pub fn overlay_rect(rows: &[String], columns: usize, lines: usize) -> (usize, us
         .unwrap_or(0)
         .saturating_add(2)
         .max(13)
-        .min(columns.saturating_sub(6));
+        .min(columns.saturating_sub(if columns < 30 { 2 } else { 6 }));
     let count = rows.len().min(lines.saturating_sub(4));
     (
         (columns.saturating_sub(width + 2)) / 2,
@@ -598,6 +635,27 @@ fn overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn confirmation_buttons_stay_visible_and_hit_testable_at_small_sizes() {
+        let mut model = Model::new(std::path::PathBuf::from("/"), &crate::jsondoc::Json::Null);
+        model.deletion = Some(super::super::model::Deletion { token: 1, count: 3, bytes: 42, ..Default::default() });
+        assert!(!model.deletion.as_ref().unwrap().destructive);
+        for columns in [12, 28, 80] {
+            for height in [4, 20] {
+                model.columns = columns;
+                model.height = height;
+                let scroll = deletion_rows(&model).len().saturating_sub(height - 2);
+                model.deletion.as_mut().unwrap().scroll = scroll;
+                let buttons = deletion_buttons(&model);
+                assert_eq!(buttons.len(), 2);
+                for (_, x, y) in &buttons {
+                    assert!(*x > 0 && x + 9 <= columns);
+                    assert!(*y > 0 && *y <= height + 2);
+                }
+                assert_ne!((buttons[0].1, buttons[0].2), (buttons[1].1, buttons[1].2));
+            }
+        }
+    }
     #[test]
     fn active_tab_remains_in_the_same_visible_hit_map() {
         let mut model = Model::new(std::path::PathBuf::from("/tab-one"), &crate::jsondoc::Json::Null);

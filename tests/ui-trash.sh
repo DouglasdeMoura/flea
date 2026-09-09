@@ -222,7 +222,7 @@ trash_click() {
 }
 
 trash_shot() {
-    local name="$1" path="$evidence_dir/$1.png" canonical
+    local name="$1" path="$evidence_dir/${trash_case_label:+$trash_case_label-}$1.png" canonical
     [[ -f "$run_root/.flea-test-sandbox" ]] || fail "trash: native evidence root is not marked"
     canonical=$(realpath -m -- "$path") || fail "trash: evidence path did not resolve"
     [[ "$canonical" == "$run_root/"* && "$canonical" != "$run_root" ]] || fail "trash: evidence escaped its sandbox"
@@ -240,8 +240,11 @@ trash_empty_strip() {
     trash_wait '.confirmation.opened and (.confirmation.destructiveFocus == false)'
 }
 
+case_trashbasic() { case_trash basic; }
+
 case_trash() {
     local trash_box payload token row uri backing root name trash_checks=0
+    local trash_case_label="${1:-full}"
     local trash_parent_bus_id="" trash_private_bus_id="" trash_bus_address="" trash_bus_pid="" trash_provider_pid=""
     [[ "$(realpath -e "$(command -v gio)")" == /usr/bin/gio ]] || fail "trash: product gio resolves to a stub"
     sandbox_require "$fixture_root"
@@ -298,6 +301,8 @@ case_trash() {
     key -k Return >/dev/null
     trash_wait '.total == 1 and (.busy == false)'
     [[ "$(cat "$payload/alpha.txt")" == alpha ]] || fail "trash: native Restore lost file contents"
+    trash_guard_store 1
+    if [[ "$trash_case_label" == basic ]]; then trash_cleanup 0; fi
 
     trash_empty_strip
     trash_shot trash-empty-confirm-cancel

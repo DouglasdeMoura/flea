@@ -322,6 +322,15 @@ fn handle_line(
             let index = st.listing.index_of(&st.base, Path::new(&path));
             say(out, &super::proto::located_line(&st.base.to_string_lossy(), &path, index));
         }
+        Request::LocateMany { paths, id, menu_id } => {
+            let mut matches = st.listing.indices_of(&st.base, &paths);
+            let error = if menu_id == 0 { None } else {
+                ops.menuactions.as_ref().ok_or_else(|| "Deletion survivor identities expired; select the items again.".to_string())
+                    .and_then(|menu| menu.retain_survivors(menu_id, &mut matches)).err()
+            };
+            if error.is_some() { matches.clear(); }
+            say(out, &super::proto::located_many_line(&st.base.to_string_lossy(), id, &matches, error.as_deref()));
+        }
         Request::Quit => return Control::Quit,
         // corner: an unrecognised line is answered with silence, see AGENTS.md.
         Request::Unknown => {}

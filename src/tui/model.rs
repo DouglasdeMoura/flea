@@ -42,6 +42,14 @@ pub struct Tab {
     pub back: Vec<PathBuf>,
     pub forward: Vec<PathBuf>,
 }
+#[derive(Default)]
+pub struct Deletion {
+    pub token: usize,
+    pub count: usize,
+    pub bytes: usize,
+    pub destructive: bool,
+    pub scroll: usize,
+}
 pub struct Model {
     pub path: PathBuf,
     pub pending: Option<PathBuf>,
@@ -65,6 +73,7 @@ pub struct Model {
     pub message: String,
     pub message_at: std::time::Instant,
     pub search: String,
+    pub search_query: String,
     pub searching: bool,
     pub search_from: Option<PathBuf>,
     pub search_here: bool,
@@ -132,6 +141,13 @@ pub struct Model {
     pub preview_generation: usize,
     pub preview_requested: usize,
     pub preview_children: Option<PathBuf>,
+    pub launches: Vec<(String, std::process::Child)>,
+    pub bulk: Option<super::batch::Batch>,
+    pub deletion: Option<Deletion>,
+    pub restore_marks: BTreeMap<PathBuf, Row>,
+    pub restore_selection: BTreeSet<PathBuf>,
+    pub restore_id: usize,
+    pub delete_marks: BTreeMap<PathBuf, Row>,
 }
 impl Model {
     pub fn new(path: PathBuf, settings: &Json) -> Self {
@@ -172,6 +188,7 @@ impl Model {
             message: String::new(),
             message_at: std::time::Instant::now(),
             search: String::new(),
+            search_query: String::new(),
             searching: false,
             search_from: None,
             search_here: false,
@@ -248,6 +265,13 @@ impl Model {
             preview_generation: 0,
             preview_requested: 0,
             preview_children: None,
+            launches: Vec::new(),
+            bulk: None,
+            deletion: None,
+            restore_marks: BTreeMap::new(),
+            restore_selection: BTreeSet::new(),
+            restore_id: 0,
+            delete_marks: BTreeMap::new(),
         }
     }
     pub fn open(&mut self, path: PathBuf, wire: &mut Wire) -> io::Result<()> {
@@ -256,7 +280,7 @@ impl Model {
         }
         if path == self.path && self.navigation_before.is_none() {
             self.restore_cursor.get_or_insert(self.cursor);
-            if self.restore_path.is_none() { self.restore_path = self.current_path(); }
+            if self.restore_path.is_none() && self.menu_action != "deleteRestore" { self.restore_path = self.current_path(); }
         }
         self.pending = Some(path.clone());
         let result = wire.send(vec![
@@ -283,6 +307,15 @@ impl Model {
         }
         self.restore_cursor = None;
         self.restore_path = None;
+    }
+    pub fn refresh(&mut self, wire: &mut Wire) -> io::Result<()> {
+        if !self.search.is_empty() && !self.search_query.is_empty() {
+            self.searching = true;
+            self.search = "Search: refreshing".into();
+            self.invalidate_rows();
+            wire.send(vec![("c", word("search")), ("path", word(&self.path.to_string_lossy())),
+                ("query", word(&self.search_query)), ("hidden", Json::Bool(self.hidden))])
+        } else { self.open(self.path.clone(), wire) }
     }
     pub fn window(&mut self, wire: &mut Wire) -> io::Result<()> {
         if self.cursor < self.top {
@@ -312,6 +345,53 @@ impl Model {
             }
             _ => None,
         }
+    }
+    pub fn next_rename(&mut self, wire: &mut Wire) -> io::Result<()> {
+        let Some(batch) = self.bulk.take() else { return Ok(()); };
+        if batch.send_next(wire, self.action_id)? {
+            self.transfer = format!("Renaming {} of {}", batch.completed + 1, batch.total);
+            self.menu_action = "bulkRename".into();
+            self.bulk = Some(batch);
+        } else {
+            self.transfer.clear();
+            self.menu_action.clear();
+            self.say(if batch.completed == 0 { if batch.cancelled { "Rename cancelled" } else { "No names changed" }.into() }
+                else { format!("{} {} items · Undo reverts one", if batch.cancelled { "Stopped after renaming" } else { "Renamed" }, batch.completed) });
+            self.restore_path = batch.last;
+            wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
+            self.refresh(wire)?;
+        }
+        Ok(())
+    }
+    fn locate_survivors(&mut self, wire: &mut Wire) -> io::Result<()> {
+        if self.menu_action != "deleteRestore" { return Ok(()); }
+        self.restore_id = self.restore_id.wrapping_add(1).max(1);
+        wire.send(vec![("c", word("locate")), ("id", number(self.restore_id)), ("menuId", number(self.action_id)),
+            ("paths", Json::Arr(self.restore_selection.iter().map(|path| word(&path.to_string_lossy())).collect()))])
+    }
+    fn restore_survivors(&mut self, value: &Json) -> bool {
+        if self.menu_action != "deleteRestore" || self.pending.is_some() || self.searching
+            || count(value, "id") != self.restore_id || text(value, "directory") != self.path.to_string_lossy() { return false; }
+        if flag(value, "ok") {
+            for item in value.get("matches").and_then(Json::as_array).unwrap_or(&[]) {
+                let path = PathBuf::from(text(item, "path"));
+                let Some(index) = item.get("index").and_then(Json::as_f64).filter(|index| index.is_finite() && *index >= 0.0 && index.fract() == 0.0 && *index < self.total as f64) else { continue; };
+                if !self.restore_selection.remove(&path) { continue; }
+                self.selected.insert(index as usize);
+                if let Some(row) = self.restore_marks.remove(&path) { self.selected_rows.insert(index as usize, row); }
+            }
+            if let Some(index) = self.selected.first() { self.cursor = *index; }
+        } else { self.fail(format!("Could not restore deletion selection: {}", text(value, "error"))); }
+        self.restore_selection.clear();
+        self.restore_marks.clear();
+        self.menu_action.clear();
+        true
+    }
+    fn refresh_deletion(&mut self, wire: &mut Wire) -> io::Result<()> {
+        self.deletion = Some(Deletion::default());
+        self.delete_marks.clear();
+        self.menu_action = "deleteRefresh".into();
+        wire.send(vec![("c", word("menuaction")), ("op", word("refreshDelete")), ("id", number(self.action_id))])
     }
     pub fn menu_enabled(&self, index: usize) -> bool {
         if self.taildrop.submenu { return self.menu_ready && index < self.taildrop.peers.len(); }
@@ -433,6 +513,7 @@ impl Model {
                     self.cursor = self.restore_cursor.take().unwrap_or(0);
                     self.top = self.cursor;
                     self.search.clear();
+                    self.search_query.clear();
                     self.searching = false;
                     self.search_from = None;
                     self.filter.clear();
@@ -456,11 +537,18 @@ impl Model {
                     ("hidden", Json::Bool(self.hidden)),
                 ])?;
                 self.window(wire)?;
-                if let Some(path) = &self.restore_path {
+                if let Some(path) = self.restore_path.as_ref().filter(|_| !self.searching) {
                     wire.send(vec![
                         ("c", word("locate")),
                         ("path", word(&path.to_string_lossy())),
                     ])?;
+                }
+                if !self.searching { self.locate_survivors(wire)?; }
+            }
+            "located" if value.get("matches").is_some() => {
+                if self.restore_survivors(&value) {
+                    self.window(wire)?;
+                    wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
                 }
             }
             "located" => {
@@ -476,7 +564,11 @@ impl Model {
                         self.cursor = index as usize;
                         self.window(wire)?;
                     } else {
-                        self.restore_path = None;
+                        if !self.search.is_empty() {
+                            if let Some(parent) = self.restore_path.as_ref().and_then(|path| path.parent()).map(PathBuf::from) {
+                                self.open(parent, wire)?;
+                            } else { self.restore_path = None; }
+                        } else { self.restore_path = None; }
                     }
                 }
             }
@@ -609,12 +701,15 @@ impl Model {
                 }
             }
             "changed" => {
+                if self.deletion.is_some() && self.menu_action == "deleteConfirm" {
+                    self.refresh_deletion(wire)?;
+                }
                 if self.pending.is_none()
                     && self.search.is_empty()
                     && text(&value, "path") == self.path.to_string_lossy()
                 {
                     self.restore_cursor = Some(self.cursor);
-                    self.restore_path = self.current_path();
+                    if self.menu_action != "deleteRestore" { self.restore_path = self.current_path(); }
                     self.open(self.path.clone(), wire)?;
                 }
             }
@@ -659,6 +754,10 @@ impl Model {
                     self.invalidate_rows();
                     self.cursor = 0;
                     self.top = 0;
+                    if let Some(path) = &self.restore_path {
+                        wire.send(vec![("c", word("locate")), ("path", word(&path.to_string_lossy()))])?;
+                    }
+                    self.locate_survivors(wire)?;
                 }
                 self.cursor = self.cursor.min(self.total.saturating_sub(1));
                 self.window(wire)?;
@@ -695,6 +794,15 @@ impl Model {
                 if !flag(&value, "ok") {
                     self.fail(format!("{}: {}", text(&value, "name"), text(&value, "err")));
                 }
+            }
+            "renamed" if self.bulk.is_some() && self.menu_action == "bulkRename" => {
+                let result = if flag(&value, "ok") { self.bulk.as_mut().unwrap().complete(text(&value, "path")) }
+                    else { Err(io::Error::other("Bulk rename stopped: the pending rename failed")) };
+                if let Err(error) = result {
+                    self.fail(error.to_string());
+                    self.bulk.as_mut().unwrap().cancelled = true;
+                }
+                self.next_rename(wire)?;
             }
             "transferdone" | "trashed" | "undone" | "redone" | "renamed" | "made"
             | "duplicated" => {
@@ -748,7 +856,7 @@ impl Model {
                     self.restore_path = Some(PathBuf::from(text(&value, "path")));
                     self.editor = None;
                 }
-                self.open(self.path.clone(), wire)?;
+                self.refresh(wire)?;
             }
             "menuaction" if text(&value, "op") == "newFile" => {
                 if count(&value, "id") != self.action_id || !self
@@ -762,24 +870,82 @@ impl Model {
                     self.editor = None;
                     self.say("File created · Undo available".into());
                     self.restore_path = Some(PathBuf::from(text(&value, "path")));
-                    self.open(self.path.clone(), wire)?;
+                    self.refresh(wire)?;
                 } else if let Some(editor) = &mut self.editor {
                     editor.pending = false;
                     editor.error = text(&value, "error").into();
                 }
             }
+            "menuaction" if text(&value, "op") == "delete" && count(&value, "id") == self.action_id => {
+                if !matches!(self.menu_action.as_str(), "deleteRunning" | "deleteCancelling") { return Ok(()); }
+                if flag(&value, "stale") && self.menu_action == "deleteRunning" {
+                    self.say("Selection changed; review the new confirmation".into());
+                    self.refresh_deletion(wire)?;
+                    return Ok(());
+                }
+                self.menu_action.clear();
+                self.deletion = None;
+                if !flag(&value, "ok") {
+                    if flag(&value, "cancelled") { self.say("Deletion cancelled".into()); }
+                    else { self.fail(text(&value, "error").into()); }
+                } else if flag(&value, "stale") {
+                    self.say("Deletion cancelled".into());
+                } else {
+                    self.say(format!("Deleted {} of {}{}", count(&value, "deleted"), self.menu_count,
+                        if flag(&value, "cancelled") { " · Cancelled".into() } else { String::new() }));
+                    if count(&value, "failed") > 0 { self.fail(format!("{} failed · {}", count(&value, "failed"), text(&value, "error"))); }
+                    let remaining: BTreeSet<PathBuf> = value.get("remaining").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(PathBuf::from).collect();
+                    self.restore_marks = std::mem::take(&mut self.delete_marks);
+                    self.restore_marks.retain(|path, _| remaining.contains(path));
+                    self.restore_path = None;
+                    self.restore_selection = remaining;
+                    if !self.restore_selection.is_empty() { self.menu_action = "deleteRestore".into(); }
+                    self.refresh(wire)?;
+                }
+                if self.menu_action != "deleteRestore" {
+                    self.delete_marks.clear();
+                    wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
+                }
+            }
             "menuaction" if !self.menu_action.is_empty() && count(&value, "id") == self.action_id => {
                 if !flag(&value, "ok") {
-                    self.fail(text(&value, "error").into());
+                    if !flag(&value, "cancelled") { self.fail(text(&value, "error").into()); }
                     self.menu_action.clear();
                     self.menu = false;
                     self.taildrop_target = None;
+                    self.deletion = None;
+                    wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
                 } else if text(&value, "op") == "snapshot" && self.menu_action == "menu" {
                     self.menu_ready = true;
+                } else if text(&value, "op") == "snapshot" && self.menu_action == "deleteSnapshot" {
+                    self.menu_action = "deletePrepare".into();
+                    wire.send(vec![("c", word("menuaction")), ("op", word("prepareDelete")), ("id", number(self.action_id))])?;
+                } else if (text(&value, "op") == "prepareDelete" && self.menu_action == "deletePrepare")
+                    || (text(&value, "op") == "refreshDelete" && self.menu_action == "deleteRefresh") {
+                    let token = count(&value, "token");
+                    if token == 0 { return Err(io::Error::other("Delete review returned no confirmation token")); }
+                    self.menu_count = count(&value, "count");
+                    self.deletion = Some(Deletion { token, count: self.menu_count, bytes: count(&value, "bytes"), destructive: false, scroll: 0 });
+                    self.menu_action = "deleteConfirm".into();
+                } else if text(&value, "op") == "snapshot" && self.menu_action == "bulkSnapshot" {
+                    self.menu_action = "bulk".into();
+                    wire.send(vec![("c", word("menuaction")), ("op", word("validate")), ("id", number(self.action_id)), ("action", word("bulk"))])?;
                 } else if text(&value, "op") == "validate" && text(&value, "action") == self.menu_action {
                     let paths: Vec<String> = value.get("paths").and_then(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(str::to_owned).collect();
                     let action = std::mem::take(&mut self.menu_action);
-                    if action == "open" {
+                    if action == "bulk" {
+                        if paths.len() != self.menu_count {
+                            self.fail("Bulk rename selection is incomplete; select the items again".into());
+                        } else {
+                            match super::batch::Batch::new(paths.into_iter().map(PathBuf::from).collect()) {
+                                Ok(batch) => { self.bulk = Some(batch); self.menu_action = "bulkEditor".into(); }
+                                Err(error) => self.fail(error.to_string()),
+                            }
+                        }
+                        if self.menu_action != "bulkEditor" {
+                            wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
+                        }
+                    } else if action == "open" {
                         if !paths.iter().any(|path| PathBuf::from(path) == self.menu_path) {
                             self.fail("Open failed: the validated selection omitted the selected path".into());
                         } else if self.menu_directory {
@@ -826,6 +992,10 @@ impl Model {
             }
             "error" => {
                 self.fail(format!("{}: {}", text(&value, "where"), text(&value, "msg")));
+                if text(&value, "where") == "rename" && self.bulk.is_some() {
+                    self.bulk.as_mut().unwrap().cancelled = true;
+                    self.next_rename(wire)?;
+                }
                 if let Some(editor) = &mut self.editor {
                     if text(&value, "where") == editor.kind {
                         editor.pending = false;
@@ -841,6 +1011,12 @@ impl Model {
                     self.pending = None;
                     self.restore_navigation();
                 }
+                if self.menu_action == "deleteRestore" && matches!(text(&value, "where"), "scan" | "search") {
+                    self.menu_action.clear();
+                    self.restore_selection.clear();
+                    self.restore_marks.clear();
+                    wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", number(self.action_id))])?;
+                }
                 if text(&value, "where") == "paths" {
                     self.pending_clipboard = false;
                     self.taildrop_target = None;
@@ -855,6 +1031,30 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn survivor_restore_requires_current_reply_and_original_membership() {
+        let mut model = Model::new(PathBuf::from("/listing"), &Json::Null);
+        model.menu_action = "deleteRestore".into();
+        model.restore_id = 7;
+        model.total = 100;
+        model.restore_selection = [PathBuf::from("/listing/survivor"), PathBuf::from("/listing/replaced")].into_iter().collect();
+        let reply = |id, directory| Json::Obj(vec![("id".into(), number(id)), ("directory".into(), word(directory)),
+            ("ok".into(), Json::Bool(true)), ("matches".into(), Json::Arr(vec![
+                Json::Obj(vec![("path".into(), word("/listing/survivor")), ("index".into(), number(75))]),
+                Json::Obj(vec![("path".into(), word("/listing/unselected")), ("index".into(), number(3))])]))]);
+        assert!(!model.restore_survivors(&reply(6, "/listing")));
+        assert!(!model.restore_survivors(&reply(7, "/other")));
+        model.pending = Some(PathBuf::from("/listing"));
+        assert!(!model.restore_survivors(&reply(7, "/listing")));
+        model.pending = None;
+        assert!(model.restore_survivors(&reply(7, "/listing")));
+        assert_eq!(model.selected, [75].into_iter().collect());
+        assert_eq!(model.cursor, 75);
+        assert!(model.selected_rows.is_empty(), "offscreen survivors remain selected without invented metadata");
+        assert!(model.restore_selection.is_empty());
+        assert!(model.menu_action.is_empty());
+    }
 
     #[test]
     fn one_mark_keeps_its_identity_when_cursor_leaves_the_page() {

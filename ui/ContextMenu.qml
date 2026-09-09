@@ -129,6 +129,9 @@ Item {
     // The row item at an index, for ui/Ipc.qml: a driven test clicks a menu row without deriving
     // its geometry from a row count the Menus settings can now change under it.
     function itemFor(index) { return menuRows.itemAt(index) }
+    function submenuItemFor(index) { return subRows.itemAt(index) }
+    readonly property var frameItem: frame
+    readonly property var submenuFrameItem: flyout
 
     // A separator is never the cursor, so both key steps and the opening cursor skip over one.
     function stepCursor(from, delta) {

@@ -381,9 +381,15 @@ launch() {
 
 wait_listing() {
     local want_total="$1"
-    local total row
+    local total row state
     for _attempt in $(seq 1 300); do
         total=$(ipc total 2>/dev/null || printf unavailable)
+        if [[ "$want_total" == 0 ]]; then
+            state=$(ipc state 2>/dev/null || printf unavailable)
+            if [[ "$total" == 0 && "$state" == empty && "$(ipc listInFlight)" == false ]]; then return; fi
+            sleep 0.05
+            continue
+        fi
         row=$(ipc rowAt 0 2>/dev/null || printf loading)
         if [[ "$total" == "$want_total" && "$row" != "loading" ]]; then
             return
@@ -7257,6 +7263,7 @@ case_previewviews() {
 
 . "$repo/tests/ui-pdf.sh"
 . "$repo/tests/ui-trash.sh"
+. "$repo/tests/ui-menus.sh"
 
 declare -a wanted=("$@")
 [[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)

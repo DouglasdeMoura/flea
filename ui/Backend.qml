@@ -31,6 +31,7 @@ Item {
     signal duplicated(bool ok, string path)
     signal undone(string op, bool ok)
     signal paths(var list)
+    signal located(var message)
     signal trashResult(var message)
     signal permissionsResult(var message)
     signal menuResult(var message)
@@ -336,6 +337,8 @@ Item {
             root.redoStarted(message.id, message.n, message.op)
         } else if (message.t === "paths") {
             root.paths(message.paths || [])
+        } else if (message.t === "located") {
+            root.located(message)
         } else if (message.t === "trashbrowse") {
             root.trashResult(message)
         } else if (message.t === "permissions") {

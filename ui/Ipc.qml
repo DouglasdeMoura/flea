@@ -20,9 +20,21 @@ QtObject {
     property var networkDialog: null
     property var shareBrowser: null
     property var emptyState: null
+    property var permissionsDialog: null
     // Overlays and the columns view are built by their first open, see ui/shell.qml, so until then
     // each reader below answers the empty value its type has: "", false or -1, never a throw.
     readonly property var columns: root.pane ? root.pane.columnsArea : null
+    function controlState(name, item) {
+        return {name: name, visible: !!item && item.visible, enabled: !!item && item.enabled
+            && (item.available === undefined || item.available), focused: !!item && item.activeFocus,
+            centre: item ? root.fleaWindow.centreOf(item) : "", rect: item ? root.fleaWindow.rectOf(item) : ""}
+    }
+    function confirmationState(item) {
+        return item ? {opened: item.opened, token: item.snapshot.token || 0, count: item.snapshot.count || 0,
+            all: item.snapshot.all === true, destructiveFocus: item.destructiveFocus, title: item.titleText,
+            rect: root.fleaWindow.rectOf(item.cardItem), cancel: root.controlState("Cancel", item.cancelItem),
+            danger: root.controlState("Delete", item.dangerItem)} : {opened: false}
+    }
 
     // The wrapper holds the references because an IpcHandler marshals every property it owns.
     property IpcHandler seam: IpcHandler {
@@ -63,6 +75,60 @@ QtObject {
         function statusColor(): string { return String(root.bar.rightColor()) }
         function statusSecondary(): string { return root.bar.secondaryText }
         function statusError(): bool { return root.bar.transientIsError }
+        function statusDetail(): string { return root.bar.errorDetail }
+        function statusDismissCentre(): string { return root.fleaWindow.centreOf(root.bar.dismissItem) }
+        function menuState(): string {
+            var menu = root.pane.contextMenu()
+            return JSON.stringify({opened: menu.visible, entries: menu.entries, cursor: menu.cursor,
+                submenu: menu.submenuOpen, submenuCursor: menu.submenuCursor, submenuEntries: menu.submenuEntries,
+                frame: root.fleaWindow.rectOf(menu.frameItem), flyout: root.fleaWindow.rectOf(menu.submenuFrameItem),
+                workArea: menu.workArea, forHeader: menu.forHeader, forRail: menu.forRail, hasRow: menu.hasRow})
+        }
+        function contextMenuModel(): string { return JSON.stringify(root.pane.contextMenu().entries) }
+        function contextMenuSubmenuRowCentre(index: int): string { return root.fleaWindow.centreOf(root.pane.contextMenu().submenuItemFor(index)) }
+        function menuDialogState(): string {
+            var dialog = root.pane.menuActions.item
+            if (!dialog) return JSON.stringify({opened: false})
+            return JSON.stringify({opened: dialog.opened, action: dialog.action, busy: dialog.busy,
+                committing: dialog.committing, error: dialog.errorText, facts: dialog.facts,
+                applications: dialog.applications, cursor: dialog.cursor, rect: root.fleaWindow.rectOf(dialog.cardItem),
+                controls: [Object.assign(root.controlState("Cancel", dialog.closeItem), {enabled: dialog.closeItem.activeFocusOnTab}),
+                    Object.assign(root.controlState("Submit", dialog.submitItem), {enabled: dialog.canSubmit}),
+                    root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.applicationsItem)],
+                confirmation: root.confirmationState(dialog.confirmationItem)})
+        }
+        function permissionsState(): string {
+            var dialog = root.permissionsDialog
+            if (!dialog) return JSON.stringify({opened: false})
+            return JSON.stringify({opened: dialog.opened, facts: dialog.facts, path: dialog.path, mode: dialog.modeText,
+                editable: dialog.editable, busy: dialog.busy, error: dialog.errorText, rect: root.fleaWindow.rectOf(dialog.cardItem),
+                controls: dialog.controls().map(function(control) {
+                    return Object.assign(root.controlState(control.name, control.item), {checked: control.checked, bit: control.bit,
+                        enabled: control.enabled === undefined ? control.item.enabled : control.enabled})
+                })})
+        }
+        function trashState(): string {
+            var view = root.pane.trash.item
+            var rail = null
+            for (var index = 0; index < root.pane.railCount; index++) {
+                var row = root.pane.sidebar.railItemFor(index)
+                if (row && row.modelData.kind === "trash") { rail = {current: row.cursor, countText: row.detail}; break }
+            }
+            if (!view) return JSON.stringify({opened: false, count: root.pane.sidebar.trashCount, rail: rail})
+            return JSON.stringify({opened: view.opened, total: view.total, count: root.pane.sidebar.trashCount, countText: view.countText, busy: view.busy,
+                operationActive: view.operationActive, cursor: view.cursor, first: view.first,
+                selectedCount: view.selectedCount, selectionToken: view.selectionToken, selectionCount: view.selectionCount,
+                headerLabels: view.headerLabels, upEnabled: view.upItem.enabled, rail: rail,
+                rows: view.rows.map(function(row) { return Object.assign({}, row, {selected: view.isSelected(row.uri)}) }),
+                confirmation: root.confirmationState(view.confirmationItem)})
+        }
+        function trashRowCentre(index: int): string { return root.pane.trash.item ? root.fleaWindow.centreOf(root.pane.trash.item.rowItemFor(index)) : "" }
+        function trashControlCentre(name: string): string {
+            var view = root.pane.trash.item
+            if (!view) return ""
+            var item = ({back: view.backItem, up: view.upItem, cancel: view.confirmationItem.cancelItem, danger: view.confirmationItem.dangerItem})[name]
+            return item ? root.fleaWindow.centreOf(item) : ""
+        }
 
         // The sticky slot an operation holds while it runs, so a test can name the verb in flight.
         function stickyMessage(): string { return root.bar.sticky }

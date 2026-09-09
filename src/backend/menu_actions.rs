@@ -4,6 +4,7 @@ use super::menu_registry::{self, Registry};
 use super::trashmanifest::Cancellation;
 use crate::json::{escape, field_str, field_usize};
 use std::fs::{Metadata, OpenOptions};
+use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Sender, SyncSender, TrySendError};
@@ -17,6 +18,7 @@ pub struct MenuActions {
     cancellation: Mutex<Cancellation>,
     registry: Registry,
     requested_id: AtomicUsize,
+    restoration: Arc<Mutex<(usize, Vec<Selected>)>>,
 }
 impl MenuActions {
     pub fn new(replies: Sender<OpMsg>) -> Self {
@@ -27,6 +29,8 @@ impl MenuActions {
         let published = Arc::clone(&snapshot);
         let registry = Registry::default();
         let queries = registry.clone();
+        let restoration = Arc::new(Mutex::new((0, Vec::new())));
+        let completed = Arc::clone(&restoration);
         std::thread::spawn(move || {
             while let Ok((line, paths, cancel)) = receiver.recv() {
                 let mut state = published.lock().unwrap().clone();
@@ -36,7 +40,11 @@ impl MenuActions {
                 if cancel.check().is_err() && field_str(&line, "op").as_deref() != Some("delete") {
                     reply.insert_str(reply.len() - 1, r#", "cancelled":true"#);
                 }
-                if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close" | "prepareDelete" | "delete")) {
+                if field_str(&line, "op").as_deref() == Some("delete") {
+                    // Close expires mutation immediately; the completed operation still identifies survivors for reselection.
+                    *completed.lock().unwrap() = (state.id, state.items.clone());
+                }
+                if matches!(field_str(&line, "op").as_deref(), Some("snapshot" | "close" | "prepareDelete" | "refreshDelete" | "delete")) {
                     publish_snapshot(published.lock().unwrap(), state, &cancel);
                 }
                 let message = if field_str(&line, "op").as_deref() == Some("delete") {
@@ -45,7 +53,14 @@ impl MenuActions {
                 if output.send(message).is_err() { break; }
             }
         });
-        Self { requests, replies, snapshot, cancellation: Mutex::new(Cancellation::default()), registry, requested_id: AtomicUsize::new(0) }
+        Self { requests, replies, snapshot, cancellation: Mutex::new(Cancellation::default()), registry, requested_id: AtomicUsize::new(0), restoration }
+    }
+    pub(crate) fn retain_survivors(&self, id: usize, matches: &mut Vec<(&str, usize)>) -> Result<(), String> {
+        let restoration = self.restoration.lock().map_err(|_| "The menu service stopped; refresh this window.")?;
+        if id == 0 || restoration.0 != id { return Err("Deletion survivor identities expired; select the items again.".into()); }
+        let originals: HashMap<_, _> = restoration.1.iter().map(|item| (item.path.as_path(), item)).collect();
+        matches.retain(|(path, _)| originals.get(Path::new(path)).is_some_and(|item| item.current().is_ok()));
+        Ok(())
     }
     pub(crate) fn selection(&self, id: usize) -> Result<Vec<Selected>, String> {
         let snapshot = self.snapshot.lock().map_err(|_| "The menu service stopped; reopen this window.")?;
@@ -168,11 +183,34 @@ impl Snapshot {
         }
         if op == "delete" {
             let review = self.take_deletion(field_usize(line, "token").unwrap_or(0))?;
-            return review.delete(&super::trashdelete::recovery_root()?, cancel);
+            let recovery = super::trashdelete::recovery_root()?;
+            return match review.delete(&recovery, cancel) {
+                Ok(result) => Ok(result),
+                Err(error) => Ok(format!(r#""stale":true,"error":"{}""#, escape(&error))),
+            }
+        }
+        if op == "checkDelete" {
+            let token = field_usize(line, "token").unwrap_or(0);
+            let review = self.deletion.as_ref().filter(|review| token > 0 && review.token == token)
+                .ok_or("Deletion confirmation expired; review a fresh confirmation.")?;
+            return Ok(format!(r#""valid":{}"#, review.validate(cancel).is_ok()));
+        }
+        if op == "refreshDelete" {
+            self.deletion = None;
+            let mut current = Vec::new();
+            for item in &self.items {
+                cancel.check()?;
+                match item.path.symlink_metadata() {
+                    Ok(_) => current.push(Selected::inspect(&item.path.to_string_lossy())?),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                    Err(error) => return Err(format!("Could not inspect {}: {}.", item.path.display(), error)),
+                }
+            }
+            self.items = current;
         }
         if op == "prepareDelete" { self.deletion = None; }
         for item in &self.items { item.current()?; }
-        if op == "prepareDelete" {
+        if op == "prepareDelete" || op == "refreshDelete" {
             let review = super::menudelete::Review::prepare(&self.items, &std::env::temp_dir(), cancel)?;
             let reply = format!(r#""token":{},"count":{},"bytes":{}"#, review.token, review.count, review.bytes);
             self.deletion = Some(Arc::new(review));
@@ -287,6 +325,52 @@ mod tests {
         snapshot.handle(r#"{"op":"close","id":4}"#, vec![]);
         assert!(snapshot.deletion.is_none());
         assert_eq!(std::fs::read_to_string(path).unwrap(), "preserved");
+    }
+
+    #[test]
+    fn deletion_refresh_requires_a_new_token_for_replacements_and_descendants() {
+        let d = TestDir::new("menu-delete-refresh");
+        let path = d.file("item", "original");
+        let folder = d.dir("folder");
+        let mut snapshot = Snapshot::default();
+        let paths = vec![path.to_string_lossy().into(), folder.to_string_lossy().into()];
+        snapshot.handle(r#"{"op":"snapshot","id":5}"#, paths);
+        let first = snapshot.handle(r#"{"op":"prepareDelete","id":5}"#, vec![]);
+        let old_token = field_usize(&first, "token").unwrap();
+        d.file("folder/new", "new child");
+        let check = format!(r#"{{"op":"checkDelete","id":5,"token":{}}}"#, old_token);
+        assert!(snapshot.handle(&check, vec![]).contains(r#""valid":false"#));
+        assert!(path.is_absolute() && path.starts_with(d.path()) && d.path().join(".flea-test-sandbox").is_file());
+        std::fs::rename(&path, d.join("original-moved")).unwrap();
+        d.file("item", "replacement");
+        d.file("unrelated", "preserved");
+        let fresh = snapshot.handle(r#"{"op":"refreshDelete","id":5}"#, vec![]);
+        assert!(fresh.contains(r#""ok":true"#), "{fresh}");
+        assert_eq!(field_usize(&fresh, "count"), Some(2));
+        assert_ne!(field_usize(&fresh, "token"), Some(old_token));
+        assert_eq!(snapshot.items.len(), 2, "unrelated arrivals never widen the confirmation");
+        assert!(snapshot.items.iter().all(|item| item.current().is_ok()));
+        assert!(snapshot.take_deletion(old_token).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "replacement");
+    }
+
+    #[test]
+    fn completed_deletion_reselection_rejects_replacements_after_close() {
+        let d = TestDir::new("menu-delete-reselection");
+        let path = d.file("item", "original");
+        let kept = d.file("kept", "survivor");
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let menu = MenuActions::new(tx);
+        *menu.restoration.lock().unwrap() = (8, vec![Selected::inspect(path.to_str().unwrap()).unwrap(), Selected::inspect(kept.to_str().unwrap()).unwrap()]);
+        assert!(path.is_absolute() && path.starts_with(d.path()) && d.path().join(".flea-test-sandbox").is_file());
+        std::fs::rename(&path, d.join("moved")).unwrap();
+        d.file("item", "replacement");
+        menu.request(r#"{"op":"close","id":8}"#.into(), vec![]);
+        let mut matches = vec![(path.to_str().unwrap(), 0), (kept.to_str().unwrap(), 1)];
+        menu.retain_survivors(8, &mut matches).unwrap();
+        assert_eq!(matches, vec![(kept.to_str().unwrap(), 1)]);
+        assert!(menu.retain_survivors(9, &mut matches).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "replacement");
     }
 
     #[test]

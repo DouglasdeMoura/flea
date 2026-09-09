@@ -19,6 +19,18 @@ FocusScope {
     readonly property bool editable: facts.ok === true && !facts.reason && !busy
     readonly property int modeValue: Permissions.parse(modeText)
     readonly property var cardItem: card
+    function controls() {
+        var result = [{name: "Close", item: closeMark}, {name: "Octal", item: octal, enabled: editable},
+            {name: "Cancel", item: cancelFocus}, {name: "Apply", item: applyFocus, enabled: editable && modeValue >= 0}]
+        for (var row = 0; row < permissionRows.count; row++) {
+            var group = permissionRows.itemAt(row)
+            for (var column = 0; column < group.checks.count; column++) {
+                var checkbox = group.checks.itemAt(column)
+                result.push({name: checkbox.Accessible.name, item: checkbox, checked: checkbox.checked, bit: checkbox.bit, enabled: editable})
+            }
+        }
+        return result
+    }
     readonly property string scopeText: facts.directory
         ? "Scope this directory only · enclosed items unchanged · ownership unchanged"
         : "Scope this item only · ownership unchanged"
@@ -124,7 +136,7 @@ FocusScope {
                         font { family: Theme.font.family; pixelSize: Theme.font.body; bold: true }
                         textFormat: Text.PlainText
                     }
-                    Flea.Glyph { width: Theme.font.bodySmall; height: title.height; name: "x"; color: Theme.color.muted
+                    Flea.Glyph { id: closeMark; width: Theme.font.bodySmall; height: title.height; name: "x"; color: Theme.color.muted
                         TapHandler { onTapped: root.close() }
                     }
                 }
@@ -145,15 +157,18 @@ FocusScope {
                     }
                 }
                 Repeater {
+                    id: permissionRows
                     model: ["Owner", "Group", "Everyone"]
                     Row {
                         id: permissionRow
                         required property string modelData
                         required property int index
+                        readonly property alias checks: checks
                         width: body.width
                         height: Theme.rowHeight
                         Text { width: Theme.space(86); anchors.verticalCenter: parent.verticalCenter; text: permissionRow.modelData; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.body } }
                         Repeater {
+                            id: checks
                             model: 3
                             FocusScope {
                                 id: checkbox

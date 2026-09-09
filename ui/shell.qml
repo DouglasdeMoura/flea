@@ -453,6 +453,7 @@ ShellRoot {
         chrome: chrome
         tabBar: tabBar
         convertDialog: convertDialog.item
+        permissionsDialog: permissionsDialog.item
         keymapSheet: keymapSheet.item
         settingsPanel: settingsPanel.item
         networkDialog: networkDialog.item

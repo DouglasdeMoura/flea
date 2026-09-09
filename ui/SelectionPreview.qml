@@ -14,7 +14,11 @@ Flea.PreviewColumn {
     property string loadedIdentity: ""
     property int pendingToken: 0
     signal thumbsApplied(var work)
-    onExpandRequested: if (root.row && root.pane) root.pane.preview.open(root.path, root.row.i, root.row.s)
+    onExpandRequested: {
+        if (!root.row || !root.pane) return
+        root.pane.preview.open(root.path, root.row.i, root.row.s)
+        root.pane.preview.pdfItem.expandFrom(root.pdfPage(), root.pdfZoom)
+    }
 
     Keys.onPressed: function(event) {
         var context = root.rowState === Facts.PDF ? "pdf"

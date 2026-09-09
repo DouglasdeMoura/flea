@@ -266,7 +266,7 @@ FocusScope {
         if (action === "openTrash" || action === "emptyTrash" || action === "restoreAll") { trashHost.action(action); return }
         if (action === "settings") { root.settingsPanel.open(root); return }
         if (action === "permissions") { root.openPermissions(); return }
-        if (["newFile", "openWith", "moveTo", "copyTo", "properties"].indexOf(action) >= 0) {
+        if (["newFile", "openWith", "moveTo", "copyTo", "properties", "deletePermanently"].indexOf(action) >= 0) {
             menuActions.open(action)
             return
         }

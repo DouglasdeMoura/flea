@@ -19,15 +19,23 @@ FocusScope {
     property string errorText: ""
     property bool busy: false
     property bool committing: false
+    property bool checkPending: false
     property Item focusHolder: null
     readonly property bool inputAction: action === "newFile" || action === "moveTo" || action === "copyTo"
+    readonly property bool deletionActive: action === "deletePermanently" && committing
     readonly property bool canSubmit: !busy && (action === "openWith" ? applications.length > 0
                                                  : inputAction && field.text.length > 0)
-    readonly property string title: ({openWith: "Open With", moveTo: "Move to", copyTo: "Copy to", properties: "Properties", newFile: "New File"})[action] || ""
+    readonly property string title: ({openWith: "Open With", moveTo: "Move to", copyTo: "Copy to", properties: "Properties", newFile: "New File", deletePermanently: "Delete permanently"})[action] || ""
     readonly property var cardItem: card
+    readonly property var confirmationItem: confirmation
+    readonly property var closeItem: closeFocus
+    readonly property var submitItem: submitFocus
+    readonly property var fieldItem: field
+    readonly property var applicationsItem: appList
     signal requested(var message)
     signal approved(var message)
     signal created(string path)
+    signal deleted(var message)
     signal closed()
 
     function open(operation, identity, parentPath, holder) {
@@ -39,20 +47,41 @@ FocusScope {
         applications = []
         cursor = 0
         errorText = ""
+        checkPending = false
+        confirmation.close()
         field.text = operation === "newFile" ? "New File" : parentPath
-        busy = operation === "properties" || operation === "openWith"
+        busy = operation === "properties" || operation === "openWith" || operation === "deletePermanently"
         committing = false
         opened = true
         body.contentY = 0
         if (inputAction) { field.forceActiveFocus(); field.selectAll() }
         else closeFocus.forceActiveFocus()
-        if (busy) requested({c: "menuaction", op: operation === "openWith" ? "applications" : "properties", id: requestId})
+        if (busy) requested({c: "menuaction", op: operation === "openWith" ? "applications" : operation === "deletePermanently" ? "prepareDelete" : "properties", id: requestId})
     }
     function receive(message) {
-        if (!opened || message.id !== requestId || message.op === "close") return
+        if ((!opened && !deletionActive) || message.id !== requestId || message.op === "close") return
+        if (deletionActive && message.op !== "delete") return
         busy = false
         committing = false
-        if (!message.ok) { errorText = message.error || "The requested action failed."; return }
+        if (!message.ok) {
+            confirmation.close()
+            opened = true
+            closeFocus.forceActiveFocus()
+            errorText = message.error || "The requested action failed."
+            return
+        }
+        if (message.stale || message.op === "checkDelete" && !message.valid) { refreshDeletion(); return }
+        if (message.op === "prepareDelete" || message.op === "refreshDelete") {
+            facts = message
+            if (checkPending) { checkPending = false; refreshDeletion() }
+            else confirmation.open(message)
+            return
+        }
+        if (message.op === "checkDelete") {
+            if (checkPending) { checkPending = false; refreshDeletion() }
+            return
+        }
+        if (message.op === "delete") { deleted(Object.assign({count: facts.count}, message)); finish(); return }
         if (message.op === "applications") {
             applications = message.applications || []
             if (applications.length) appList.forceActiveFocus()
@@ -65,10 +94,34 @@ FocusScope {
     }
     function close() {
         if (!opened || busy && committing && action === "newFile") return
+        finish()
+    }
+    function finish() {
         requested({c: "menuaction", op: "close", id: requestId})
+        confirmation.close()
         opened = false
         closed()
         if (focusHolder) focusHolder.forceActiveFocus()
+    }
+    function refreshDeletion() {
+        confirmation.close()
+        opened = true
+        busy = true
+        errorText = ""
+        closeFocus.forceActiveFocus()
+        requested({c: "menuaction", op: "refreshDelete", id: requestId})
+    }
+    function checkDeletion() {
+        if (!opened || action !== "deletePermanently" || errorText) return
+        if (busy) { checkPending = true; return }
+        busy = true
+        requested({c: "menuaction", op: "checkDelete", id: requestId, token: facts.token})
+    }
+    function sourceChanged() {
+        if (!opened || action !== "deletePermanently" || errorText) return
+        confirmation.close()
+        if (busy) checkPending = true
+        else refreshDeletion()
     }
     function submit() {
         if (!canSubmit) return
@@ -106,6 +159,7 @@ FocusScope {
     Keys.onPressed: function(event) { event.accepted = true }
     Rectangle {
         anchors.fill: parent
+        visible: !confirmation.opened
         color: Theme.color.background
         opacity: 0.5
         MouseArea {
@@ -118,6 +172,7 @@ FocusScope {
     }
     Rectangle {
         id: card
+        visible: !confirmation.opened
         anchors.centerIn: parent
         width: Math.max(0, Math.min(Theme.space(420), root.width - 2 * Theme.spacing.gap))
         height: Math.max(0, Math.min(body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * Theme.spacing.gap))
@@ -244,15 +299,16 @@ FocusScope {
                         id: closeFocus
                         width: closeButton.implicitWidth
                         height: closeButton.implicitHeight
-                        activeFocusOnTab: !(root.busy && root.committing && (root.action === "openWith" || root.action === "newFile"))
+                        activeFocusOnTab: !(root.busy && root.committing && root.action === "newFile")
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
                         Flea.DialogButton { id: closeButton; label: root.action === "properties" ? "Close" : "Cancel"; primary: parent.activeFocus; available: parent.activeFocusOnTab; onActivated: root.close() }
                     }
                     FocusScope {
+                        id: submitFocus
                         width: submitButton.implicitWidth
                         height: submitButton.implicitHeight
-                        visible: root.action !== "properties"
+                        visible: root.action !== "properties" && root.action !== "deletePermanently"
                         activeFocusOnTab: root.canSubmit
                         Keys.onReturnPressed: root.submit()
                         Keys.onSpacePressed: root.submit()
@@ -260,6 +316,20 @@ FocusScope {
                     }
                 }
             }
+        }
+    }
+    // Match Trash's identity-check cadence only while the destructive strip is visible.
+    Timer { interval: 2500; repeat: true; running: confirmation.opened && !root.busy; onTriggered: root.checkDeletion() }
+    Flea.TrashConfirm {
+        id: confirmation
+        scopeName: "items"
+        onCancelled: root.close()
+        onConfirmed: function(token) {
+            root.busy = true
+            root.committing = true
+            root.opened = false
+            if (root.focusHolder) root.focusHolder.forceActiveFocus()
+            root.requested({c: "menuaction", op: "delete", id: root.requestId, token: token})
         }
     }
 }

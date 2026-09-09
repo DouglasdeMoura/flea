@@ -44,6 +44,11 @@ FocusScope {
     property int confirmingToken: 0
     readonly property bool confirmationOpen: confirmation.opened
     readonly property var confirmationItem: confirmation
+    readonly property var backItem: backButton
+    readonly property var upItem: upButton
+    readonly property string countText: countLabel.text
+    readonly property var headerLabels: [nameTitle.text, locationTitle.text, deletedTitle.text]
+    function rowItemFor(index) { return listing.itemAtIndex(index) }
     readonly property int windowRows: Math.max(1, Math.min(350, Math.ceil(listing.height / Theme.fileRowHeight) + 2))
     readonly property int selectedCount: allSelected ? Math.max(0, selectionCount - excludedUris().length) + selectedUris().length : selectedUris().length
     readonly property string home: Quickshell.env("HOME") || ""
@@ -286,6 +291,7 @@ FocusScope {
                 anchors.rightMargin: Theme.spacing.rowPaddingX
                 spacing: Theme.spacing.gap
                 Flea.Glyph {
+                    id: backButton
                     width: Theme.hitMin; height: parent.height; maxSize: Theme.chromeMarkSize
                     name: "arrow-left"; color: Theme.color.foreground
                     Accessible.role: Accessible.Button
@@ -294,6 +300,7 @@ FocusScope {
                     TapHandler { onTapped: root.close() }
                 }
                 Flea.Glyph {
+                    id: upButton
                     width: Theme.hitMin; height: parent.height; maxSize: Theme.chromeMarkSize
                     name: "arrow-up"; color: Theme.color.muted
                     Accessible.role: Accessible.Button
@@ -313,7 +320,7 @@ FocusScope {
             rightPadding: Theme.spacing.rowPaddingX
             spacing: Theme.spacing.gap
             Item { width: Theme.markSize; height: 1 }
-            Text { width: Math.max(0, parent.width - Theme.markSize - locationTitle.width - deletedTitle.width - 3 * parent.spacing - parent.leftPadding - parent.rightPadding); anchors.verticalCenter: parent.verticalCenter; text: "Name"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+            Text { id: nameTitle; width: Math.max(0, parent.width - Theme.markSize - locationTitle.width - deletedTitle.width - 3 * parent.spacing - parent.leftPadding - parent.rightPadding); anchors.verticalCenter: parent.verticalCenter; text: "Name"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
             // TrashSidebar's fixed columns are 210/110 at bodySmall 13, then clamp to preserve the name.
             Text { id: locationTitle; width: Math.min(Math.round(210 * Theme.font.bodySmall / 13), root.width * 0.35); anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: "Original location"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
             Text { id: deletedTitle; width: Math.min(Math.round(110 * Theme.font.bodySmall / 13), root.width * 0.2); anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: "Deleted"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }

@@ -18,6 +18,7 @@ Item {
     property var errors: []
     readonly property string transient_: root.errors.length ? root.errors[0].text : root.notice
     readonly property string errorDetail: root.errors.length ? root.errors[0].detail : ""
+    readonly property var dismissItem: dismissAction
     readonly property bool transientIsError: root.errors.length > 0
     property string sticky: ""
     property var transfer: Ops.emptyTransfer()
@@ -127,7 +128,7 @@ Item {
             }
         }
         StatusAction { visible: root.hasUndo; label: "Undo · z"; onActivated: root.undoRequested() }
-        StatusAction { visible: root.transientIsError; label: "Dismiss error"; onActivated: root.dismiss() }
+        StatusAction { id: dismissAction; visible: root.transientIsError; label: "Dismiss error"; onActivated: root.dismiss() }
     }
 
     Text {

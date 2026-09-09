@@ -10,6 +10,11 @@ use std::{io, path::PathBuf};
 
 pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Result<()> {
     let armed = std::mem::take(&mut model.key_arm);
+    if model.deletion.is_some() { return deletion_key(model, key, wire); }
+    if !model.menu && !model.menu_action.is_empty() && model.menu_action != "menu" {
+        let action = map.action(key, &model.preset);
+        return if matches!(action.as_str(), "escape" | "quit") { act(model, &action, wire) } else { Ok(()) };
+    }
     if let Some(pointer) = &key.pointer {
         return pointer_key(model, key, pointer, map, wire);
     }
@@ -266,7 +271,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
     if m.searching
         && matches!(
             action,
-            "paste" | "movePaste" | "duplicate" | "trash" | "trashArm" | "rename" | "copy" | "cut"
+            "paste" | "movePaste" | "duplicate" | "trash" | "trashArm" | "deletePermanently" | "rename" | "copy" | "cut"
         )
     {
         m.fail("Wait for search to settle before a file operation".into());
@@ -281,6 +286,7 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
                 | "cut"
                 | "trash"
                 | "trashArm"
+                | "deletePermanently"
                 | "rename"
                 | "preview"
                 | "reveal"
@@ -345,7 +351,10 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         "search" => m.editor = Some(Editor::new("search", String::new(), m.path.clone())),
         "rename" => {
             if m.selected.len() > 1 {
-                m.fail("Select one item to rename".into());
+                m.action_id = m.action_id.wrapping_add(1).max(1);
+                m.menu_action = "bulkSnapshot".into();
+                m.menu_count = m.selected.len();
+                w.send(vec![("c", word("menuaction")), ("op", word("snapshot")), ("id", super::wire::number(m.action_id)), ("rows", m.indices())])?;
             } else if let Some((index, row)) = m.single_row() {
                 m.cursor = index;
                 m.window(w)?;
@@ -395,6 +404,19 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             }
         }
         "undo" | "redo" => w.send(vec![("c", word(action))])?,
+        "deletePermanently" => {
+            m.action_id = m.action_id.wrapping_add(1).max(1);
+            m.menu_action = "deleteSnapshot".into();
+            m.deletion = Some(super::model::Deletion::default());
+            m.delete_marks.clear();
+            let indices: Vec<usize> = if m.selected.is_empty() { vec![m.cursor] } else { m.selected.iter().copied().collect() };
+            for index in indices {
+                if let Some(row) = m.selected_rows.get(&index).or_else(|| m.rows.get(&index)) {
+                    m.delete_marks.insert(m.row_path(row), row.clone());
+                }
+            }
+            w.send(vec![("c", word("menuaction")), ("op", word("snapshot")), ("id", super::wire::number(m.action_id)), ("rows", m.indices())])?;
+        }
         "duplicate" => {
             if let Some((_, row)) = m.single_row() {
                 let path = m.row_path(&row);
@@ -448,6 +470,10 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             });
             let index = m.tabs.len() - 1;
             tab(m, index, w)?;
+        }
+        "openTerminal" | "windowNew" => {
+            let child = super::terminal::launch(&m.path, action == "windowNew")?;
+            m.launches.push((if action == "windowNew" { "New Flea window" } else { "Terminal" }.into(), child));
         }
         "tabClose" => {
             if m.tabs.len() == 1 {
@@ -522,7 +548,21 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             }
         }
         "escape" => {
+            if let Some(batch) = &mut m.bulk {
+                batch.cancelled = true;
+                return Ok(());
+            }
+            if matches!(m.menu_action.as_str(), "deleteRunning" | "deleteCancelling") {
+                if m.menu_action == "deleteRunning" {
+                    m.menu_action = "deleteCancelling".into();
+                    w.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", super::wire::number(m.action_id))])?;
+                }
+                return Ok(());
+            }
             m.menu_action.clear();
+            m.restore_selection.clear();
+            m.restore_marks.clear();
+            m.delete_marks.clear();
             m.taildrop_target = None;
             if !m.error.is_empty() {
                 m.dismiss_error();
@@ -546,6 +586,57 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
         _ => {}
     }
     m.remember_selection();
+    Ok(())
+}
+fn deletion_key(m: &mut Model, key: &Key, wire: &mut Wire) -> io::Result<()> {
+    let rows = super::render::deletion_rows(m);
+    let scroll = m.deletion.as_ref().unwrap().scroll.min(rows.len().saturating_sub(1));
+    let (x, y, width, count) = super::render::overlay_rect(&rows[scroll..], m.columns, m.height + 2);
+    let mut activate = false;
+    let mut cancel = key.name == "Escape";
+    if let Some(pointer) = &key.pointer {
+        if pointer.released { return Ok(()); }
+        let inside = pointer.x > x && pointer.x <= x + width + 2 && pointer.y > y && pointer.y <= y + count + 2;
+        if matches!(pointer.button, 64 | 65) {
+            let deletion = m.deletion.as_mut().unwrap();
+            deletion.scroll = if pointer.button == 64 { scroll.saturating_sub(1) }
+                else { (scroll + 1).min(rows.len().saturating_sub(count.max(1))) };
+        } else if !inside && pointer.button == 0 && !pointer.motion { cancel = true; }
+        else if inside {
+            if let Some((destructive, _, _)) = super::render::deletion_buttons(m).into_iter().find(|(_, x, y)| pointer.y == *y && pointer.x >= *x && pointer.x < *x + 10) {
+                if pointer.motion || pointer.button == 0 {
+                let deletion = m.deletion.as_mut().unwrap();
+                if destructive && deletion.token == 0 { return Ok(()); }
+                deletion.destructive = destructive && deletion.token != 0;
+                activate = pointer.button == 0 && !pointer.motion;
+                }
+            }
+        }
+    } else {
+        let deletion = m.deletion.as_mut().unwrap();
+        if key.mods.is_empty() && key.name == "Up" { deletion.scroll = scroll.saturating_sub(1); }
+        else if key.mods.is_empty() && key.name == "Down" { deletion.scroll = (scroll + 1).min(rows.len().saturating_sub(count.max(1))); }
+        else if (matches!(key.name.as_str(), "Tab" | "Backtab") && matches!(key.mods.as_str(), "" | "shift"))
+            || (key.mods.is_empty() && (matches!(key.name.as_str(), "Right" | "Left") || matches!(key.text.as_str(), "h" | "l"))) {
+            deletion.destructive = deletion.token != 0 && match key.name.as_str() {
+                "Left" => false, "Right" => true,
+                _ if key.text == "h" => false, _ if key.text == "l" => true,
+                _ => !deletion.destructive,
+            };
+            deletion.scroll = rows.len().saturating_sub(count.max(1));
+        } else if key.mods.is_empty() && matches!(key.name.as_str(), "Return" | "Enter" | "Space") { activate = true; }
+    }
+    let deletion = m.deletion.as_ref().unwrap();
+    if cancel || (activate && !deletion.destructive) {
+        m.deletion = None;
+        m.menu_action.clear();
+        wire.send(vec![("c", word("menuaction")), ("op", word("close")), ("id", super::wire::number(m.action_id))])?;
+    } else if activate && deletion.token != 0 && super::render::deletion_buttons(m).iter().any(|(destructive, _, _)| *destructive) {
+        let token = deletion.token;
+        m.deletion = None;
+        m.menu_action = "deleteRunning".into();
+        wire.send(vec![("c", word("menuaction")), ("op", word("delete")), ("id", super::wire::number(m.action_id)), ("token", super::wire::number(token))])?;
+    }
     Ok(())
 }
 fn pointer_key(
@@ -850,6 +941,7 @@ fn edit(m: &mut Model, key: &Key, w: &mut Wire) -> io::Result<()> {
                 m.top = 0;
                 m.total = 0;
                 m.searching = true;
+                m.search_query = value.clone();
                 m.search = "Search: starting".into();
                 w.send(vec![
                     ("c", word("search")),
