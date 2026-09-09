@@ -269,6 +269,10 @@ case_oversight() {
             oversight_visible_row "$row"
             click_row "$row" left
             permissions_expect cursor "$row"
+            if [[ "$oversight_arm" == candidate ]]; then
+                permissions_expect selectedIndices "$row"
+                key v >/dev/null
+            fi
             permissions_expect selectionCount 0
             if [[ "$view" == columns ]]; then permissions_expect previewColumnState text; fi
             oversight_park_row "$row"

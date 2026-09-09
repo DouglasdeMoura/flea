@@ -50,6 +50,9 @@ Item {
         (root.transientIsError || root.stickyHere) && root.searching ? root.searchText() : "",
         root.retryLine]
         .filter(function (s) { return s.length > 0 }).map(function (s) { return " · " + s }).join("")
+    readonly property real slotWidth: Math.max(0, root.width - Theme.spacing.rowPaddingX
+        - counts.x - counts.width - 3 * Theme.spacing.gap - root.spiralSize)
+    readonly property real hintWidth: hintMetrics.width
     signal transferCancelRequested(int id)
     implicitHeight: Theme.chromeHeight + detailView.height
 
@@ -165,8 +168,8 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: strip.verticalCenter
-        width: Math.min(implicitWidth, Math.max(0, root.width - counts.x - counts.width
-            - 3 * Theme.spacing.gap - root.spiralSize))
+        width: Math.min(implicitWidth, Math.max(0, root.slotWidth
+            - Math.min(primary.implicitWidth, Math.max(0, root.slotWidth - hintMetrics.width))))
         text: root.secondaryText
         color: Theme.color.muted
         font.family: Theme.font.family
@@ -175,13 +178,18 @@ Item {
         textFormat: Text.PlainText
     }
 
+    TextMetrics {
+        id: hintMetrics
+        font: secondary.font
+        text: root.keyHint.length ? " · " + root.keyHint
+            + (root.secondaryText !== " · " + root.keyHint ? " · …" : "") : ""
+    }
+
     Text {
         id: primary
         anchors.right: secondary.left
         anchors.verticalCenter: strip.verticalCenter
-        width: Math.max(0, Math.min(implicitWidth, secondary.x
-            - (counts.x + counts.width)
-            - 3 * Theme.spacing.gap - root.spiralSize))
+        width: Math.min(implicitWidth, Math.max(0, root.slotWidth - secondary.width))
         text: root.rightText()
         color: root.rightColor()
         font.family: Theme.font.family

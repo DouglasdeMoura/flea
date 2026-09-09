@@ -145,7 +145,7 @@ operations_absent() {
 }
 
 operations_mixed() {
-    local source="$menu_box/mixed" destination="$menu_box/mixed-out" name selected
+    local source="$menu_box/mixed" destination="$menu_box/mixed-out" name selected notice
     for name in "$source" "$destination"; do menus_guard "$name"; mkdir "$name"; done
     for name in a.txt b.txt c.txt d.txt e.txt; do
         menus_guard "$source/$name"
@@ -181,11 +181,13 @@ operations_mixed() {
     shot operations-mixed-error
     sleep "$transient_clear_s"
     menus_expect statusActivityState '.errors == 1 and (.notice | contains("Copied 4 of 5"))' "error and hidden outcome survive the notice timeout"
-    key -k Home >/dev/null
-    menus_expect cursor '. == 0' "negative footer click starts from a known native cursor"
+    cardsize_expect focusView list
     operations_footer_click
-    key -k End >/dev/null
-    menus_expect cursor '. == 4' "a later native key is delivered before checking the inert error click"
+    # A native focus cycle flushes click delivery without changing the retry-selection identity.
+    key -k Tab >/dev/null
+    cardsize_expect focusView rail
+    key -k Tab >/dev/null
+    cardsize_expect focusView list
     menus_expect statusActivityState '.errors == 1' "pointer at the removed Dismiss control leaves the persistent error unacknowledged"
     menus_error 'Copy failed: c.txt' 'removed footer control does not dismiss the named failure'
     shot operations-error-footer-click-inert
@@ -194,6 +196,11 @@ operations_mixed() {
     menus_expect statusActivityState '.undoAvailable and .errors == 0' "successful items remain undoable through the native key"
     operations_counts_footer "acknowledged completion"
     operations_secondary " · z undoes · c.txt selected for retry" "acknowledged completion retains Undo hint and selected-retry secondary"
+    notice=$(ipc statusActivityState | jq -er .notice) || fail "operations: acknowledged Undo notice unavailable"
+    sleep "$transient_clear_s"
+    menus_equal 'acknowledged Undo notice survives the transient timeout unchanged' "$notice" "$(ipc statusActivityState | jq -er .notice)"
+    menus_expect statusActivityState '.undoAvailable and .errors == 0' "acknowledged completion stays undoable beyond the notice timeout"
+    operations_secondary " · z undoes · c.txt selected for retry" "acknowledged retry identity and Undo hint survive the notice timeout"
     shot operations-mixed-acknowledged
     key -k Escape >/dev/null
     menus_expect selectionCount '. == 0' "native Escape clears the retry selection"
@@ -221,11 +228,12 @@ operations_mixed() {
     operations_secondary " · z undoes" "successful retry names the native Undo key"
     shot operations-transient-undo
     menus_guard "$destination/c.txt"
-    key -k Home >/dev/null
-    menus_expect cursor '. == 0' "negative Undo click starts from a known native cursor"
+    cardsize_expect focusView list
     operations_footer_click
-    key -k End >/dev/null
-    menus_expect cursor '. == 4' "a later native key is delivered before checking the inert Undo click"
+    key -k Tab >/dev/null
+    cardsize_expect focusView rail
+    key -k Tab >/dev/null
+    cardsize_expect focusView list
     menus_expect statusActivityState '.undoAvailable and (.notice | contains("Copied 1 item"))' "clicking the informational footer cannot undo a completed copy"
     menus_same_file 'footer click preserves the completed retry' "$source/c.txt" "$destination/c.txt"
     key z >/dev/null
@@ -237,6 +245,43 @@ operations_mixed() {
     for name in a.txt b.txt d.txt e.txt; do operations_absent "$destination/$name"; done
     [[ "$(cat "$menu_box/collision-kept.txt")" == 'existing collision' ]] || fail "operations: Undo touched the pre-existing collision"
     for name in a.txt b.txt c.txt d.txt e.txt; do [[ "$(cat "$source/$name")" == "original $name" ]] || fail "operations: source changed through copy or Undo"; done
+    kill_flea
+}
+
+operations_long_error() {
+    local source="$menu_box/long-name" destination="$menu_box/long-name-out" name path
+    for path in "$source" "$destination"; do
+        menus_guard "$path"
+        mkdir "$path" || fail "operations: long-name fixture directory creation failed"
+    done
+    printf -v name 'long-%0230d.txt' 0
+    menus_guard "$source/$name"
+    menus_guard "$destination/$name"
+    printf 'long-name source\n' > "$source/$name" || fail "operations: legal long-name source creation failed"
+    printf 'long-name collision\n' > "$destination/$name" || fail "operations: legal long-name collision creation failed"
+    launch "$source"
+    wait_listing 1
+    permissions_viewport 880 620
+    key v >/dev/null
+    menus_expect selectionCount '. == 1' "long-name collision selects its real source"
+    operations_copy_to "$destination"
+    menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1 and (.notice | contains("Copied 0 of 1") and contains("1 failed"))' "one long-name collision records its real failed outcome"
+    menus_error "Copy failed: $name" 'long-name error retains the exact failed source identity'
+    menus_equal 'long-name retry selects the original row' "$(row_index_of "$name")" "$(ipc selectedIndices)"
+    operations_secondary " · esc dismisses · $name selected for retry" "long-name error retains its hint and identity-verified retry text"
+    menus_expect statusFooterState '.right.visible and .right.width > 0 and .right.truncated and .right.implicitWidth > .right.width
+        and .secondary.visible and .secondary.width > 0 and .secondary.truncated and .secondary.implicitWidth > .secondary.width
+        and .hintWidth > 0 and .secondary.width >= ([.hintWidth, .slotWidth] | min)' \
+        "long secondary content cannot erase the primary error; both captions report their actual elision"
+    menus_equal 'long-name error retains its semantic role' "$(ipc palette | cut -d' ' -f6)" "$(ipc statusColor)"
+    operations_footer_geometry "long-name persistent error"
+    [[ "$(cat "$source/$name")" == 'long-name source' && "$(cat "$destination/$name")" == 'long-name collision' ]] \
+        || fail "operations: long-name collision changed source or existing destination"
+    shot operations-long-name-error
+    menus_acknowledge
+    menus_expect statusFooterState '(.right.text | startswith("Copied 0 of 1")) and .right.width > 0 and (.right.truncated | not) and .secondary.truncated' \
+        "acknowledging the long-name error leaves its complete short outcome ahead of the elided retry"
+    shot operations-long-name-acknowledged
     kill_flea
 }
 
@@ -451,6 +496,7 @@ case_operationsdesign() (
     "$flea_bin" --ui-state '{"view":"list","keys":"default","display":{"textSize":{"mode":14}},"menu":{"hidden":[]}}' >/dev/null || fail "operations: fixture settings failed"
     operations_missing_footer || fail "operations: missing-filesystem proof failed"
     operations_mixed || fail "operations: mixed-outcome proof failed"
+    operations_long_error || fail "operations: long-name footer proof failed"
     operations_search_footer || fail "operations: search footer proof failed"
     menus_guard "$menu_box/cancel-source/a-large.bin"
     truncate -s "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
@@ -459,5 +505,5 @@ case_operationsdesign() (
     printf 'OPERATIONS_WORKLOAD bytes=%s source=%q\n' "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
     operations_cancel pointer || fail "operations: interrupted pointer cancellation proof failed"
     operations_cancel escape || fail "operations: interrupted Escape cancellation proof failed"
-    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok informational_footer=ok search_initial=ok interrupted_pointer_cancel=ok interrupted_escape_cancel=ok unpaused_live=not_run positive_scanned_live=not_run visual_inspection=pending\n'
+    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok informational_footer=ok long_name_elision=ok search_initial=ok interrupted_pointer_cancel=ok interrupted_escape_cancel=ok unpaused_live=not_run positive_scanned_live=not_run visual_inspection=pending\n'
 )

@@ -115,11 +115,13 @@ QtObject {
         function statusFooterState(): string {
             function textState(item) {
                 return {text: item.text, visible: item.visible, x: item.x, width: item.width,
+                    implicitWidth: item.implicitWidth, truncated: item.truncated,
                     color: String(item.color), fontSize: item.font.pixelSize}
             }
             return JSON.stringify({path: root.bar.path, total: root.bar.total, selected: root.bar.selectionCount,
                 listingState: root.bar.listingState, filesystem: root.bar.fsText(), counts: root.bar.countText(),
                 frame: root.fleaWindow.rectOf(root.bar.stripItem), borderWidth: root.bar.stripItem.border.width,
+                slotWidth: root.bar.slotWidth, hintWidth: root.bar.hintWidth,
                 left: textState(root.bar.countsItem), right: textState(root.bar.primaryItem),
                 secondary: textState(root.bar.secondaryItem)})
         }
