@@ -494,7 +494,7 @@ operations_missed_window() {
 
 operations_cancel_live() (
     local source="$menu_box/cancel-source" destination="$menu_box/cancel-live" permissions_listing="$menu_box/cancel-source"
-    local state observed_bytes source_hash source_identity selected cursor pid deadline path
+    local state observed_bytes source_hash source_identity pid deadline path
     local -a pids
     menus_guard "$destination"
     mkdir "$destination" || fail "operations: live cancellation destination creation failed"
@@ -507,8 +507,6 @@ operations_cancel_live() (
     permissions_viewport 880 620
     hotkey --global ctrl a flea >/dev/null
     menus_expect selectionCount '. == 2' "live cancellation selects both real files"
-    selected=$(ipc selectedIndices) || fail "operations: live selection unavailable"
-    cursor=$(ipc cursor) || fail "operations: live cursor unavailable"
     mapfile -t pids < <(backend_pids)
     [[ "${#pids[@]}" == 1 ]] || fail "operations: live cancellation requires one owned backend"
     pid="${pids[0]}"
@@ -541,8 +539,11 @@ operations_cancel_live() (
         || operations_missed_window transfer-cancellation "$state"
     operations_absent "$destination/a-large.bin"
     operations_absent "$destination/b-after.txt"
-    menus_equal "unpaused Escape preserves listing marks" "$selected" "$(ipc selectedIndices)"
-    menus_equal "unpaused Escape preserves listing cursor" "$cursor" "$(ipc cursor)"
+    # Completion refreshes the listing and resets selection in released 0.1.6 as well.
+    menus_expect listInFlight '. == false' "completed cancellation finishes its listing refresh"
+    wait_listing 2
+    menus_equal "completed cancellation resets listing marks" "" "$(ipc selectedIndices)"
+    menus_equal "completed cancellation resets listing cursor" 0 "$(ipc cursor)"
     shot operations-cancelled-unpaused
     printf 'OPERATIONS_CANCEL variant=escape unpaused_native=ok filename_observed=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok attempts=1\n'
 )

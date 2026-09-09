@@ -111,10 +111,12 @@ Item {
             id: drag
             target: null
             xAxis.enabled: false
+            property real startY: 0
             onActiveChanged: {
-                if (active) return
+                if (active) { startY = persistentTranslation.y; return }
+                // Qt clears active translation before this release callback.
                 var to = Math.max(0, Math.min(Favourites.records.length - 1,
-                    root.row.favouriteIndex + Math.round(translation.y / Theme.railRowHeight)))
+                    root.row.favouriteIndex + Math.round((persistentTranslation.y - startY) / Theme.railRowHeight)))
                 if (to !== root.row.favouriteIndex) root.moved(to)
             }
         }

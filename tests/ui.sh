@@ -3700,7 +3700,7 @@ case "\$1 \${2:-}" in
 "info nfs://stale-two.test/export") exit 1 ;;
 "info nfs://late-retry.test/export") exit 1 ;;
 "info nfs://origin.test/export") printf 'local path: %s\n' "$races/mounted" ;;
-"info smb://shares-origin.test/alpha/")
+"info smb://shares-origin.test/alpha")
     : > "$fake_root/child-started"
     read release < "$fake_root/child-release"
     printf 'local path: %s\n' "$races/share-mounted"
@@ -7793,12 +7793,12 @@ if ! ( kill_flea ); then
 fi
 
 printf '\nLOG_CHECK_BEGIN %s\n' "$run_log"
-# case_network makes its own bookmarks file unreadable on purpose, and Quickshell correctly reports
+# case_network makes its own Flea store unreadable on purpose, and Quickshell correctly reports
 # that it cannot watch a file it cannot read. This drops that one line and nothing else: the path
 # carries this run's own pid and names one fixture home, so no product warning can ever match it.
 # The reader has no -q, so it drains the pipe and takes no SIGPIPE; pipefail then reports its own
 # status, which is what says whether anything but that one line matched.
-expected_warning="inotify_add_watch($fixture_root/network-home/.config/gtk-3.0/bookmarks) failed: (Permission denied)"
+expected_warning="inotify_add_watch($fixture_root/network-state/flea/ui.json) failed: (Permission denied)"
 # Qt Multimedia's ffmpeg backend saying VAAPI zero-copy needs an OpenGL RHI; Flea runs Vulkan, the backend falls back, and case_views proves the frames still change.
 vaapi_warning="VAAPITextureConverter: No rhi or non openGL based RHI"
 # case_formats and case_previewviews open a file with no permission bits on purpose; Qt names it, and this run's fixture path is the whole match.

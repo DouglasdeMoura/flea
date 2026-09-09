@@ -33,18 +33,81 @@ note() { printf '     %s\n' "$*"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1"; note "expected [$3]"; note "got      [$2]"; fi; }
 die() { bad "$*"; exit 1; }
 
+stop_owned_processes() {
+  [[ -n "${FLEA_PID:-}" ]] || return 0
+  python3 - "$SB" "$FLEA_PID" <<'PY'
+import os, signal, sys, time
+from pathlib import Path
+
+root, session = Path(sys.argv[1]), int(sys.argv[2])
+if not root.is_absolute() or not (root / ".flea-test-sandbox").is_file():
+    raise RuntimeError("drag cleanup: ownership root is missing; processes and fixtures kept")
+marker = b"FLEA_TEST_RUN_ROOT=" + os.fsencode(root)
+drain_seconds, kill_wait_seconds, poll_seconds = 30, 5, 0.05
+
+def owned_processes(pid=None):
+    processes = [Path("/proc", str(pid))] if pid else Path("/proc").iterdir()
+    owned = []
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        number = int(process.name)
+        try:
+            if os.getsid(number) != session:
+                continue
+            if process.stat().st_uid != os.getuid():
+                raise RuntimeError(f"drag cleanup: session process {number} has another owner")
+            # /proc/stat follows "pid (comm) state ..."; a zombie cannot receive input or write fixtures.
+            if (process / "stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                continue
+            if marker not in (process / "environ").read_bytes().split(b"\0"):
+                raise RuntimeError(f"drag cleanup: session process {number} lacks this run's marker")
+            owned.append(number)
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return owned
+
+def signal_owned(pid, value):
+    try:
+        descriptor = os.pidfd_open(pid)
+        try:
+            if pid in owned_processes(pid):
+                signal.pidfd_send_signal(descriptor, value)
+        finally:
+            os.close(descriptor)
+    except ProcessLookupError:
+        pass
+
+def drain(seconds):
+    deadline = time.monotonic() + seconds
+    remaining = owned_processes()
+    while remaining and time.monotonic() < deadline:
+        time.sleep(poll_seconds)
+        remaining = owned_processes()
+    return remaining
+
+for pid in owned_processes():
+    signal_owned(pid, signal.SIGCONT)
+    signal_owned(pid, signal.SIGTERM)
+# Match ui.sh/TUI: the backend has a 25-second drain limit, with a 30-second observation deadline.
+remaining = drain(drain_seconds)
+if remaining:
+    for pid in remaining:
+        signal_owned(pid, signal.SIGKILL)
+    survivors = drain(kill_wait_seconds)
+    raise RuntimeError(f"drag cleanup: processes {remaining} exceeded drain; SIGKILL survivors={survivors}; fixtures kept")
+print("DRAG_DRAIN owned_processes=0 forced_kill=false")
+PY
+}
+
 cleanup() {
-  local status=$?
+  local status=$? drained=true
   trap - EXIT
   if [ "$button_down" = true ]; then
     ydotool key 1:1 1:0 >/dev/null 2>&1 || { bad "cleanup could not cancel the held drag"; status=1; }
   fi
-  # R7 stops the backend it owns; a stopped process ignores TERM until it is continued.
-  [ -n "${BACKEND_PID:-}" ] && kill -CONT "$BACKEND_PID" 2>/dev/null
-  [ -n "${FLEA_PID:-}" ] && kill -- -"$FLEA_PID" 2>/dev/null
-  [ -n "${FLEA_PID:-}" ] && kill "$FLEA_PID" 2>/dev/null
-  [ -n "${FLEA_PID:-}" ] && wait "$FLEA_PID" 2>/dev/null
-  # Release only after the owned window exits, so a failed cancellation cannot commit the drop.
+  stop_owned_processes || { status=1; drained=false; }
+  # Teardown is bounded even when the owned application cannot drain; failed teardown retains its fixtures.
   if [ "$button_down" = true ]; then
     ydotool click 0x80 >/dev/null 2>&1 || { bad "cleanup could not release the pointer"; status=1; }
   fi
@@ -55,9 +118,13 @@ cleanup() {
     note "native stderr from $SB/flea.log"
     cat -- "$SB/flea.log"
   fi
-  sandbox_remove "$SB" 2>/dev/null
-  # R7's tmpfs root: its own mktemp, its own marker, and the pattern checked again before the delete.
-  case "${XDEV:-}" in /dev/shm/flea-drag-xdev-*) FIXTURE_ROOT=/dev/shm sandbox_remove "$XDEV" ;; esac
+  if [ "$drained" = true ]; then
+    sandbox_remove "$SB" 2>/dev/null
+    # R7's tmpfs root has its own mktemp and marker, checked again before deletion.
+    case "${XDEV:-}" in /dev/shm/flea-drag-xdev-*) FIXTURE_ROOT=/dev/shm sandbox_remove "$XDEV" ;; esac
+  else
+    bad "cleanup did not drain; fixtures kept at $SB ${XDEV:-}"
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -111,9 +178,32 @@ print("%s %s" % (hits[0]["id"], hits[0]["pid"]))
 ' "$repo/ui/shell.qml" "$FLEA_PID"
 }
 ipc() { qs ipc -i "$MYID" call flea "$@" 2>&1; }
+native_key() {
+  local result=0
+  omarchy-drive key --window flea "$@" || result=$?
+  (( result == 0 )) || die "native key delivery failed with status $result: $*"
+}
+expect_ipc() {
+  local reader="$1" expected="$2" observed attempt
+  for ((attempt=1; attempt<=40; attempt++)); do
+    observed=$(ipc "$reader") || die "native observer failed: $reader"
+    if [[ "$observed" == "$expected" ]]; then ok "$reader = $expected"; return; fi
+    sleep 0.25
+  done
+  die "$reader expected [$expected], observed [$observed]"
+}
+
+r5_state() {
+  local phase="$1" reader value
+  for reader in tabCount tabIndex tabLabels path keyDeliveryState pathBarOpen; do
+    value=$(ipc "$reader") || die "R5 $phase observer failed: $reader: $value"
+    printf 'DRAG_R5 phase=%s reader=%s value=%q\n' "$phase" "$reader" "$value"
+  done
+}
 
 # The product entry resolves the UI, renderer and backend identity before execing Quickshell.
-QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" HOME="$HOMEDIR" setsid "$FLEA_BIN" --gui "$HOMEDIR" >"$SB/flea.log" 2>&1 &
+QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" HOME="$HOMEDIR" FLEA_TEST_RUN_ROOT="$SB" \
+  setsid "$FLEA_BIN" --gui "$HOMEDIR" >"$SB/flea.log" 2>&1 &
 FLEA_PID=$!
 MYID=""
 MYPID=""
@@ -164,6 +254,15 @@ screen_centre() {
   set -- $c
   (( $1 > 0 && $2 > 0 && $1 < WW && $2 < WH )) || return 1
   echo $(( WX + $1 )) $(( WY + $2 ))
+}
+
+screen_tab_centre() {
+  local point x y
+  point=$(ipc tabCentre "$1") || return 1
+  [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
+  read -r x y <<< "$point"
+  (( x > 0 && y > 0 && x < WW && y < WH )) || return 1
+  printf '%s %s\n' "$((WX + x))" "$((WY + y))"
 }
 
 # The active listing's empty tail, including Columns' narrower floor, measured before any release.
@@ -304,15 +403,34 @@ echo "== R5: a drag resting on a tab selects it, and the drop lands on that tab'
 # on the empty floor under the rows. The marker resolves the drop by path, because after the switch
 # the row indices name bbb's own rows; a same-filesystem move is what a plain drag means.
 export PATH="$HOME/.local/bin:$PATH"
-omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.5
-omarchy-drive key --window flea : >/dev/null 2>&1; sleep 0.3
-omarchy-drive key --window flea "$HOMEDIR/bbb" >/dev/null 2>&1; sleep 0.2
-omarchy-drive key --window flea -k Return >/dev/null 2>&1; sleep 0.6
+r5_state before-t
+expect_ipc tabCount 1
+expect_ipc tabIndex 0
+native_key t
+r5_state after-t
+expect_ipc tabCount 2
+expect_ipc tabIndex 1
+native_key :
+expect_ipc pathBarOpen true
+native_key "$HOMEDIR/bbb"
+r5_state before-Return
+native_key -k Return
+r5_state after-Return
+expect_ipc pathBarOpen false
+expect_ipc path "$HOMEDIR/bbb"
+expect_ipc listInFlight false
 check "the second tab shows bbb" "$(ipc path)" "$HOMEDIR/bbb"
-omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.6
+r5_state before-1
+native_key 1
+r5_state after-1
+expect_ipc tabIndex 0
+expect_ipc path "$HOMEDIR"
+expect_ipc listInFlight false
 check "and the first tab is the home listing again" "$(ipc path)" "$HOMEDIR"
-set -- $(screen_centre r1a.txt); sx=$1; sy=$2
-set -- $(ipc tabCentre 1); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+point=$(screen_centre r1a.txt) || die "R5 source r1a.txt is not visible"
+read -r sx sy <<< "$point"
+point=$(screen_tab_centre 1) || die "R5 destination tab is not visible"
+read -r tx ty <<< "$point"
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
 # The rest outlives the switch by a second: the pressed row's delegate is released by the re-list
@@ -336,10 +454,10 @@ echo "== R6: a tab on the same directory re-lists under the drag, and the drop s
 # R5 left bbb's tab current, so the home tab is selected first and a third tab is opened from it; that
 # tab shows hidden files, where .local, aaa and bbb sort ahead of .r0hidden and every text row shifts.
 # A drop resolved by the lifted index would move the row now sitting there; by path it moves r1b.txt.
-omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.6
+native_key 1; sleep 0.6
 check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
-omarchy-drive key --window flea t >/dev/null 2>&1; sleep 0.8
-omarchy-drive key --window flea . >/dev/null 2>&1
+native_key t; sleep 0.8
+native_key .
 for i in $(seq 1 40); do [ "$(ipc showHidden)" = "true" ] && [ -n "$(rowidx .r0hidden)" ] && break; sleep 0.1; done
 # .cache and .local are the window's own, so the dotfile's row is pinned as after every folder, not a number.
 hidden_row=$(rowidx .r0hidden || echo none)
@@ -347,14 +465,17 @@ check "the third tab lists the hidden file" "$([ "$hidden_row" != none ] && echo
 check "and every folder sorts ahead of it" "$([ "$(rowidx aaa)" -lt "$hidden_row" ] && [ "$(rowidx bbb)" -lt "$hidden_row" ] && echo yes || echo no)" "yes"
 check "so aaa is no longer row 0 on this tab" "$([ "$(rowidx aaa)" -gt 0 ] && echo shifted || echo same)" "shifted"
 # aaa's centre is read here, on the tab the drop lands on, under whatever dotdirs sort ahead of it.
-set -- $(screen_centre aaa); fx=$1; fy=$2
-omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
+point=$(screen_centre aaa) || die "R6 destination aaa is not visible"
+read -r fx fy <<< "$point"
+native_key 1; sleep 0.8
 check "and the home tab does not" "$(rowidx .r0hidden || echo none)" "none"
 # Escape drops the restored selection; aaa already holds R3's copy, so the drop is judged by its delta.
-omarchy-drive key --window flea -k Escape >/dev/null 2>&1; sleep 0.3
+native_key -k Escape; sleep 0.3
 aaa_before=$(ls -A "$HOMEDIR/aaa" | tr '\n' ' ')
-set -- $(screen_centre r1b.txt); sx=$1; sy=$2
-set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+point=$(screen_centre r1b.txt) || die "R6 source r1b.txt is not visible"
+read -r sx sy <<< "$point"
+point=$(screen_tab_centre 2) || die "R6 destination tab is not visible"
+read -r tx ty <<< "$point"
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
 glide_to "$tx" "$ty"; sleep 1.2
@@ -382,12 +503,12 @@ check "the tmpfs root is another filesystem than the fixture" \
 printf 'r7 payload\n' > "$HOMEDIR/r7.txt"
 # R6 left the third tab current; it is walked into the tmpfs directory through the path bar, as R5 walked into bbb.
 check "the third tab is current" "$(ipc tabIndex)" "2"
-omarchy-drive key --window flea : >/dev/null 2>&1; sleep 0.3
-omarchy-drive key --window flea "$XDEV/big" >/dev/null 2>&1; sleep 0.2
-omarchy-drive key --window flea -k Return >/dev/null 2>&1
+native_key :; sleep 0.3
+native_key "$XDEV/big"; sleep 0.2
+native_key -k Return
 for i in $(seq 1 40); do [ "$(ipc path)" = "$XDEV/big" ] && [ "$(ipc listInFlight)" = false ] && break; sleep 0.25; done
 check "the third tab lists the tmpfs directory" "$(ipc path)" "$XDEV/big"
-omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
+native_key 1; sleep 0.8
 check "the home tab is current again" "$(ipc path)" "$HOMEDIR"
 for i in $(seq 1 40); do rowidx r7.txt >/dev/null 2>&1 && break; sleep 0.25; done
 # The one backend this suite owns: the instance's child running FLEA_BIN --backend, ui/Backend.qml's command.
@@ -396,8 +517,10 @@ for p in $(pgrep -P "$MYPID"); do
   [ "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" = "$FLEA_BIN --backend " ] && BACKEND_PID=$p
 done
 check "the suite found the one backend it owns" "$([ -n "$BACKEND_PID" ] && echo found || echo none)" "found"
-set -- $(screen_centre r7.txt); sx=$1; sy=$2
-set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+point=$(screen_centre r7.txt) || die "R7 source r7.txt is not visible"
+read -r sx sy <<< "$point"
+point=$(screen_tab_centre 2) || die "R7 destination tab is not visible"
+read -r tx ty <<< "$point"
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
 kill -STOP "$BACKEND_PID"
@@ -424,17 +547,20 @@ echo "== R8: the line over a folder on another filesystem says copy, and the dro
 # switch the pane's own dirDev is the destination's, and read from there the line said move over a
 # folder the drop would copy into. The same dragCopy drives the row's "copy here" badge.
 printf 'r8 payload\n' > "$HOMEDIR/r8.txt"
-omarchy-drive key --window flea 1 >/dev/null 2>&1; sleep 0.8
+native_key 1; sleep 0.8
 check "the home tab is current" "$(ipc path)" "$HOMEDIR"
 for i in $(seq 1 40); do rowidx r8.txt >/dev/null 2>&1 && break; sleep 0.25; done
-set -- $(screen_centre r8.txt); sx=$1; sy=$2
-set -- $(ipc tabCentre 2); tx=$(( WX + $1 )); ty=$(( WY + $2 ))
+point=$(screen_centre r8.txt) || die "R8 source r8.txt is not visible"
+read -r sx sy <<< "$point"
+point=$(screen_tab_centre 2) || die "R8 destination tab is not visible"
+read -r tx ty <<< "$point"
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
 glide_to "$tx" "$ty"
 for i in $(seq 1 40); do [ "$(ipc path)" = "$XDEV/big" ] && [ "$(ipc listInFlight)" = false ] && rowidx dest >/dev/null 2>&1 && break; sleep 0.1; done
 check "resting on the tmpfs tab listed it in full" "$(ipc path)" "$XDEV/big"
-set -- $(screen_centre dest); fx=$1; fy=$2
+point=$(screen_centre dest) || die "R8 destination folder is not visible"
+read -r fx fy <<< "$point"
 glide_to "$fx" "$fy"; sleep 0.6
 check "the line over the folder says copy" "$(ipc stickyMessage)" "Copy 1 item to dest"
 release; sleep 0.6
@@ -449,17 +575,6 @@ echo
 [ "$fail" = 0 ] || exit 1
 
 # ---------------------------------------------------------------- shared source/target ownership
-native_key() { omarchy-drive key --window flea "$@" >/dev/null 2>&1 || die "native key delivery failed: $*"; }
-expect_ipc() {
-  local reader="$1" expected="$2" observed attempt
-  for ((attempt=1; attempt<=40; attempt++)); do
-    observed=$(ipc "$reader") || die "native observer failed: $reader"
-    if [[ "$observed" == "$expected" ]]; then ok "$reader = $expected"; return; fi
-    sleep 0.25
-  done
-  die "$reader expected [$expected], observed [$observed]"
-}
-
 expect_feedback() {
   local owner="$1" line="$2" state attempt
   for ((attempt=1; attempt<=40; attempt++)); do

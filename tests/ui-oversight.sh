@@ -379,15 +379,20 @@ case_emptystate() (
         hotkey --global ctrl "$chord" flea >/dev/null
         cardsize_expect viewMode "$mode"
         menus_expect stateLayers '.empty and (.message | not)' "$mode empty hero excludes the ordinary state sentence"
+        menus_expect previewSelectionState '(.inlineVisible | not)' "$mode empty listing has no file preview"
         shot "empty-state-$mode"
     done
     sandbox_require "$directory"
     printf 'visible row\n' > "$directory/visible.txt"
     wait_listing 1
     menus_expect stateLayers '(.empty | not) and (.message | not)' "populated listing hides both empty surfaces"
+    hotkey --global ctrl 2 flea >/dev/null
+    cardsize_expect viewMode columns
+    menus_expect previewSelectionState '.inlineVisible and .index == 0' "Columns shows the selected file preview"
     key -M ctrl -k l -m ctrl "$directory/missing" -k Return >/dev/null
     cardsize_expect state error
     menus_expect stateLayers '(.empty | not) and .message' "a genuine missing-path error keeps its state sentence"
+    menus_expect previewSelectionState '(.inlineVisible | not)' "missing directory cannot retain the old file preview"
     shot empty-state-missing-path
     key -M ctrl -k l -m ctrl "$directory" -k Return >/dev/null
     wait_listing 1

@@ -531,6 +531,12 @@ case_settingsplaces() {
     expected=$(jq -c '.[1:3] |= reverse' <<< "$expected")
     places_wait_records "$expected"
     shot places-pointer-reorder
+    places_drag_row 1 2
+    expected=$(jq -c '.[1:3] |= reverse' <<< "$expected")
+    places_wait_records "$expected"
+    places_drag_row 2 1
+    expected=$(jq -c '.[1:3] |= reverse' <<< "$expected")
+    places_wait_records "$expected"
     settings_focus_row favourite:1
     settings_focus_row favouriteActions
     key l >/dev/null; key -k Space >/dev/null; settle

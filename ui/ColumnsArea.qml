@@ -257,7 +257,7 @@ Item {
             Flea.SelectionPreview {
                 id: preview
                 anchors.fill: parent
-                visible: !root.cursorIsDir && ViewState.previewColumn
+                visible: root.cursorRow !== null && !root.cursorIsDir && ViewState.previewColumn
                 pane: root.pane
                 onThumbsApplied: function (work) { root.thumbsApplied(work) }
             }
