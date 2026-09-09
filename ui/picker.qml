@@ -72,6 +72,8 @@ ShellRoot {
         readonly property bool saveReady: win.saveReview.key === win.saveKey
         readonly property bool saveCollision: win.saveReady && win.saveReview.collision
         readonly property bool submitting: win.acceptMarks || win.reviewRequest > 0
+        // Submission disables its initiating control; keep cancellation on the enabled focus path.
+        onSubmittingChanged: if (win.submitting) win.stepFocus(null, false)
         readonly property bool canAccept: !win.backendUnavailable && !win.submitting && !win.markRequest && (win.saving
             ? win.saveReady : win.marks.length > 0 || (win.folderMode && !win.recent && win.listingState !== "loading"))
 
@@ -333,6 +335,7 @@ ShellRoot {
                     win.saveReview = ({})
                     win.saveError = msg
                     win.say(msg + "; cancel and reopen this request.", true)
+                    win.stepFocus(null, false)
                     return
                 }
                 if (where === "scan" || where === "sort") {
@@ -521,7 +524,8 @@ ShellRoot {
                     id: statusHints
                     anchors.right: parent.right
                     anchors.rightMargin: Theme.spacing.rowPaddingX
-                    width: Math.min(implicitWidth, parent.width / 2)
+                    width: Math.min(implicitWidth, Math.max(0, parent.width - 2 * Theme.spacing.rowPaddingX
+                        - Theme.spacing.gap - Math.min(statusMessage.implicitWidth, parent.width / 2)))
                     anchors.verticalCenter: parent.verticalCenter
                     text: win.backendUnavailable ? "Esc cancel" : Picker.hints(win.req)
                     color: Theme.color.foreground
@@ -599,7 +603,9 @@ ShellRoot {
                     railFocus: places.focusItem.activeFocus, preset: Flea.ViewState.keysPreset,
                     bodySmall: Theme.font.bodySmall, body: Theme.font.body, width: win.width, height: win.height,
                     geometry: {chrome: chrome.height, rail: places.width, row: Theme.rowHeight, footer: status.height,
-                        save: save.height, list: list.height}, title: win.title, app: win.req.app})
+                        save: save.height, list: list.height, saveViewport: win.bounds(save.scrollItem), saveScroll: save.scrollItem.contentY},
+                    outputUri: {text: save.uri, offset: save.uriItem.contentX,
+                        maximum: Math.max(0, save.uriItem.contentWidth - save.uriItem.width)}, title: win.title, app: win.req.app})
             }
         }
 
@@ -609,7 +615,12 @@ ShellRoot {
             return Math.round(point.x) + " " + Math.round(point.y)
         }
         function control(name, item, available) {
-            return {name: name, visible: item.visible, enabled: available, focused: item.activeFocus, centre: win.centre(item)}
+            return {name: name, visible: item.visible, enabled: available, focused: item.activeFocus, centre: win.centre(item), bounds: win.bounds(item)}
+        }
+        function bounds(item) {
+            if (!item) return []
+            var point = item.mapToItem(win.contentItem, 0, 0)
+            return [point.x, point.y, item.width, item.height]
         }
         function stepFocus(from, back) {
             var items = chrome.focusItems().concat([places.focusItem, list], save.focusItems())

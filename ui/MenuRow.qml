@@ -171,19 +171,22 @@ Item {
     HoverHandler {
         id: pointer
         enabled: !root.isSeparator && root.available
-        // The first point after entry is where the pointer rested; only a later, different one is motion.
+        // Global coordinates distinguish actual motion from a row moving beneath the resting pointer.
         property bool armed: false
         property point restingAt
         onHoveredChanged: pointer.armed = false
         onPointChanged: {
             if (!pointer.hovered)
                 return
+            var position = root.mapToGlobal(pointer.point.position)
             if (!pointer.armed) {
                 pointer.armed = true
-                pointer.restingAt = pointer.point.position
+                pointer.restingAt = position
                 return
             }
-            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
+            var moved = position.x !== pointer.restingAt.x || position.y !== pointer.restingAt.y
+            pointer.restingAt = position
+            if (moved)
                 root.pointerMoved()
         }
     }

@@ -33,6 +33,7 @@ Item {
     property real leadingSlot: 0
     // The picker's second difference: SendPicker.html's narrow date column and its compact form.
     property bool compactDate: false
+    property bool foregroundMetadata: false
     // The window's own third: only FleaWindow.html and Search.html end a directory name with a slash.
     property bool dirSuffix: false
     readonly property real dateWidth: root.dualMode ? Theme.dualColumn.date : root.compactDate ? Theme.column.pickerDate : Theme.column.date
@@ -334,7 +335,7 @@ Item {
 
     // A lifted row is a surface the theme never modelled, so its text takes the strongest ink; see the plan's Task 2 table.
     function cellColor() {
-        return root.lifted ? Theme.color.foreground : root.dim
+        return root.lifted || root.foregroundMetadata ? Theme.color.foreground : root.dim
     }
 
     // A directory's own row.s is its dirent size, not the walk's, so this reads root.dirSize instead, see docs/protocol.md "dirsized".

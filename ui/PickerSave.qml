@@ -11,7 +11,10 @@ Item {
     signal nameEdited(string text)
     signal accepted()
     readonly property alias fieldItem: field
+    readonly property alias scrollItem: body
+    readonly property alias uriItem: outputUri
     readonly property string outPath: Picker.join(root.picker.path, root.picker.saveName)
+    readonly property string uri: Format.fileUri(root.outPath)
     readonly property string askedName: root.picker.saveName || root.picker.req.name
     readonly property bool refused: root.askedName.length > 0 && !Picker.validName(root.askedName)
     visible: root.picker.saving
@@ -71,14 +74,36 @@ Item {
                     color: Theme.color.foreground
                     font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 }
-                Text {
+                Flickable {
+                    id: outputUri
                     Layout.fillWidth: true
                     visible: !root.refused
-                    text: Format.fileUri(root.outPath)
-                    textFormat: Text.PlainText
-                    elide: Text.ElideLeft
-                    color: Theme.color.foreground
-                    font { family: Theme.font.family; pixelSize: Theme.font.caption }
+                    implicitHeight: uriText.implicitHeight
+                    contentWidth: uriText.implicitWidth
+                    contentHeight: height
+                    flickableDirection: Flickable.HorizontalFlick
+                    boundsBehavior: Flickable.StopAtBounds
+                    clip: true
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "Output URI"
+                    Accessible.description: uriText.text
+                    Keys.onHomePressed: contentX = 0
+                    Keys.onEndPressed: contentX = Math.max(0, contentWidth - width)
+                    Keys.onLeftPressed: contentX = Math.max(0, contentX - Theme.font.caption)
+                    Keys.onRightPressed: contentX = Math.min(Math.max(0, contentWidth - width), contentX + Theme.font.caption)
+                    Keys.onTabPressed: function(event) { root.picker.stepFocus(outputUri, (event.modifiers & Qt.ShiftModifier) !== 0) }
+                    Keys.onBacktabPressed: root.picker.stepFocus(outputUri, true)
+                    Flea.FastScrollHandler { flickable: outputUri }
+                    TapHandler { onTapped: outputUri.forceActiveFocus(Qt.MouseFocusReason) }
+                    Text {
+                        id: uriText
+                        text: root.uri
+                        textFormat: Text.PlainText
+                        color: outputUri.activeFocus ? Theme.color.accent : Theme.color.foreground
+                        font { family: Theme.font.family; pixelSize: Theme.font.caption }
+                        onTextChanged: outputUri.contentX = 0
+                    }
                 }
             }
             Text {
@@ -97,6 +122,14 @@ Item {
                 spacing: Theme.spacing.gap
                 ReviewButton { id: cancelButton; label: "Cancel"; onPressed: root.picker.cancel() }
                 ReviewButton { id: useButton; label: "Use this location"; danger: true; onPressed: root.picker.accept(true) }
+            }
+            Text {
+                width: parent.width
+                visible: root.picker.saveCollision
+                text: "This confirms the shown name and folder. Cancel leaves the existing file untouched."
+                wrapMode: Text.WordWrap
+                color: Theme.color.foreground
+                font { family: Theme.font.family; pixelSize: Theme.font.caption }
             }
         }
     }
@@ -134,8 +167,10 @@ Item {
         TapHandler { onTapped: { control.forceActiveFocus(Qt.MouseFocusReason); control.pressed() } }
     }
     function focusCancel() { cancelButton.forceActiveFocus(Qt.TabFocusReason) }
-    function focusItems() { return root.visible ? [field].concat(root.picker.saveCollision ? [cancelButton, useButton] : []) : [] }
+    function focusItems() { return root.visible ? [field, outputUri].concat(root.picker.saveCollision ? [cancelButton, useButton] : []) : [] }
     function controls() {
-        return root.focusItems().map(function(item) { return root.picker.control(item === field ? "Filename" : item.label, item, item.enabled) })
+        return root.focusItems().map(function(item) {
+            return root.picker.control(item === field ? "Filename" : item === outputUri ? "Output URI" : item.label, item, item.enabled)
+        })
     }
 }

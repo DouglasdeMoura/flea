@@ -189,6 +189,33 @@ class Request:
             raise AssertionError(f"{name} is not a visible control")
         return found[-1]
 
+    def focus_control(self, name):
+        def focus(state):
+            return [state["listFocus"], state["railFocus"], *[item["focused"] for item in state["controls"]]]
+        state = self.state()
+        for _ in range(len(state["controls"]) + 3):
+            if self.control(name)["focused"]:
+                check(f"{self.name}: native Tab focuses {name}", True)
+                return state
+            previous = focus(state)
+            self.key("-k", "Tab")
+            state = self.until("Tab advances focus", lambda state: focus(state) != previous)
+        raise AssertionError(f"native Tab never reached {name}")
+
+    def revealed(self, name):
+        state = self.state()
+        control = self.control(name)
+        x, y, width, height = control["bounds"]
+        left, top, viewport_width, viewport_height = state["geometry"]["saveViewport"]
+        check(f"{self.name}: focused {name} is fully inside the scrolling form",
+              control["focused"] and left <= x and top <= y and x + width <= left + viewport_width
+              and y + height <= top + viewport_height,
+              {"control": control, "viewport": state["geometry"]["saveViewport"], "scroll": state["geometry"]["saveScroll"]})
+        check(f"{self.name}: scrolling form stays above footer",
+              0 <= left and 0 <= top and left + viewport_width <= state["width"]
+              and top + viewport_height <= state["height"] - state["geometry"]["footer"], state["geometry"])
+        return state
+
     def point(self, centre, button="left"):
         x, y = map(int, centre.split())
         window = self.window()
@@ -397,11 +424,15 @@ def test_failure():
         try:
             lost.click("Save" if mode == "save" else "Open")
             lost.until("acceptance waits on the real stopped backend", lambda state: state["submitting"])
+            lost.until("submission keeps enabled Cancel focused", lambda state: any(
+                control["name"] == "Cancel" and control["focused"] and control["enabled"] for control in state["controls"]))
         finally:
             os.kill(backends[0], signal.SIGKILL)
         after = lost.until("lost backend clears checks and disables acceptance", lambda state: state["backendUnavailable"] and not state["submitting"] and not state["marksBusy"] and not state["saveBusy"] and not state["canAccept"] and state["messageError"])
         check("backend loss retains selected identities and draft", after["marks"] == before["marks"] and after["saveName"] == before["saveName"])
         check("backend loss advertises only cancellation", after["hints"] == "Esc cancel", after["hints"])
+        check("backend loss keeps enabled Cancel focused", any(
+            control["name"] == "Cancel" and control["focused"] and control["enabled"] for control in after["controls"]), after["controls"])
         lost.capture("unavailable")
         if mode == "open": lost.key("-k", "Escape")
         else: lost.click("Cancel")
@@ -451,6 +482,44 @@ def test_keys():
         state = small.state()
         check(f"SP10 size {size} listing remains inside viewport", state["geometry"]["list"] >= 0 and state["geometry"]["save"] >= 0, state["geometry"])
         small.capture("small")
+        initial_scroll = state["geometry"]["saveScroll"]
+        use_bounds = small.control("Use this location")["bounds"]
+        viewport = state["geometry"]["saveViewport"]
+        lower_clipped = use_bounds[1] + use_bounds[3] > viewport[1] + viewport[3]
+        small.focus_control("Filename")
+        small.revealed("Filename")
+        small.focus_control("Output URI")
+        small.revealed("Output URI")
+        small.key("-k", "End")
+        uri = small.until("End reveals the Output URI tail", lambda state: state["outputUri"]["offset"] == state["outputUri"]["maximum"])
+        check(f"SP10 size {size} Output URI identity unchanged", uri["outputUri"]["text"] == (fixture / "beta.txt").as_uri(), uri["outputUri"])
+        small.capture("uri-end")
+        small.key("-k", "Home")
+        small.until("Home restores the Output URI prefix", lambda state: state["outputUri"]["offset"] == 0)
+        if uri["outputUri"]["maximum"] > 0:
+            small.key("-k", "Right")
+            small.until("Right pans the Output URI", lambda state: 0 < state["outputUri"]["offset"] <= state["outputUri"]["maximum"])
+            small.key("-k", "Left")
+            small.until("Left restores the Output URI prefix", lambda state: state["outputUri"]["offset"] == 0)
+            small.click("Output URI")
+            small.until("pointer focuses Output URI", lambda state: small.control("Output URI")["focused"])
+            small.window()
+            drive("scroll", "right", "1")
+            small.until("horizontal wheel pans Output URI", lambda state: state["outputUri"]["offset"] > 0)
+            small.key("-k", "Home")
+            small.until("Home restores URI after wheel input", lambda state: state["outputUri"]["offset"] == 0)
+        small.focus_control("Cancel")
+        small.revealed("Cancel")
+        small.focus_control("Use this location")
+        revealed = small.revealed("Use this location")
+        if lower_clipped:
+            check(f"SP10 size {size} native focus scrolls clipped collision controls into view",
+                  revealed["geometry"]["saveScroll"] > initial_scroll, [initial_scroll, revealed["geometry"]["saveScroll"]])
+        small.capture("collision-focus")
+        for target in ["Cancel", "Output URI", "Filename"]:
+            small.key("-M", "shift", "-k", "Tab", "-m", "shift")
+            small.until(f"Shift Tab restores {target}", lambda state: small.control(target)["focused"])
+            small.revealed(target)
         small.cancel()
 
 

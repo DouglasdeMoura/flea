@@ -4015,7 +4015,7 @@ EOS
         && "$(ipc networkFocusState)" == "$draft_focus" && -z "$(ipc networkStatus)" ]] \
         || fail "network: late failure replaced or refocused the newer draft"
     [[ "$(ipc statusError)" == true && "$(ipc lastMessage)" == 'Connect failed: network location was refused' ]] \
-        || fail "network: preserving the newer draft hid the older mount failure"
+        || fail "network: preserving the newer draft hid the older mount failure: statusError=$(ipc statusError) message=$(ipc lastMessage) footer=$(ipc statusFooterState) result=$(ipc networkResult)"
     network_wait_favourites '.places.favourites | length == 4'
     shot network-late-retry-newer-draft
     key -k Escape >/dev/null

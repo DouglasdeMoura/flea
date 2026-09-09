@@ -144,7 +144,7 @@ case_thumbnailpolicy() (
         permissions_viewport 1280 900
         if [[ "$mode" == columns ]]; then
             key -M ctrl -k Space -m ctrl >/dev/null
-            thumbnailpolicy_expect '.previewIndex == 0 and (.previewPath | endswith("/a-ready.png")) and .previewReady' 'Columns loads the original image while row thumbnails are off'
+            thumbnailpolicy_expect '.previewIndex == 0 and (.previewPath | endswith("/a-ready.png")) and .previewReady' 'Columns decodes the completed cached thumbnail while row thumbnails are off'
         fi
         settings_open_key
         settings_section preview
@@ -159,7 +159,7 @@ case_thumbnailpolicy() (
             key -k Escape >/dev/null
             key -k Down >/dev/null
             key -M ctrl -k Space -m ctrl >/dev/null
-            thumbnailpolicy_expect '.previewIndex == 1 and (.previewPath | endswith("/b-block1.png")) and .previewReady and .files["1"] == null' 'Columns loads the original image and owns its still-pending thumbnail'
+            thumbnailpolicy_expect '.previewIndex == 1 and (.previewPath | endswith("/b-block1.png")) and (.previewReady | not) and .files["1"] == null' 'Columns loads the selected identity and waits for its gated thumbnail'
             settings_open_key
             settings_focus_row preview.thumbnails
             off_state='.pending == [1] and (.files | keys) == ["0","1"]'
@@ -199,6 +199,12 @@ PY
             || fail "thumbnailpolicy: changing policy moved the listing or changed loaded preview ownership"
         thumbnailpolicy_release || fail "thumbnailpolicy: running decoder release failed"
         thumbnailpolicy_expect '.pending == [] and (.files | keys) == ["0","1","2","3","4"] and all(.files[]; type == "string" and length > 0)' "$mode lets running real helpers finish while canceled jobs stay absent"
+        if [[ "$mode" == columns ]]; then
+            thumbnailpolicy_expect '.previewIndex == 1 and (.previewPath | endswith("/b-block1.png")) and .previewReady' 'Columns decodes its owned thumbnail after gate release'
+            omarchy-drive wait ipc -p "$flea_ui" flea columnThumbShown true --timeout 15 >/dev/null \
+                || fail "thumbnailpolicy: completed selected thumbnail is not drawn in the Columns frame"
+            baseline=$(jq -c '.previewReady = true' <<< "$baseline") || fail "thumbnailpolicy: invalid preview baseline"
+        fi
         thumbnailpolicy_helper_inventory "$expected_initial"
         for index in 0 1 2 3 4 5 6; do
             [[ -z "$(ipc rowThumb "$index")" ]] || fail "thumbnailpolicy: Off still draws a thumbnail at row $index"

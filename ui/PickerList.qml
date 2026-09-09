@@ -71,6 +71,7 @@ ListView {
             anchors.fill: parent
             leadingSlot: root.checkSize + Theme.spacing.gap
             compactDate: true
+            foregroundMetadata: true
             hiddenCols: Picker.HIDDEN_COLS
             row: cell.shownRow
             cursor: cell.listingIndex === root.picker.cursorIndex
