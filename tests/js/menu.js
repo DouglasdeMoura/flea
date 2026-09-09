@@ -23,11 +23,11 @@ function run(check) {
     check("Restore all uses the authoritative undo geometry", Icons.pathFor("undo"), "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8 M3 3v5h5")
     check("inventory storage ids are unique", Object.keys(Menu.INVENTORY.reduce(function (out, row) { out[row[0]] = true; return out }, {})).length, 30)
     check("default image menu matches Menus specimen", actions(file),
-          "open,cut,copy,paste,duplicate,rename,compress,convert,taildrop,dropbox,trash,addFavourite,toggleHidden")
+          "open,cut,copy,paste,duplicate,rename,compress,convert,taildrop,dropbox,trash,openWith,addFavourite,toggleHidden")
     check("empty clipboard leaves Paste visible and disabled", entry(file, "paste").disabled, true)
     check("populated clipboard enables Paste", entry(Menu.listingEntries(state({ clipboardAvailable: true })), "paste").disabled, false)
     check("folder omits conversion and extraction", actions(Menu.listingEntries(state({ rowMode: 0o040755, rowIsImage: false }))),
-          "open,cut,copy,paste,duplicate,rename,compress,taildrop,dropbox,trash,addFavourite,toggleHidden")
+          "open,cut,copy,paste,duplicate,rename,compress,taildrop,dropbox,trash,openWith,addFavourite,toggleHidden")
     check("background menu includes real creation actions in order", actions(Menu.listingEntries(state({ hasRow: false }))),
           "newFolder,newFile,paste,selectAll,addFavourite,sort,toggleHidden,settings")
     check("selected file cannot be pinned as a folder", entry(file, "addFavourite").disabled, true)

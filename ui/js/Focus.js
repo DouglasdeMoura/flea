@@ -37,6 +37,8 @@ function lookup(event, root) {
         if (event.key === Qt.Key_Right) return "cursorRight"
     }
     var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
+    // The share listing borrows the menu context for j/k/enter, but it has no submenu to step into.
+    if (action === "menuRight" && shareBrowserHere(root)) return "open"
     // Only the bare a is rail-only; Ctrl+K is scoped to neither view and opens the dialog anywhere.
     if (action === "addNetwork" && root.focusView !== RAIL && !(event.modifiers & Qt.ControlModifier))
         return ""

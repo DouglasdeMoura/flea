@@ -263,7 +263,7 @@ function run(check) {
     var gone = renamePane(0, 7, stale)
     Ops.commitRename(gone, "x")
     check("a missing source cannot send a write or discard the draft",
-          stale.length + "|" + gone.renamingIndex + "|" + gone.renameError, "0|7|Selected item changed; reopen Rename.")
+          stale.length + "|" + gone.renamingIndex + "|" + gone.renameError, "0|7|Item changed; reopen Rename.")
     for (var invalid of ["", ".", "..", "a/b", "a\u0000b"]) {
         var refusedWrites = [], refused = renamePane(2, 2, refusedWrites)
         Ops.commitRename(refused, invalid)
