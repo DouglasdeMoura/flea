@@ -12,6 +12,13 @@ thumbnailpolicy_expect() {
         fi
         sleep 0.05
     done
+    local diagnostic
+    for diagnostic in "$menu_box"/decoder-*.log; do
+        [[ -f "$diagnostic" ]] || continue
+        menus_guard "$diagnostic"
+        printf 'THUMBNAIL_DECODER_LOG %s\n' "$diagnostic"
+        cat "$diagnostic"
+    done
     fail "thumbnailpolicy: $label: expected $expression; observed $observed"
 }
 
@@ -68,6 +75,9 @@ if binds:
     if name.startswith('b-block') and not (root / 'released').exists():
         with (root / 'gates' / name).open('rb', buffering=0) as gate:
             assert gate.read(1) == b'1'
+    diagnostic = os.open(root / ('decoder-' + name + '.log'), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.dup2(diagnostic, 2)
+    os.close(diagnostic)
 # Keep the production resource limits, bwrap jail and selected decoder unchanged after the gate.
 os.execv('/usr/bin/prlimit', ['/usr/bin/prlimit', *arguments])
 PY

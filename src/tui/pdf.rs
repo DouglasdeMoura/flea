@@ -144,32 +144,47 @@ impl Pdf {
     pub fn prefix(&self) -> String {
         format!("Page {} / {} · {}%  ", self.page, if self.pages == 0 { "?".into() } else { self.pages.to_string() }, self.zoom)
     }
-    pub fn control_at(&self, cell: usize, quicklook: bool) -> Option<usize> {
-        let mut x = 0;
-        for index in 0..if quicklook { 6 } else { 5 } {
-            let width = if index == self.control { 3 } else { 1 };
-            if cell >= x && cell < x + width { return Some(index); }
-            x += width + 2;
-        }
-        None
+    pub fn control_at(&self, cell: usize, quicklook: bool, columns: usize) -> Option<(usize, bool)> {
+        toolbar(self.control, quicklook, columns).1.get(cell).copied().flatten()
     }
-    pub fn line(&self, quicklook: bool) -> String {
-        let labels = ["‹", "›", "−", "+", "↗", "×"];
-        let buttons = labels
-            .iter()
-            .take(if quicklook { 6 } else { 5 })
-            .enumerate()
-            .map(|(i, label)| {
-                if i == self.control {
-                    format!("[{}]", label)
-                } else {
-                    label.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        buttons
+    pub fn line(&self, quicklook: bool, columns: usize) -> String {
+        toolbar(self.control, quicklook, columns).0
     }
+}
+fn toolbar(control: usize, quicklook: bool, columns: usize) -> (String, Vec<Option<(usize, bool)>>) {
+    let labels: Vec<String> = ["‹", "›", "−", "+", "↗", "×"].iter()
+        .take(if quicklook { 6 } else { 5 }).enumerate()
+        .map(|(index, label)| if index == control { format!("[{label}]") } else { label.to_string() }).collect();
+    let widths: Vec<usize> = labels.iter().map(|label| super::render::text_width(label)).collect();
+    let overflow = widths.iter().sum::<usize>() + (labels.len() - 1) * 2 > columns;
+    let available = columns.saturating_sub(if overflow { 2 } else { 0 });
+    let (mut first, mut end, mut used) = (control, control + 1, widths[control]);
+    // Keep complete controls around focus; overflow arrows reveal controls without activating them.
+    while first > 0 && used + 2 + widths[first - 1] <= available {
+        first -= 1;
+        used += 2 + widths[first];
+    }
+    while end < labels.len() && used + 2 + widths[end] <= available {
+        used += 2 + widths[end];
+        end += 1;
+    }
+    let (mut line, mut hits) = (String::new(), Vec::new());
+    let mut append = |text: &str, hit| {
+        line.push_str(text);
+        hits.extend(std::iter::repeat(hit).take(super::render::text_width(text)));
+    };
+    if overflow {
+        append(if first > 0 { "←" } else { " " }, first.checked_sub(1).map(|index| (index, false)));
+    }
+    for (index, label) in labels.iter().enumerate().take(end).skip(first) {
+        if index > first { append("  ", None); }
+        append(label, Some((index, true)));
+    }
+    if overflow {
+        append(&" ".repeat(available.saturating_sub(used)), None);
+        append(if end < labels.len() { "→" } else { " " }, (end < labels.len()).then_some((end, false)));
+    }
+    (line, hits)
 }
 // Sample input: Pages:           12
 fn pages(text: &str) -> usize {
@@ -187,5 +202,43 @@ mod tests {
     fn page_count_uses_named_fact() {
         assert_eq!(pages("Title: 99\nPages: 12\n"), 12);
         assert_eq!(pages("Pages: unknown"), 0);
+    }
+    #[test]
+    fn narrow_toolbar_keeps_focus_and_pointer_targets_visible() {
+        let labels = ["‹", "›", "−", "+", "↗", "×"];
+        assert_eq!(toolbar(0, false, 80).0, "[‹]  ›  −  +  ↗");
+        assert!(!super::super::render::fit(&toolbar(4, false, 80).0, 6).contains("[↗]"));
+        for quicklook in [false, true] {
+            let count = if quicklook { 6 } else { 5 };
+            for terminal_columns in 12..=100 {
+                let columns = if quicklook { terminal_columns } else { super::super::render::panes(terminal_columns, true).2 };
+                for control in 0..count {
+                    let (line, hits) = toolbar(control, quicklook, columns);
+                    assert!(super::super::render::text_width(&line) <= columns);
+                    assert_eq!(hits.len(), super::super::render::text_width(&line));
+                    assert!(line.contains(&format!("[{}]", labels[control])));
+                    assert_eq!(hits.iter().filter(|hit| **hit == Some((control, true))).count(), 3);
+                    for (index, activate) in hits.iter().flatten() {
+                        assert!(*index < count);
+                        assert_eq!(*activate, line.contains(labels[*index]));
+                    }
+                }
+                for forward in [false, true] {
+                    let mut control = if forward { 0 } else { count - 1 };
+                    let mut reachable = [false; 6];
+                    for _ in 0..count {
+                        let (_, hits) = toolbar(control, quicklook, columns);
+                        for (index, activate) in hits.iter().flatten() {
+                            if *activate { reachable[*index] = true; }
+                        }
+                        let edge = if forward { hits.last() } else { hits.first() };
+                        let Some(Some((next, false))) = edge else { break; };
+                        assert!(if forward { *next > control } else { *next < control });
+                        control = *next;
+                    }
+                    assert!(reachable[..count].iter().all(|visible| *visible));
+                }
+            }
+        }
     }
 }

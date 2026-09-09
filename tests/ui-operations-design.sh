@@ -24,6 +24,63 @@ operations_secondary() {
     menus_equal "$2" "$1" "$(ipc statusSecondary)"
 }
 
+operations_idle_footer() {
+    local total="$1" selected="$2" label="$3" items="$1 items"
+    [[ "$total" == 1 ]] && items="1 item"
+    menus_expect statusFooterState ".total == $total and .selected == $selected and .countsLeft and .filesystem != \"\" and .left.text == \"$items\" and .right.text == .filesystem and .right.width > 0 and .right.color == .left.color and .right.fontSize == .left.fontSize" "$label"
+    if [[ "$selected" == 0 ]]; then
+        menus_expect statusFooterState '(.selection.visible | not) and .right.x >= .left.x + .left.width' "$label has no selection label"
+    else
+        menus_expect statusFooterState ".selection.visible and .selection.text == \"$selected selected\" and .selection.x == .left.x + .left.width + .countGap and .right.x >= .selection.x + .selection.width" "$label has separate nonoverlapping counts"
+    fi
+    menus_equal "$label foreground" "$(ipc themeForeground)" "$(ipc statusColor)"
+}
+
+operations_path_footer() {
+    menus_expect statusFooterState '(.countsLeft | not) and .left.text == .path and (.selection.visible | not) and .right.text != .filesystem' "$1 retains the path beside activity"
+}
+
+operations_missing_footer() {
+    local missing="$menu_box/missing"
+    menus_guard "$missing"
+    [[ ! -e "$missing" && ! -L "$missing" ]] || fail "operations: missing-path fixture already exists"
+    launch "$missing"
+    menus_expect statusFooterState '.listingState == "error" and .filesystem == ""' "missing directory has no filesystem information"
+    menus_acknowledge
+    menus_expect statusFooterState '(.countsLeft | not) and .left.text == .path and .right.text == "unavailable" and (.selection.visible | not)' "missing filesystem retains path-left and unavailable fallback-right"
+    menus_equal "missing filesystem fallback foreground" "$(ipc themeForeground)" "$(ipc statusColor)"
+    shot operations-no-filesystem
+    kill_flea
+}
+
+operations_loading_footer() (
+    local permissions_listing="$1" total="$2" operations_stopped="" pid end state
+    local -a pids
+    menus_guard "$permissions_listing"
+    mapfile -t pids < <(backend_pids)
+    [[ "${#pids[@]}" == 1 ]] || fail "operations: loading proof requires one owned backend"
+    pid="${pids[0]}"
+    permissions_backend_owned "$pid" || fail "operations: loading backend candidate, fixture or session differs"
+    operations_stopped="$pid"
+    trap 'permissions_resume_stopped "$operations_stopped"' EXIT
+    kill -STOP "$pid" || fail "operations: could not pause the owned listing backend"
+    end=$((SECONDS + 15))
+    while (( SECONDS < end )); do
+        # Sample process state: Tsl; its leading T proves the owned backend stopped.
+        state=$(ps -o stat= -p "$pid") || fail "operations: paused listing backend disappeared"
+        [[ "$state" == T* ]] && break
+        sleep 0.05
+    done
+    [[ "$state" == T* ]] || fail "operations: listing backend did not stop"
+    key -M ctrl -k l -m ctrl "$permissions_listing" -k Return >/dev/null
+    menus_expect statusFooterState '.listingState == "loading" and .filesystem != "" and (.countsLeft | not) and .left.visible and .left.width > 0 and .left.text == .path and (.selection.visible | not)' "native refresh preserves its path while the backend cannot reply"
+    shot operations-loading-footer
+    permissions_resume_stopped "$operations_stopped" || fail "operations: listing backend could not resume"
+    operations_stopped=""
+    wait_listing "$total"
+    operations_idle_footer "$total" 0 "resumed listing restores idle counts and filesystem"
+)
+
 operations_absent() {
     local path="$1" end=$((SECONDS + 15))
     menus_guard "$path"
@@ -47,11 +104,20 @@ operations_mixed() {
     wait_listing 5
     permissions_viewport 920 600
     operations_secondary "" "no retry claim exists before an attributed failure"
+    operations_idle_footer 5 0 "idle footer shows all five items and actual filesystem"
+    operations_loading_footer "$source" 5
+    key v >/dev/null
+    operations_idle_footer 5 1 "native selection adds the separate one-selected label"
+    shot operations-idle-selected
+    key v >/dev/null
+    operations_idle_footer 5 0 "native deselection removes the selection label"
     hotkey --global ctrl a flea >/dev/null
     menus_expect selectionCount '. == 5' "native Select All captures all five sources"
+    operations_idle_footer 5 5 "native Select All updates the separate selection label"
     operations_copy_to "$destination"
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1 and (.notice | contains("Copied 4 of 5") and contains("1 failed"))' "mixed completion retains all counts behind its named error"
     menus_error 'Copy failed: c.txt' 'collision names the failed source'
+    operations_path_footer "persistent error"
     menus_expect selectionCount '. == 1' "failed original is selected for retry"
     selected=$(ipc selectedIndices)
     [[ "$selected" == "$(row_index_of c.txt)" ]] || fail "operations: retry selected a different source"
@@ -64,6 +130,7 @@ operations_mixed() {
     operations_status_control dismiss
     menus_message 'Copied 4 of 5' 'acknowledgement reveals the complete outcome'
     menus_expect statusActivityState '.undo.visible and .undo.enabled and .errors == 0' "successful items retain their native Undo control"
+    operations_path_footer "acknowledged completion"
     operations_secondary "c.txt selected for retry" "acknowledged completion retains its selected-retry secondary"
     shot operations-mixed-acknowledged
     key -k Escape >/dev/null
@@ -114,6 +181,7 @@ operations_cancel() (
     menus_expect selectionCount '. == 2' "$variant cancellation selects two real files"
     operations_copy_to "$destination"
     menus_expect statusActivityState '.activities[0].running and .cancel.enabled' "$variant transfer is running through the actual copy path"
+    operations_path_footer "$variant transfer"
     if [[ "$variant" == paused ]]; then
         ui_pid=$(flea_pid)
         mapfile -t pids < <(pgrep -P "$ui_pid" -x flea)
@@ -141,6 +209,7 @@ operations_cancel() (
     operations_status_control cancel
     if [[ "$variant" == paused ]]; then
         menus_expect statusActivityState '.activities[0].cancelling and .cancel.visible and (.cancel.enabled | not)' "Cancel disables immediately while the backend is interrupted"
+        operations_path_footer "pending cancellation"
         operations_status_control cancel
         menus_expect statusActivityState '.activities[0].cancelling and (.cancel.enabled | not)' "repeated pointer Cancel cannot resubmit"
         shot operations-cancelling
@@ -166,6 +235,7 @@ case_operationsdesign() (
     for path in state config cache data cancel-source; do menus_guard "$menu_box/$path"; mkdir "$menu_box/$path"; done
     export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config" XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
     "$flea_bin" --ui-state '{"view":"list","keys":"default","menu":{"hidden":[]}}' >/dev/null || fail "operations: fixture settings failed"
+    operations_missing_footer
     operations_mixed
     menus_guard "$menu_box/cancel-source/a-large.bin"
     truncate -s "$operations_bytes" "$menu_box/cancel-source/a-large.bin"

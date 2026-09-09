@@ -21,6 +21,9 @@ Item {
     readonly property var dismissItem: dismissAction
     readonly property var cancelItem: cancelAction
     readonly property var undoItem: undoAction
+    readonly property var locationItem: location
+    readonly property var selectionItem: selected
+    readonly property var primaryItem: primary
     readonly property bool transientIsError: root.errors.length > 0
     property var activities: []
     readonly property var activity: root.activities.length ? root.activities[0] : null
@@ -42,6 +45,10 @@ Item {
         (root.transientIsError || root.stickyHere) && root.searching ? "search " + root.searchLine : "",
         root.retryLine]
         .filter(function (s) { return s.length > 0 }).join(" · ")
+    readonly property bool countsLeft: (root.listingState === "ready" || root.listingState === "empty")
+        && root.fsName.length > 0 && !root.transient_.length
+        && !root.stickyHere && !root.searching && !root.secondaryText.length
+    readonly property int countGap: Theme.space(16)
     signal transferCancelRequested(int id)
     signal undoRequested()
     implicitHeight: Theme.chromeHeight + detailView.height
@@ -76,12 +83,17 @@ Item {
     onStickyHereChanged: root.syncNoticeTimer()
     onSearchingChanged: root.syncNoticeTimer()
 
-    function countText() {
+    function itemText() {
         if (root.listingState === "empty") return "empty"
         if (root.listingState === "error" || root.listingState === "locked") return "unavailable"
         if (root.listingState !== "ready") return ""
-        var base = root.total + (root.total === 1 ? " item" : " items")
-        return root.selectionCount > 0 ? base + " · " + root.selectionCount + " selected" : base
+        return root.total + (root.total === 1 ? " item" : " items")
+    }
+
+    function countText() {
+        var base = root.itemText()
+        return root.listingState === "ready" && root.selectionCount > 0
+            ? base + " · " + root.selectionCount + " selected" : base
     }
 
     function fsText() {
@@ -118,11 +130,26 @@ Item {
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: strip.verticalCenter
         width: Math.min(implicitWidth, root.width / 4)
-        text: root.path
+        text: root.countsLeft ? root.itemText() : root.path
         color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         elide: Text.ElideMiddle
+        textFormat: Text.PlainText
+    }
+
+    Text {
+        id: selected
+        visible: root.countsLeft && root.listingState === "ready" && root.selectionCount > 0
+        anchors.left: location.right
+        anchors.leftMargin: root.countGap
+        anchors.verticalCenter: strip.verticalCenter
+        width: Math.min(implicitWidth, root.width / 4)
+        text: root.selectionCount + " selected"
+        color: Theme.color.foreground
+        font.family: Theme.font.family
+        font.pixelSize: Theme.font.caption
+        elide: Text.ElideRight
         textFormat: Text.PlainText
     }
 
@@ -177,7 +204,9 @@ Item {
         anchors.right: separator.visible ? separator.left : secondary.left
         anchors.rightMargin: secondary.width ? Theme.spacing.gap : 0
         anchors.verticalCenter: strip.verticalCenter
-        width: Math.max(0, Math.min(implicitWidth, (separator.visible ? separator.x : secondary.x) - location.x - location.width - 3 * Theme.spacing.gap - root.spiralSize))
+        width: Math.max(0, Math.min(implicitWidth, (separator.visible ? separator.x : secondary.x)
+            - (selected.visible ? selected.x + selected.width : location.x + location.width)
+            - 3 * Theme.spacing.gap - root.spiralSize))
         text: root.rightText() || root.countText()
         color: root.rightColor()
         font.family: Theme.font.family

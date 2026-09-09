@@ -110,6 +110,16 @@ QtObject {
                 cancel: root.controlState("Cancel", root.bar.cancelItem), undo: root.controlState("Undo", root.bar.undoItem),
                 dismiss: root.controlState("Dismiss error", root.bar.dismissItem)})
         }
+        function statusFooterState(): string {
+            function textState(item) {
+                return {text: item.text, visible: item.visible, x: item.x, width: item.width,
+                    color: String(item.color), fontSize: item.font.pixelSize}
+            }
+            return JSON.stringify({path: root.bar.path, total: root.bar.total, selected: root.bar.selectionCount,
+                listingState: root.bar.listingState, filesystem: root.bar.fsText(), countsLeft: root.bar.countsLeft,
+                countGap: root.bar.countGap, left: textState(root.bar.locationItem),
+                selection: textState(root.bar.selectionItem), right: textState(root.bar.primaryItem)})
+        }
         function menuState(): string {
             var menu = root.pane.contextMenu()
             return JSON.stringify({opened: menu.visible, entries: menu.entries, cursor: menu.cursor,
@@ -464,7 +474,7 @@ QtObject {
                 formats: dialog.formats.map(function(format, index) {
                     return Object.assign(root.controlState(format, dialog.formatItem(index)), {selected: dialog.format === format,
                         current: dialog.formatItem(index).current, labelColor: String(dialog.formatItem(index).labelColor),
-                        markColor: String(dialog.formatItem(index).markColor)})
+                        markColor: String(dialog.formatItem(index).markColor), pointerProbe: dialog.formatItem(index).probe()})
                 }), controls: [root.controlState("Remove metadata", dialog.metadataItem),
                     root.controlState("Cancel", dialog.cancelItem), root.controlState("Convert", dialog.submitItem)]})
         }

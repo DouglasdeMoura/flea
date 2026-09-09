@@ -717,9 +717,10 @@ fn pointer_key(
                 .x
                 .saturating_sub(if m.quicklook { 1 } else { left + middle + 3 });
             if let Some(pdf) = &mut m.pdf {
-                if let Some(control) = pdf.control_at(cell, m.quicklook) {
+                let columns = if m.quicklook { m.columns } else { super::render::panes(m.columns, true).2 };
+                if let Some((control, activate)) = pdf.control_at(cell, m.quicklook, columns) {
                     pdf.control = control;
-                    if !pointer.motion {
+                    if activate && !pointer.motion {
                         return self::key(m, &Key::named("Return", ""), map, w);
                     }
                 }

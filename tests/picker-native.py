@@ -227,7 +227,8 @@ class Request:
         result = wait(f"{self.name} callback", lambda: self.result)
         check(f"{self.name}: response", result["response"] == code, result)
         if code:
-            check(f"{self.name}: cancelled/fault results empty", result["results"] == {}, result)
+            # The public frontend may add an empty URI array; portal.sh checks the backend's empty dictionary.
+            check(f"{self.name}: cancelled/fault frontend returns no selection", result["results"] in ({}, {"uris": []}), result)
         else:
             check(f"{self.name}: retained URIs", result["results"].get("uris") == uris, result)
         wait(f"{self.name} native window closed", lambda: not any(window.get("title") == self.title for window in windows()))

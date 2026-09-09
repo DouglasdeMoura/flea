@@ -2649,8 +2649,10 @@ case_gridnavigation() {
         key -k Escape -k Home -M shift -k Down -m shift >/dev/null
         cardsize_expect cursor "$next_columns"
         cardsize_expect selectionCount "$((next_columns + 1))"
-        key -k Escape / file-0 -k Return -k Home >/dev/null
+        key -k Escape /file-0 -k Return -k Home >/dev/null
         printf 'GRID_FILTER state=%s\n' "$(ipc keyDeliveryState)"
+        jq -e '.filterQuery == "file-0" and (.filterTyping | not)' <<< "$(ipc keyDeliveryState)" >/dev/null \
+            || fail "grid: native filter text or committed state differs"
         cardsize_expect drawnCount 9
         cardsize_expect cursor 0
         cardsize_expect visibleRowName file-01.txt 0
@@ -2659,7 +2661,7 @@ case_gridnavigation() {
         key v >/dev/null
         cardsize_expect selectedIndices "$next_columns"
         shot "grid-navigation-$preset-filtered"
-        key -k Escape / no-such-tile -k Return >/dev/null
+        key -k Escape /no-such-tile -k Return >/dev/null
         cardsize_expect drawnCount 0
         [[ -z "$(ipc visibleRowName "$next_columns")" ]] || fail "grid: hidden filtered tile still has a visible delegate"
         shot "grid-navigation-$preset-zero-matches"
@@ -3440,6 +3442,26 @@ case_network() {
     done
     for name in late origin shares child; do mkfifo "$fake_root/$name-release"; done
 
+    network_cleanup() {
+        local name fifo fd result=0
+        local -a release_fds=()
+        sandbox_require "$fake_root"
+        sandbox_owned "$fake_root" || fail "network: refusing cleanup of an unowned fixture"
+        for name in mount late origin shares child; do
+            sandbox_require "$fake_root/$name-release"
+            fifo="$SANDBOX_PATH"
+            [[ -p "$fifo" && ! -L "$fifo" ]] || fail "network: cleanup barrier is not an owned FIFO: $fifo"
+            # Keep both ends open through the reap so even a helper arriving late receives its release.
+            exec {fd}<>"$fifo" || fail "network: could not open cleanup barrier: $fifo"
+            release_fds+=("$fd")
+            printf 'release\n' >&"$fd" || fail "network: could not release cleanup barrier: $fifo"
+        done
+        ( kill_flea ) || result=1
+        for fd in "${release_fds[@]}"; do exec {fd}>&-; done
+        return "$result"
+    }
+    trap 'network_cleanup || exit 1' EXIT
+
     network_wait_favourites() {
         settings_wait_value "$1"
         local expected
@@ -3959,9 +3981,17 @@ EOS
 
     network_click_favourite "Late retry"
     wait_marker "$fake_root/late-started" "network: late retry did not reach its mount barrier"
+    [[ "$(ipc keymapPreset)" == default && "$(ipc focusView)" == rail && "$(ipc networkResult)" == mounting ]] \
+        || fail "network: direct mount context differs: preset=$(ipc keymapPreset) focus=$(ipc focusView) result=$(ipc networkResult)"
     key -M ctrl -k k -m ctrl >/dev/null
     settle
-    [[ "$(ipc dialogOpen)" == true ]] || fail "network: Ctrl+K did not open a newer draft during the direct mount"
+    [[ "$(ipc dialogOpen)" == false ]] || fail "network: Mac-only Ctrl+K opened a draft in the Default preset"
+    key a >/dev/null
+    settle
+    [[ "$(ipc dialogOpen)" == true ]] \
+        || fail "network: rail a did not open a newer draft: preset=$(ipc keymapPreset) focus=$(ipc focusView) dialog=$(ipc dialogOpen) mount=$(ipc networkResult) dialogFocus=$(ipc networkFocusState)"
+    printf 'NETWORK direct-mount preset=%s focus=%s dialog=%s mount=%s default-CtrlK=refused rail-a=opened\n' \
+        "$(ipc keymapPreset)" "$(ipc networkFocusState)" "$(ipc dialogOpen)" "$(ipc networkResult)"
     click_chip NFS
     key "newer-draft.test" >/dev/null
     key -k Tab -k Tab >/dev/null
@@ -4066,7 +4096,8 @@ EOS
     export PATH="$saved_path"
     if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
     if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
-    kill_flea
+    network_cleanup || fail "network: owned process did not drain after releasing its barriers"
+    trap - EXIT
     sandbox_remove "$fixture_home"
     sandbox_remove "$fake_root"
 }

@@ -9,6 +9,16 @@ convert_choose_format() {
     menus_expect convertState ".opened and (.checking | not) and .format == \"$format\"" "format $format selects and probes without committing"
 }
 
+convert_pointer_state() {
+    local stage="$1" compositor row
+    # Sample native cursorpos: {"x":1280,"y":594}; MenuRow.probe reports hovered, point and resting point.
+    compositor=$(hyprctl cursorpos -j | jq -ce '{x, y} | select((.x | type) == "number" and (.y | type) == "number")') \
+        || fail "convert: cannot observe native pointer position"
+    row=$(ipc convertState | jq -ce '.formats[] | select(.name == "webp" and (.pointerProbe | type) == "string") | {centre, rect, current, pointerProbe}') \
+        || fail "convert: cannot observe WebP pointer handler"
+    printf 'CONVERT_POINTER stage=%s compositor=%s row=%s\n' "$stage" "$compositor" "$row"
+}
+
 convert_pause_backend() {
     local pid="$1" state end=$((SECONDS + 15))
     permissions_backend_owned "$pid" || fail "convert: backend executable, fixture or session identity differs"
@@ -109,13 +119,18 @@ case_convertdesign() (
     read -r wx wy ww wh < <(window_box)
     (( cx > 1 && cy > 0 && cx < ww && cy < wh )) || fail "convert: hover target is outside the owned viewport"
     assert_focus
+    printf 'CONVERT_POINTER_TARGET window=%s,%s,%s,%s centre=%s,%s\n' "$wx" "$wy" "$ww" "$wh" "$cx" "$cy"
+    convert_pointer_state before-warp
     omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null || fail "convert: hover entry failed"
+    convert_pointer_state after-warp
     # A compositor warp sends no Qt pointer frame; two real moves arm entry, then select the row.
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1 \
         || fail "convert: native hover entry failed"
     settle
+    convert_pointer_state after-entry
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1 \
         || fail "convert: actual pointer movement failed"
+    convert_pointer_state after-motion
     menus_expect convertState ".requestId == $request and .format == \"jpg\" and .collision and any(.formats[]; .name == \"webp\" and .current and (.selected | not))" 'actual pointer motion highlights a format without changing the draft or probing'
     key -k Up >/dev/null
     menus_expect convertState '.format == "png" and (.checking | not) and any(.formats[]; .name == "png" and .focused and .current)' 'keyboard chooses from the moved cursor without a resting pointer stealing selection'

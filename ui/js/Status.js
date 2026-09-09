@@ -17,9 +17,7 @@ function rightText(slot) {
 }
 
 function rightRole(slot) {
-    if (errorHere(slot))
-        return "error"
-    return slot.stickyHere || slot.searching || slot.transient.length > 0 ? "foreground" : "muted"
+    return errorHere(slot) ? "error" : "foreground"
 }
 
 // Each backend numbers its own transfers, so an id is meaningful only with its pane owner.

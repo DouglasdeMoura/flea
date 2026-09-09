@@ -24,7 +24,9 @@ function slot(over) {
 function run(check) {
     var quiet = slot({})
     check("an idle bar says what the filesystem is", Status.rightText(quiet), "btrfs · 412 GB free")
-    check("and draws it muted", Status.rightRole(quiet), "muted")
+    check("idle filesystem text keeps the board's foreground role", Status.rightRole(quiet), "foreground")
+    check("idle counts without filesystem information keep foreground contrast",
+          Status.rightRole(slot({ fsText: "" })), "foreground")
 
     var searching = slot({ searching: true, searchKeys: "esc cancels" })
     check("a search on its own owns the slot", Status.rightText(searching), "esc cancels")

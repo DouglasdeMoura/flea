@@ -398,7 +398,7 @@ class Native:
         self.snapshot("missing-path-persists", lambda text: "Esc dismisses" in text and "\u00b7 size" in text.splitlines()[0])
         self.key("-k", "Escape")
         self.snapshot("missing-path-acknowledged", lambda text: "Esc dismisses" not in text)
-        self.key("ss")
+        self.key("sss")
         self.snapshot("sort-restored-after-error", lambda text: "\u00b7 name" in text.splitlines()[0])
         self.rename_changed_identity()
         self.menu_and_panel()
@@ -748,6 +748,145 @@ class Native:
         self.chord("Tab", "shift")
         self.key("-k", "Return")
         self.snapshot("pdf-close-enter", lambda text: "\u2502" in text and self.cursor_is("02-pages.pdf"))
+        self.pdf_narrow_controls(controls)
+
+    def pdf_narrow_controls(self, controls):
+        original, cells, (cell_x, _) = self.cell_geometry()
+        inline_width = len("  ".join(controls)) + 2
+        inline_columns = max(columns for columns in range(12, cells[1])
+                             if columns - columns * 22 // 100 - columns * 40 // 100 < inline_width)
+        quick_columns = len("  ".join(controls + ("\u00d7",))) + 1
+
+        def resize(columns, label):
+            self.resize_window(round(original["size"][0] + (columns - cells[1]) * cell_x), original["size"][1], label)
+            self.wait(label + "-cells", lambda: self.terminal_size()[:2] == (cells[0], columns))
+
+        def toolbar(quicklook):
+            line = self.text.splitlines()[self.size[0] - 3]
+            if len(line) != self.size[1]:
+                raise RuntimeError("PDF toolbar row escaped the measured terminal columns")
+            return line if quicklook else line.rsplit("\u2502", 1)[-1]
+
+        def focused(index, quicklook):
+            labels = controls + (("\u00d7",) if quicklook else ())
+            return "[" + labels[index] + "]" in toolbar(quicklook)
+
+        def cycle(quicklook, label):
+            count = 6 if quicklook else 5
+            for direction in (1, -1):
+                for step in range(1, count + 1):
+                    self.chord("Tab", "shift") if direction < 0 else self.key("-k", "Tab")
+                    self.snapshot(f"{label}-focus-{direction}-{step}", lambda text: focused(step * direction % count, quicklook))
+
+        def click(glyph, quicklook, label):
+            line = toolbar(quicklook)
+            self.click_cell(self.size[1] - len(line) + line.index(glyph) + 1, self.size[0] - 2, label)
+
+        def facts(quicklook):
+            line = self.text.splitlines()[self.size[0] - 4]
+            return line if quicklook else line.rsplit("\u2502", 1)[-1]
+
+        def pointer_controls(quicklook, label):
+            for glyph, control, page, zoom, action in [
+                    (controls[0], 0, 1, 100, "previous"), (controls[0], 0, 1, 100, "first-boundary"),
+                    (controls[1], 1, 2, 100, "next"), (controls[1], 1, 2, 100, "last-boundary"),
+                    (controls[2], 2, 2, 75, "zoom-out"), (controls[3], 3, 2, 100, "zoom-in")]:
+                click(glyph, quicklook, label + "-" + action)
+                expected = f"Page {page} / 2 \u00b7 {zoom}%  "
+                self.snapshot(label + "-" + action, lambda text: focused(control, quicklook)
+                              and facts(quicklook) == expected[:len(facts(quicklook))].ljust(len(facts(quicklook))))
+            for _ in range(3):
+                self.chord("Tab", "shift")
+            self.snapshot(label + "-focus-restored", lambda text: focused(0, quicklook))
+
+        def inert_cell(column, row, label):
+            before = (facts(True), toolbar(True))
+            self.click_cell(column, row, label)
+            self.key("-k", "Tab")
+            self.snapshot(label + "-processed", lambda text: focused(1, True) and facts(True) == before[0])
+            self.chord("Tab", "shift")
+            self.snapshot(label, lambda text: "\u2502" not in text and (facts(True), toolbar(True)) == before)
+
+        self.chord("Tab", "ctrl")
+        self.key("-k", "Right")
+        self.snapshot("pdf-narrow-page-two", lambda text: "Page 2 / 2" in text and "100%" in text)
+        try:
+            resize(inline_columns, "pdf-narrow-inline-window")
+            self.snapshot("pdf-narrow-inline", lambda text: focused(0, False) and "\u2192" in toolbar(False))
+            cycle(False, "pdf-narrow-inline")
+            pointer_controls(False, "pdf-narrow-inline-pointer")
+            click("\u2192", False, "pdf-narrow-inline-overflow-next")
+            self.snapshot("pdf-narrow-expand-revealed", lambda text: focused(4, False) and "\u2502" in text and "Page 2 / 2" in text)
+            click("\u2190", False, "pdf-narrow-inline-overflow-previous")
+            self.snapshot("pdf-narrow-previous-revealed", lambda text: focused(0, False) and "Page 2 / 2" in text)
+            self.chord("Tab", "shift")
+            self.snapshot("pdf-narrow-expand-focused", lambda text: focused(4, False))
+            click("\u2197", False, "pdf-narrow-expand-pointer")
+            self.snapshot("pdf-narrow-expanded", lambda text: "\u2502" not in text and "Page 2 / 2" in text)
+            resize(quick_columns, "pdf-narrow-quicklook-window")
+            self.key("-k", "Tab")
+            self.key("-k", "Tab")
+            self.snapshot("pdf-narrow-quicklook", lambda text: focused(0, True) and "\u2192" in toolbar(True))
+            cycle(True, "pdf-narrow-quicklook")
+            pointer_controls(True, "pdf-narrow-quicklook-pointer")
+            inert_cell(1, self.size[0] - 2, "pdf-narrow-inert-left-gutter")
+            inert_cell(toolbar(True).index("]") + 2, self.size[0] - 2, "pdf-narrow-inert-control-gap")
+            inert_cell(self.size[1], self.size[0] - 3, "pdf-narrow-inert-above-toolbar")
+            inert_cell(self.size[1], self.size[0] - 1, "pdf-narrow-inert-below-toolbar")
+            minimum_label = "pdf-minimum-window"
+            try:
+                resize(12, minimum_label)
+            except RuntimeError as error:
+                expected_errors = [f"native TUI did not reach {minimum_label}{suffix} within {WAIT_SECONDS}s"
+                                   for suffix in ("", "-cells")]
+                if str(error) not in expected_errors and not str(error).startswith("compositor refused native TUI resize:"):
+                    raise
+                evidence = guard(self.case, self.case / "evidence/pdf-minimum-blocker.json")
+                gap = {"requirement": "Tui.html PDF controls at the renderer's admitted 12-column minimum", "state": "undriven",
+                       "reason": str(error), "requested_columns": 12, "window": self.identity(),
+                       "pty_rows_columns_pixels": self.terminal_size(), "evidence": str(evidence)}
+                evidence.write_text(json.dumps(gap))
+                shot = guard(self.case, self.case / "evidence/pdf-minimum-blocker.png")
+                if shot.exists():
+                    raise RuntimeError("refused stale PDF minimum screenshot")
+                self.drive("shot", shot, self.address)
+                if not shot.is_file() or shot.stat().st_size == 0:
+                    raise RuntimeError("native PDF minimum screenshot returned no new image")
+                self.undriven.append(gap)
+                guard(self.case, self.case / "evidence/undriven.json").write_text(json.dumps(self.undriven))
+                print("TUI_UNDRIVEN " + json.dumps(gap), flush=True)
+            else:
+                self.snapshot("pdf-minimum-toolbar", lambda text: focused(0, True) and "\u2192" in toolbar(True))
+                cycle(True, "pdf-minimum-toolbar")
+                self.key("-k", "Escape")
+                self.chord("Tab", "ctrl")
+                self.snapshot("pdf-minimum-inline", lambda text: focused(0, False) and "\u2502" in text)
+                cycle(False, "pdf-minimum-inline")
+                self.chord("Tab", "shift")
+                self.snapshot("pdf-minimum-expand-focused", lambda text: focused(4, False))
+                self.key("-k", "Return")
+                self.key("-k", "Tab")
+                self.key("-k", "Tab")
+                self.snapshot("pdf-minimum-quicklook-restored", lambda text: focused(0, True) and "\u2502" not in text)
+            resize(quick_columns, "pdf-minimum-returned")
+            self.snapshot("pdf-minimum-state-retained", lambda text: focused(0, True) and "Page 2 / 2" in text and "100%" in text)
+            click("\u2192", True, "pdf-narrow-quicklook-overflow-next")
+            self.snapshot("pdf-narrow-close-revealed", lambda text: focused(5, True) and "\u2502" not in text)
+            click("\u2190", True, "pdf-narrow-quicklook-overflow-previous")
+            self.snapshot("pdf-narrow-quicklook-previous", lambda text: focused(0, True) and "Page 2 / 2" in text)
+            self.chord("Tab", "shift")
+            self.snapshot("pdf-narrow-close-focused", lambda text: focused(5, True))
+            click("\u00d7", True, "pdf-narrow-close-pointer")
+            self.snapshot("pdf-narrow-closed", lambda text: "\u2502" in text and focused(0, False))
+        finally:
+            self.resize_window(*original["size"], "pdf-narrow-window-restored")
+            if not original["floating"]:
+                self.drive("window", "float", self.address)
+            self.wait("pdf-narrow-cells-restored", lambda: self.terminal_size()[:2] == cells)
+        self.snapshot("pdf-narrow-restored", lambda text: self.cursor_is("02-pages.pdf") and "Page 2 / 2" in text and "100%" in text)
+        self.chord("Tab", "ctrl")
+        self.key("-k", "Left")
+        self.snapshot("pdf-narrow-page-restored", lambda text: "Page 1 / 2" in text)
 
     def media_controls(self, label):
         self.key("-k", "space")

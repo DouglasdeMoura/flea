@@ -263,7 +263,7 @@ pub fn draw(
                 m.player
                     .as_ref()
                     .map(|p| p.line(columns))
-                    .or_else(|| m.pdf.as_ref().map(|p| p.line(true)))
+                    .or_else(|| m.pdf.as_ref().map(|p| p.line(true, columns)))
                     .unwrap_or_default()
             } else if m.pdf.is_some() && y == body.saturating_sub(3) {
                 m.pdf.as_ref().unwrap().prefix()
@@ -349,7 +349,7 @@ pub fn draw(
             m.player
                 .as_ref()
                 .map(|p| p.line(right))
-                .or_else(|| m.pdf.as_ref().map(|p| p.line(false)))
+                .or_else(|| m.pdf.as_ref().map(|p| p.line(false, right)))
                 .unwrap_or_default()
         } else if m.pdf.is_some() && y == body.saturating_sub(3) {
             m.pdf.as_ref().unwrap().prefix()
