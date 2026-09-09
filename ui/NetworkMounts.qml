@@ -213,19 +213,19 @@ Item {
                 var coveredKey = Mounts.normalize(marks[j].uri)
                 if (seen[coveredKey]) continue
                 seen[coveredKey] = true
-                out.push({ path: "", label: marks[j].label, group: "network", kind: "share", editable: false, uri: marks[j].uri, mountUri: mounts[i].uri, mounted: true, glyph: "server" })
+                out.push({ path: "", label: marks[j].label, group: "network", kind: "share", uri: marks[j].uri, mountUri: mounts[i].uri, mounted: true, glyph: "server" })
             }
             if (covered) continue
             var mkey = Mounts.normalize(mounts[i].uri)
             if (seen[mkey]) continue
             seen[mkey] = true
-            out.push({ path: "", label: Mounts.railLabel(mounts[i], marks), group: "network", kind: "share", editable: false, uri: mounts[i].uri, mounted: true, glyph: "server" })
+            out.push({ path: "", label: Mounts.railLabel(mounts[i], marks), group: "network", kind: "share", uri: mounts[i].uri, mounted: true, glyph: "server" })
         }
         for (var k = 0; k < marks.length; k++) {
             var bkey = Mounts.normalize(marks[k].uri)
             if (seen[bkey]) continue
             seen[bkey] = true
-            out.push({ path: "", label: marks[k].label, group: "network", kind: "share", editable: false, uri: marks[k].uri, mounted: false, glyph: "server" })
+            out.push({ path: "", label: marks[k].label, group: "network", kind: "share", uri: marks[k].uri, mounted: false, glyph: "server" })
         }
         if (root.dropboxPath.length > 0) {
             out.push({ path: root.dropboxPath, label: "Dropbox", group: "network", kind: "dropbox", uri: "", mounted: true, glyph: "" })
