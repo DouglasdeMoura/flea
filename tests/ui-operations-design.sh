@@ -177,7 +177,7 @@ operations_mixed() {
     menus_expect selectionCount '. == 1' "failed original is selected for retry"
     selected=$(ipc selectedIndices)
     [[ "$selected" == "$(row_index_of c.txt)" ]] || fail "operations: retry selected a different source"
-    operations_secondary " · esc dismisses · c.txt selected for retry" "error hint and identity-verified retry use separate muted secondary text"
+    operations_secondary " · esc dismisses" "unacknowledged error names only its dismissal key"
     menus_expect statusFooterState '(.right.text | startswith("Copy failed: c.txt · ")) and (.right.text | contains("(os error") | not)' "error is a plain sentence with a named cause"
     for name in a.txt b.txt d.txt e.txt; do menus_same_file "committed copy $name" "$source/$name" "$destination/$name"; done
     [[ "$(cat "$destination/c.txt")" == 'existing collision' ]] || fail "operations: collision was overwritten"
@@ -214,13 +214,13 @@ operations_mixed() {
     operations_secondary " · z undoes" "manual re-selection cannot revive an earlier identity proof"
     operations_copy_to "$destination"
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1' "a repeated collision records its own completed failure"
-    operations_secondary " · esc dismisses · c.txt selected for retry" "a new verified locate reply establishes fresh retry text"
+    operations_secondary " · esc dismisses" "a repeated error retains the dismissal hint"
+    menus_acknowledge
+    operations_secondary " · c.txt selected for retry" "acknowledged failure exposes its fresh identity-verified retry text"
     menus_guard "$source/c.txt"
     touch "$source/c.txt"
-    operations_secondary " · esc dismisses" "external metadata change invalidates displayed retry proof without hiding error acknowledgement"
+    operations_secondary "" "external metadata change invalidates the completed outcome's retry proof"
     menus_expect selectionCount '. == 1' "watch invalidation does not change the user's selected source"
-    menus_acknowledge
-
     menus_guard "$destination/c.txt"
     menus_guard "$menu_box/collision-kept.txt"
     mv -- "$destination/c.txt" "$menu_box/collision-kept.txt"
@@ -271,11 +271,11 @@ operations_long_error() {
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1 and (.notice | contains("Copied 0 of 1") and contains("1 failed"))' "one long-name collision records its real failed outcome"
     menus_error "Copy failed: $name" 'long-name error retains the exact failed source identity'
     menus_equal 'long-name retry selects the original row' "$(row_index_of "$name")" "$(ipc selectedIndices)"
-    operations_secondary " · esc dismisses · $name selected for retry" "long-name error retains its hint and identity-verified retry text"
+    operations_secondary " · esc dismisses" "long-name error keeps the short dismissal hint visible"
     menus_expect statusFooterState '.right.visible and .right.width > 0 and .right.truncated and .right.implicitWidth > .right.width
-        and .secondary.visible and .secondary.width > 0 and .secondary.truncated and .secondary.implicitWidth > .secondary.width
+        and .secondary.visible and .secondary.width > 0 and (.secondary.truncated | not) and .secondary.implicitWidth <= .secondary.width
         and .hintWidth > 0 and .secondary.width >= ([.hintWidth, .slotWidth] | min)' \
-        "long secondary content cannot erase the primary error; both captions report their actual elision"
+        "long error elides while its complete dismissal hint stays visible"
     menus_equal 'long-name error retains its semantic role' "$(ipc palette | cut -d' ' -f6)" "$(ipc statusColor)"
     operations_footer_geometry "long-name persistent error"
     [[ "$(cat "$source/$name")" == 'long-name source' && "$(cat "$destination/$name")" == 'long-name collision' ]] \
@@ -649,3 +649,284 @@ case_operationsdesign() (
 )
 
 case_operationslive() { case_operationsdesign live; }
+
+operations_footer_fixture() {
+    local part
+    sandbox_require "$fixture_root"
+    menu_box=$(mktemp -d "$fixture_root/footer-$1.XXXXXXXX") || fail 'footer: cannot create fixture'
+    printf 'native Footer fixture\n' > "$menu_box/.flea-test-sandbox" || fail 'footer: cannot mark fixture'
+    [[ "$menu_box" == "$(realpath -e "$menu_box")" ]] || fail 'footer: fixture is not canonical'
+    for part in state config cache data payload destination; do
+        menus_guard "$menu_box/$part"
+        mkdir "$menu_box/$part" || fail "footer: cannot create $part"
+    done
+    export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config"
+    export XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
+    "$flea_bin" --ui-state '{"view":"list","keys":"default","display":{"textSize":{"mode":14}},"preview":{"thumbnails":"off","loadOn":"manual"},"menu":{"hidden":[]}}' >/dev/null \
+        || fail 'footer: private settings seed failed'
+}
+
+operations_footer_capture() {
+    local name="$1" expression="$2" before after
+    operations_footer_geometry "$name"
+    before=$(ipc statusFooterState) || fail "footer: $name pre-capture observation failed"
+    jq -e "$expression" <<< "$before" >/dev/null || fail "footer: $name missed its state before capture: $before"
+    menus_shot "footer-$name"
+    after=$(ipc statusFooterState) || fail "footer: $name post-capture observation failed"
+    jq -e "$expression" <<< "$after" >/dev/null || fail "footer: $name changed during capture: $after"
+    printf 'FOOTER_CAPTURE name=%s before=%s after=%s inspection=pending\n' "$name" "$before" "$after"
+}
+
+case_footerstates() (
+    local menu_box menus_checks=0 name
+    operations_footer_fixture states
+    for name in a.txt b.txt photo.heic y.txt z.txt keep-{1..5}.txt; do
+        menus_guard "$menu_box/payload/$name"
+        printf 'original %s\n' "$name" > "$menu_box/payload/$name" || fail "footer: cannot create $name"
+    done
+    menus_guard "$menu_box/destination/photo.heic"
+    printf 'retained collision\n' > "$menu_box/destination/photo.heic" || fail 'footer: cannot seed collision'
+    launch "$menu_box/payload"
+    trap 'kill_flea' EXIT
+    wait_listing 10
+    permissions_viewport 880 620
+    click_row "$(row_index_of photo.heic)" left
+    operations_idle_footer 10 1 'ten-item selected idle specimen'
+    operations_footer_capture idle '.total == 10 and .selected == 1 and .left.text == "10 items · 1 selected" and .right.text == .filesystem and .secondary.text == ""'
+    for name in a.txt b.txt y.txt z.txt; do
+        seek_row_named "$name"
+        key v >/dev/null || fail "footer: cannot add $name to the selection"
+    done
+    menus_expect selectionCount '. == 5' 'mixed specimen selects five genuine originals'
+    operations_copy_to "$menu_box/destination"
+    menus_expect statusActivityState '.errors == 1 and (.activities | length) == 0 and (.notice | contains("Copied 4 of 5 · 1 failed"))' 'mixed specimen records its actual completed outcome'
+    menus_expect selectionCount '. == 1' 'mixed specimen retains the failed original for retry'
+    operations_footer_capture error-collision '.left.text == "10 items · 1 selected" and .right.text == "Copy failed: photo.heic · already exists" and .secondary.text == " · esc dismisses"'
+    key -k Escape >/dev/null || fail 'footer: collision acknowledgement failed'
+    menus_expect statusActivityState '.errors == 0 and .undoAvailable' 'acknowledgement reveals the actual undoable completion'
+    operations_footer_capture completed-collision '.left.text == "10 items · 1 selected" and .right.text == "Copied 4 of 5 · 1 failed" and .secondary.text == " · z undoes · photo.heic selected for retry"'
+    for name in a.txt b.txt y.txt z.txt; do menus_same_file "committed $name" "$menu_box/payload/$name" "$menu_box/destination/$name"; done
+    menus_same_file 'failed destination remains intact' <(printf 'retained collision\n') "$menu_box/destination/photo.heic"
+    printf 'FOOTER_LITERAL_GAP error=real-collision-not-ENOSPC completed=4-of-5,1-failed,0-skipped undo-and-retry-retained=true\n'
+)
+
+case_footertransfer() (
+    local menu_box menus_checks=0 name before_bytes after_bytes operations_stopped=""
+    local operations_bytes=$((1024 * 1024 * 1024)) permissions_listing
+    operations_footer_fixture transfer
+    permissions_listing="$menu_box/payload"
+    for name in a-first.txt photo.heic z-after-{1..3}.txt zz-kept-{1..5}.txt; do
+        menus_guard "$permissions_listing/$name"
+        printf 'original %s\n' "$name" > "$permissions_listing/$name" || fail "footer: cannot create $name"
+    done
+    menus_guard "$permissions_listing/photo.heic"
+    truncate -s "$operations_bytes" "$permissions_listing/photo.heic" || fail 'footer: cannot size transfer fixture'
+    menus_guard "$menu_box/destination/photo.heic"
+    launch "$permissions_listing"
+    trap 'permissions_resume_stopped "$operations_stopped" || exit 1; kill_flea' EXIT
+    wait_listing 10
+    permissions_viewport 880 620
+    click_row 0 left
+    key -M shift -k Down -k Down -k Down -k Down -m shift >/dev/null || fail 'footer: five-item selection failed'
+    cardsize_expect selectedIndices '0,1,2,3,4'
+    operations_copy_to "$menu_box/destination" live
+    menus_expect statusActivityState '.errors == 0 and .activities[0].running and .activities[0].text == "Copying 2 of 5 · photo.heic"' 'second genuine transfer item publishes its filename'
+    operations_pause_backend
+    before_bytes=$(stat -c '%s' "$menu_box/destination/photo.heic") || fail 'footer: partial destination unavailable'
+    (( before_bytes > 0 && before_bytes < operations_bytes )) || fail 'footer: transfer finished before capture pause'
+    click_row "$(row_index_of photo.heic)" left
+    menus_expect selectionCount '. == 1' 'transfer specimen displays one native selection'
+    operations_footer_capture transfer '.left.text == "10 items · 1 selected" and .right.text == "Copying 2 of 5 · photo.heic" and .secondary.text == " · esc cancels"'
+    after_bytes=$(stat -c '%s' "$menu_box/destination/photo.heic") || fail 'footer: captured partial disappeared'
+    menus_equal 'controlled capture keeps the same incomplete copy' "$before_bytes" "$after_bytes"
+    printf 'FOOTER_TRANSFER controlled_pause=true bytes=%s total=%s unpaused_proof=existing-operationslive\n' "$after_bytes" "$operations_bytes"
+    permissions_resume_stopped "$operations_stopped" || fail 'footer: cannot resume captured transfer'
+    operations_stopped=""
+    menus_expect statusActivityState '.errors == 0 and (.activities | length) == 0 and (.notice | contains("Copied 5 items"))' 'captured transfer resumes and completes all five originals'
+    for name in a-first.txt photo.heic z-after-{1..3}.txt; do menus_same_file "completed $name" "$permissions_listing/$name" "$menu_box/destination/$name"; done
+)
+
+case_footersearch() (
+    local menu_box menus_checks=0 query=footer-needle state
+    local directory_count=100000 matched_count=10
+    operations_footer_fixture search
+    python3 - "$menu_box" "$directory_count" "$matched_count" "$query" <<'PY' || fail 'footer: Search fixture creation failed'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+payload = root / "payload"
+if not root.is_absolute() or root.resolve() != root or not (root / ".flea-test-sandbox").is_file():
+    raise SystemExit("footer: Search requires an absolute marked sandbox")
+if payload.resolve() != payload or not payload.is_relative_to(root) or any(payload.iterdir()):
+    raise SystemExit("footer: Search payload is not an empty canonical child")
+for index in range(int(sys.argv[2])):
+    (payload / f"dir-{index}").mkdir()
+for index in range(int(sys.argv[3])):
+    (payload / f"{sys.argv[4]}-{index}.txt").write_text(f"matched original {index}\n")
+PY
+    launch "$menu_box/payload"
+    trap 'kill_flea' EXIT
+    wait_listing "$((directory_count + matched_count))"
+    permissions_viewport 880 620
+    key f >/dev/null || fail 'footer: Search entry failed'
+    menus_expect keyDeliveryState '.searchMode == "typing"' 'populated Search editor receives native focus'
+    key "$query" -k Return >/dev/null || fail 'footer: Search submission failed'
+    menus_expect keyDeliveryState '.searchMode == "results" and .searchRunning and .searchScanned == 100010 and (.searchCancelled | not)' 'real Search scans its populated root while descendant work remains'
+    wait_listing 10
+    [[ "$(ipc rowAt 0)" == "$query-"* ]] || fail 'footer: populated Search has not delivered an actual fixture match'
+    operations_footer_capture search '.listingState == "ready" and .total == 10 and .selected == 0 and .left.text == "10 items" and .right.text == "Search: 100,010 scanned" and .secondary.text == " · esc cancels"'
+    state=$(ipc keyDeliveryState) || fail 'footer: captured Search state unavailable'
+    jq -e '.searchRunning and (.searchCancelled | not)' <<< "$state" >/dev/null || fail 'footer: Search finished during its capture'
+    key -k Escape >/dev/null || fail 'footer: Search cancellation failed'
+    menus_expect keyDeliveryState '.searchMode == "results" and (.searchRunning | not) and .searchCancelled' 'populated Search remains cancellable after capture'
+    wait_listing 10
+    key -k Escape >/dev/null || fail 'footer: completed Search dismissal failed'
+    menus_expect keyDeliveryState '.searchMode == ""' 'Search dismissal restores the source directory'
+    wait_listing "$((directory_count + matched_count))"
+    printf 'FOOTER_LITERAL_GAP search=100010-real-scanned-not-4120 matched_results=10\n'
+)
+
+case_footertrash() (
+    local menu_box menus_checks=0 trash_box payload name index trash_checks=0
+    local trash_parent_bus_id="" trash_private_bus_id="" trash_bus_address="" trash_bus_pid="" trash_provider_pid=""
+    operations_footer_fixture trash
+    trash_box="$menu_box" payload="$menu_box/payload"
+    [[ "$(realpath -e "$(command -v gio)")" == /usr/bin/gio ]] || fail 'footer: private Trash requires the real GIO'
+    for name in keep-{1..10}.txt trash-{1..4}.txt; do
+        trash_guard "$payload/$name"
+        printf 'original %s\n' "$name" > "$payload/$name" || fail "footer: cannot create $name"
+    done
+    trash_start_bus
+    launch "$payload"
+    wait_listing 14
+    permissions_viewport 880 620
+    trash_guard_store 0
+    index=$(row_index_of trash-1.txt)
+    click_row "$index" left
+    key -M shift -k Down -k Down -k Down -m shift >/dev/null || fail 'footer: Trash selection failed'
+    menus_expect selectionCount '. == 4' 'Trash specimen selects four real originals'
+    for name in trash-{1..4}.txt; do trash_guard "$payload/$name"; done
+    trash_guard_store 0
+    key -k Delete >/dev/null || fail 'footer: native Move to Trash failed'
+    wait_listing 10
+    trash_wait '.count == 4 and (.busy | not)' 'four originals reach the private Trash provider'
+    trash_guard_store 4
+    operations_footer_capture trash '.left.text == "10 items" and .right.text == "Moved 4 items to Trash" and .secondary.text == " · z undoes"'
+    trash_guard_store 4
+    key z >/dev/null || fail 'footer: native Trash Undo failed'
+    wait_listing 14
+    trash_wait '.count == 0 and (.busy | not)' 'native Undo restores the four private Trash originals'
+    trash_guard_store 0
+    for name in keep-{1..10}.txt trash-{1..4}.txt; do
+        menus_same_file "Trash cycle preserves $name" <(printf 'original %s\n' "$name") "$payload/$name"
+    done
+)
+
+case_footerspecimens() {
+    case_footerstates || fail 'footer: idle and actual mixed-state captures failed'
+    case_footertransfer || fail 'footer: second-file transfer capture failed'
+    case_footersearch || fail 'footer: populated running Search capture failed'
+    case_footertrash || fail 'footer: actual Trash transient capture failed'
+    printf 'FOOTER_SPECIMENS captures=6 matched_visual_approval=pending disk_full=not_run literal_completion_difference=recorded old_dismiss_proof=reused\n'
+}
+
+operations_footer_full_mount() {
+    local mount owner identity contents
+    sandbox_require "$menu_box"
+    [[ "$menu_box" == "$(realpath -e "$menu_box")" && -O "$menu_box" && ! -L "$menu_box/.flea-test-sandbox" && -O "$menu_box/.flea-test-sandbox" ]] \
+        || fail 'footerdiskfull: prepared root or marker identity changed'
+    menus_guard "$menu_box/full"
+    [[ -d "$menu_box/full" && ! -L "$menu_box/full" ]] || fail 'footerdiskfull: full is not the prepared directory'
+    owner=$(stat -c '%u:%g:%d:%i' "$menu_box/full") || fail 'footerdiskfull: mount ownership unavailable'
+    [[ "$owner" == "$(id -u):$(id -g):"* ]] || fail 'footerdiskfull: mount does not belong to the native test user'
+    mount=$(findmnt --json --bytes --mountpoint "$menu_box/full" --output TARGET,FSTYPE,SIZE,OPTIONS,ID,MAJ:MIN,SOURCE) \
+        || fail 'footerdiskfull: exact prepared mount unavailable'
+    # Sample findmnt row: {"target":"/owned/full","fstype":"tmpfs","size":1048576,"options":"rw,nodev,nosuid,noexec","id":123,"maj:min":"0:42","source":"tmpfs"}.
+    identity=$(jq -ceS --arg target "$menu_box/full" --arg owner "$owner" '
+        .filesystems | select(length == 1) | .[0] |
+        select(.target == $target and .fstype == "tmpfs" and (.size | tonumber) == 1048576
+            and (.options | split(",") | contains(["rw","nodev","nosuid","noexec"]))
+            and .id != null and ."maj:min" != null) |
+        {target,fstype,size,options,id,source,"maj:min":."maj:min",owner:$owner}' <<< "$mount") \
+        || fail "footerdiskfull: expected exactly one 1MiB nodev,nosuid,noexec tmpfs: $mount"
+    [[ -z "$full_identity" || "$identity" == "$full_identity" ]] || fail 'footerdiskfull: prepared mount identity changed'
+    full_identity="$identity"
+    if [[ "${1:-}" == empty ]]; then
+        contents=$(find "$menu_box/full" -mindepth 1 -maxdepth 1 -print -quit) || fail 'footerdiskfull: cannot inspect initial destination'
+        [[ -z "$contents" ]] || fail 'footerdiskfull: prepared destination is not empty'
+    fi
+    printf 'FOOTER_ENOSPC_MOUNT %s\n' "$identity"
+}
+
+operations_footer_full_cleanup() {
+    local result="$1"
+    trap - EXIT
+    (operations_footer_full_mount) || result=1
+    (kill_flea) || result=1
+    printf 'FOOTER_ENOSPC_RETAINED root=%q mount=%q teardown_status=%s automatic_deletion=false\n' "$menu_box" "$menu_box/full" "$result"
+    exit "$result"
+}
+
+case_footerdiskfull() (
+    local menu_box="${FLEA_ENOSPC_ROOT:-}" menus_checks=0 full_identity="" fixture_root="$fixture_root"
+    local part contents source source_identity source_hash partial_bytes error_color before_error
+    local source_bytes=$((2 * 1024 * 1024))
+    [[ -n "$menu_box" && "$menu_box" == /* ]] || fail 'footerdiskfull: FLEA_ENOSPC_ROOT must name the prepared absolute marked root'
+    for part in "$fixture_root" "$thumb_fixture" "$hash_fixture" "$stale_fixture" "$run_root"; do
+        [[ "$menu_box" != "$part" && "$menu_box" != "$part/"* ]] || fail 'footerdiskfull: prepared mount would enter automatic suite cleanup'
+    done
+    operations_footer_full_mount empty
+    for part in state config cache data payload; do
+        menus_guard "$menu_box/$part"
+        [[ -d "$menu_box/$part" && ! -L "$menu_box/$part" && -O "$menu_box/$part" && -w "$menu_box/$part" ]] \
+            || fail "footerdiskfull: missing or foreign prepared $part directory"
+        contents=$(find "$menu_box/$part" -mindepth 1 -maxdepth 1 -print -quit) || fail "footerdiskfull: cannot inspect $part"
+        [[ -z "$contents" ]] || fail "footerdiskfull: prepared $part is not empty"
+    done
+    kill_flea
+    fixture_root="$menu_box"
+    trap 'operations_footer_full_cleanup "$?"' EXIT
+    export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config"
+    export XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
+    "$flea_bin" --ui-state '{"view":"list","keys":"default","display":{"textSize":{"mode":14}},"preview":{"thumbnails":"off","loadOn":"manual"},"menu":{"hidden":[]}}' >/dev/null \
+        || fail 'footerdiskfull: private settings seed failed'
+    source="$menu_box/payload/photo.heic"
+    menus_guard "$source"
+    truncate -s "$source_bytes" "$source" || fail 'footerdiskfull: cannot create the 2MiB source'
+    for part in keep-{1..9}.txt; do
+        menus_guard "$menu_box/payload/$part"
+        printf 'original %s\n' "$part" > "$menu_box/payload/$part" || fail "footerdiskfull: cannot create $part"
+    done
+    source_identity=$(stat -c '%d:%i:%f:%u:%g:%s:%Y:%Z' "$source") || fail 'footerdiskfull: source identity unavailable'
+    source_hash=$(sha256sum < "$source") || fail 'footerdiskfull: source checksum unavailable'
+    launch "$menu_box/payload"
+    wait_listing 10
+    permissions_viewport 880 620
+    click_row "$(row_index_of photo.heic)" left
+    operations_idle_footer 10 1 'disk-full source is the sole native selection'
+    operations_footer_full_mount empty
+    operations_copy_to "$menu_box/full"
+    menus_expect statusActivityState '.errors == 1 and (.activities | length) == 0' 'actual bounded filesystem rejects the copy'
+    menus_error 'Copy failed: photo.heic · disk full' 'native failure names the genuine ENOSPC cause'
+    operations_footer_full_mount
+    menus_guard "$menu_box/full/photo.heic"
+    [[ -f "$menu_box/full/photo.heic" && ! -L "$menu_box/full/photo.heic" ]] || fail 'footerdiskfull: failed copy did not retain its regular partial'
+    partial_bytes=$(stat -c '%s' "$menu_box/full/photo.heic") || fail 'footerdiskfull: partial byte count unavailable'
+    (( partial_bytes > 0 && partial_bytes < source_bytes )) || fail "footerdiskfull: unexpected partial length $partial_bytes"
+    menus_equal 'ENOSPC preserves source identity' "$source_identity" "$(stat -c '%d:%i:%f:%u:%g:%s:%Y:%Z' "$source")"
+    menus_equal 'ENOSPC preserves every source byte' "$source_hash" "$(sha256sum < "$source")"
+    menus_expect selectionCount '. == 1' 'failed original remains selected for retry'
+    before_error=$(ipc statusPrimary) || fail 'footerdiskfull: error sentence unavailable'
+    sleep "$transient_clear_s"
+    menus_expect statusActivityState '.errors == 1' 'disk-full error survives the transient timeout'
+    menus_equal 'unacknowledged disk-full sentence persists' "$before_error" "$(ipc statusPrimary)"
+    error_color=$(ipc palette | cut -d' ' -f6) || fail 'footerdiskfull: semantic error role unavailable'
+    [[ -n "$error_color" ]] || fail 'footerdiskfull: semantic error role is empty'
+    menus_equal 'only the failure sentence uses the error role' "$error_color" "$(ipc statusColor)"
+    operations_footer_capture disk-full '.left.text == "10 items · 1 selected" and .right.text == "Copy failed: photo.heic · disk full" and (.right.text | contains("(os error") | not) and .secondary.text == " · esc dismisses"'
+    key -k Escape >/dev/null || fail 'footerdiskfull: native error acknowledgement failed'
+    menus_expect statusActivityState '.errors == 0 and (.activities | length) == 0 and (.notice | contains("Copied 0 of 1 · 1 failed"))' 'Escape acknowledges ENOSPC and reveals the truthful outcome'
+    operations_footer_full_mount
+    menus_equal 'acknowledgement retains the partial for explicit recovery' "$partial_bytes" "$(stat -c '%s' "$menu_box/full/photo.heic")"
+    printf 'FOOTER_ENOSPC native_entry=copy-to source_bytes=%s partial_bytes=%s error_persistent=true acknowledged=true retry_caption=retained fixture_preserved=true\n' "$source_bytes" "$partial_bytes"
+)

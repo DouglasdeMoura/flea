@@ -93,6 +93,8 @@ providers_close() {
 providers_ready() {
     providers_mode tailscale ready "$provider_ready"
     providers_mode dropbox-cli ready 'Up to date'
+    providers_mode sharelink ready 'https://fixture.invalid/share'
+    providers_mode wl-copy ready ''
     providers_write home/.dropbox/info.json "$(jq -cn --arg path "$menu_box/Dropbox" '{personal:{path:$path}}')"
 }
 
@@ -175,20 +177,10 @@ guard() {
 }
 name=${0##*/}
 guard "$box/calls.jsonl"
+response=''
 case "$name:$#:${1:-}:${2:-}" in
     tailscale:2:status:--json|dropbox-cli:1:status:)
-        jq -cn --arg helper "$name" --args '{helper:$helper,args:$ARGS.positional}' -- "$@" >> "$box/calls.jsonl"
-        guard "$box/$name-mode"
-        if [[ "$(cat "$box/$name-mode")" == gate ]]; then
-            guard "$box/$name-release"
-            [[ -p "$box/$name-release" && ! -L "$box/$name-release" ]] || exit 92
-            read -r release < "$box/$name-release"
-            [[ "$release" == release ]] || exit 93
-        fi
-        for field in output error exit; do guard "$box/$name-$field"; done
-        cat "$box/$name-output"
-        cat "$box/$name-error" >&2
-        exit "$(cat "$box/$name-exit")"
+        response=$name
         ;;
     omarchy-tailscale-send:2:fixture.invalid:*)
         guard "$2"
@@ -197,12 +189,51 @@ case "$name:$#:${1:-}:${2:-}" in
     dropbox-cli:2:sharelink:*)
         guard "$2"
         [[ -f "$2" && ! -L "$2" ]] || exit 94
-        printf 'https://fixture.invalid/share\n'
+        response=sharelink
         ;;
-    wl-copy:1:https://fixture.invalid/share:) ;;
+    wl-copy:1:https://fixture.invalid/share:) response=wl-copy ;;
     *) printf 'REFUSED: provider fixture received unexpected arguments: %s\n' "$name" >&2; exit 95 ;;
 esac
 jq -cn --arg helper "$name" --args '{helper:$helper,args:$ARGS.positional}' -- "$@" >> "$box/calls.jsonl"
+if [[ -n "$response" ]]; then
+    guard "$box/$response-mode"
+    mode=$(cat "$box/$response-mode")
+    if [[ "$mode" == socket-timeout && "$response" == sharelink ]]; then
+        python3 - <<'PY_SOCKET'
+import socket
+
+# Installed DropboxCommand(timeout=5) reports BadConnection as an exit-zero sentence.
+socket_timeout_seconds = 5
+client, server = socket.socketpair()
+with client, server:
+    client.settimeout(socket_timeout_seconds)
+    try:
+        client.recv(1)
+    except socket.timeout:
+        print("Dropbox isn't responding!")
+    else:
+        raise SystemExit("provider fixture: expected a real socket timeout")
+PY_SOCKET
+        exit $?
+    elif [[ "$mode" == gate ]]; then
+        gate=$name
+        # Share Link and clipboard run after status, so they reuse the now-idle Dropbox gate.
+        [[ "$response" == sharelink || "$response" == wl-copy ]] && gate=dropbox-cli
+        guard "$box/$gate-release"
+        [[ -p "$box/$gate-release" && ! -L "$box/$gate-release" ]] || exit 92
+        read -r release < "$box/$gate-release"
+        [[ "$release" == release ]] || exit 93
+    elif [[ "$mode" == vanish && "$response" == dropbox-cli ]]; then
+        guard "$box/bin/dropbox-cli"
+        guard "$box/absent/dropbox-cli"
+        [[ ! -e "$box/absent/dropbox-cli" ]] || exit 96
+        mv -- "$box/bin/dropbox-cli" "$box/absent/dropbox-cli"
+    fi
+    for field in output error exit; do guard "$box/$response-$field"; done
+    cat "$box/$response-output"
+    cat "$box/$response-error" >&2
+    exit "$(cat "$box/$response-exit")"
+fi
 SH
     chmod 700 "$menu_box/doubles/provider" || fail 'providers: cannot make dispatcher executable'
     for name in tailscale omarchy-tailscale-send dropbox-cli wl-copy; do
@@ -245,6 +276,110 @@ providers_choose() {
         menus_expect menuState '.submenu and .submenuEntries[.submenuCursor].id == "fixture-peer"' 'Taildrop submenu retains the selected peer identity'
     fi
     key -k Return >/dev/null || fail 'providers: activation key failed'
+}
+
+providers_sharelink_checks() {
+    local scenario reason before clipboard_calls share_before share_requests
+    for scenario in share-failed share-invalid share-socket-timeout share-missing clipboard-failed clipboard-missing; do
+        providers_ready
+        providers_selection "$menu_box/Dropbox"
+        before=$(providers_calls wl-copy)
+        clipboard_calls=0
+        case "$scenario" in
+            share-failed)
+                providers_mode sharelink ready '' 'fixture share-link refusal' 7
+                reason='Dropbox could not make a share link for that file.' ;;
+            share-invalid)
+                providers_mode sharelink ready 'http is not a share link'
+                reason='Dropbox could not make a share link for that file.' ;;
+            share-socket-timeout)
+                providers_mode sharelink socket-timeout ''
+                reason='Dropbox could not make a share link for that file.' ;;
+            share-missing)
+                providers_mode dropbox-cli vanish 'Up to date'
+                reason='The Dropbox share link helper could not start.' ;;
+            clipboard-failed)
+                providers_mode wl-copy ready '' 'fixture clipboard refusal' 7
+                reason='The share link could not be copied to the clipboard.'
+                clipboard_calls=1 ;;
+            clipboard-missing)
+                providers_install wl-copy no
+                reason='The clipboard helper could not start; the share link was not copied.' ;;
+        esac
+        providers_choose sharelink
+        menus_error "$reason" "$scenario reports its own plain failure"
+        menus_expect statusActivityState '.errors == 1' "$scenario records one persistent error"
+        menus_equal "$scenario clipboard dispatch count" "$((before + clipboard_calls))" "$(providers_calls wl-copy)"
+        providers_expect '.listFocus and (.pendingActivation | not)' "$scenario returns menu ownership to the listing"
+        menus_shot "providers-$scenario"
+        providers_install dropbox-cli yes
+        providers_install wl-copy yes
+        menus_acknowledge
+    done
+
+    providers_ready
+    providers_selection "$menu_box/Dropbox"
+    providers_mode sharelink gate 'https://fixture.invalid/share'
+    providers_mode wl-copy gate ''
+    share_before=$(providers_calls dropbox-cli)
+    before=$(providers_calls wl-copy)
+    providers_choose sharelink
+    providers_call dropbox-cli "$(jq -cn --arg path "$menu_box/Dropbox/b-cursor.txt" '["sharelink",$path]')" "$((share_before + 1))"
+    menus_expect statusActivityState '.errors == 0 and .notice != "Share link copied to the clipboard."' 'a pending Dropbox reply cannot claim clipboard success'
+    key -k Up >/dev/null || fail 'providers: pending-share cursor movement failed'
+    providers_release dropbox-cli
+    providers_call wl-copy '["https://fixture.invalid/share"]' "$before"
+    menus_expect statusActivityState '.errors == 0 and .notice != "Share link copied to the clipboard."' 'starting wl-copy cannot claim clipboard success'
+    share_requests=$(jq -s '[.[] | select(.helper == "dropbox-cli" and .args[0] == "sharelink")] | length' "$menu_box/calls.jsonl")
+    providers_open a-marked.txt
+    providers_choose sharelink
+    menus_error 'A share link is still being copied; try again when it finishes.' 'another file cannot replace the pending clipboard request'
+    menus_equal 'busy refusal starts no second share-link request' "$share_requests" \
+        "$(jq -s '[.[] | select(.helper == "dropbox-cli" and .args[0] == "sharelink")] | length' "$menu_box/calls.jsonl")"
+    menus_equal 'busy refusal starts no second clipboard request' "$((before + 1))" "$(providers_calls wl-copy)"
+    menus_acknowledge
+    providers_release dropbox-cli
+    menus_message 'Share link copied to the clipboard.' 'only successful clipboard completion acknowledges the retained share link'
+    providers_ready
+}
+
+providers_dropbox_move_checks() {
+    providers_selection "$menu_dir"
+    providers_choose dropbox
+    menus_error 'Move failed: a-marked.txt' 'Move to Dropbox reports the real destination collision'
+    menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1' 'failed Dropbox move finishes without hiding its error'
+    menus_expect statusFooterState '.secondary.text == " · esc dismisses"' 'unacknowledged Dropbox error keeps the informational error specimen'
+    menus_equal 'collision keeps the marked source bytes' 'list/a-marked.txt original' "$(cat "$menu_dir/a-marked.txt")"
+    menus_equal 'collision keeps the existing destination bytes' 'Dropbox/a-marked.txt original' "$(cat "$menu_box/Dropbox/a-marked.txt")"
+    menus_equal 'Dropbox retry selects only the failed marked file' "$(row_index_of a-marked.txt)" "$(ipc selectedIndices)"
+    menus_shot providers-dropbox-collision
+
+    menus_guard "$menu_box/Dropbox/a-marked.txt"
+    menus_guard "$menu_box/retired/dropbox-collision.txt"
+    mv -- "$menu_box/Dropbox/a-marked.txt" "$menu_box/retired/dropbox-collision.txt" || fail 'providers: cannot preserve the collision before retry'
+    menus_acknowledge
+    menus_expect statusFooterState '.secondary.text | contains("a-marked.txt selected for retry")' 'acknowledged Dropbox failure names the identity-checked source for retry'
+    key -k Menu >/dev/null || fail 'providers: retained-selection retry menu failed'
+    menus_expect menuState '.opened and .snapshotReady' 'native retry captures the retained original selection'
+    providers_expect '(.refreshing | not) and .menuFocus' 'Dropbox retry refresh settles'
+    providers_choose dropbox
+    menus_message 'Moved 1 item' 'Move to Dropbox retries the retained original through the real transfer'
+    wait_listing 1
+    [[ ! -e "$menu_dir/a-marked.txt" ]] || fail 'providers: successful move retained its source'
+    menus_equal 'successful Dropbox move commits the original bytes' 'list/a-marked.txt original' "$(cat "$menu_box/Dropbox/a-marked.txt")"
+    menus_equal 'successful Dropbox move leaves the unmarked cursor file alone' replacement "$(cat "$menu_dir/b-cursor.txt")"
+    menus_expect statusActivityState '.undoAvailable and .errors == 0 and (.activities | length) == 0' 'successful Dropbox move is undoable'
+    menus_shot providers-dropbox-moved
+
+    menus_guard "$menu_dir/a-marked.txt"
+    menus_guard "$menu_box/Dropbox/a-marked.txt"
+    key z >/dev/null || fail 'providers: native Dropbox Undo failed'
+    menus_message 'Undid the move.' 'native Undo restores the same Dropbox source'
+    wait_listing 2
+    [[ ! -e "$menu_box/Dropbox/a-marked.txt" ]] || fail 'providers: Undo retained its moved destination'
+    menus_equal 'Dropbox Undo restores original source bytes' 'list/a-marked.txt original' "$(cat "$menu_dir/a-marked.txt")"
+    menus_equal 'Dropbox Undo preserves the pre-existing collision' 'Dropbox/a-marked.txt original' "$(cat "$menu_box/retired/dropbox-collision.txt")"
+    menus_shot providers-dropbox-undone
 }
 
 case_providers() (
@@ -405,13 +540,8 @@ STATES
         providers_ready
     done
 
-    providers_selection "$menu_box/Dropbox"
-    before=$(providers_calls dropbox-cli)
-    providers_choose sharelink
-    providers_expect '(.refreshing | not) and (.pendingActivation | not)' 'fresh Share Link activation settles'
-    providers_call dropbox-cli "$(jq -cn --arg path "$menu_box/Dropbox/b-cursor.txt" '["sharelink",$path]')" "$((before + 1))"
-    providers_call wl-copy '["https://fixture.invalid/share"]' 0
-    menus_message 'Share link copied to the clipboard.' 'Share Link hands the fixture URL to the private clipboard recorder'
+    providers_sharelink_checks
+    providers_dropbox_move_checks
 
     providers_selection "$menu_dir"
     providers_mode dropbox-cli gate 'Up to date'
@@ -431,4 +561,57 @@ STATES
     menus_shot providers-destination-refusal
     printf 'PROVIDERS_NATIVE_CHECKS=%s\n' "$menus_checks"
     printf 'PROVIDERS_UNVERIFIED worker-stage Dropbox retry, offline daemon wording, helper launch race, concurrent panes, all-preset provider combinations, matched-size pixels\n'
+)
+
+# Opt-in: real provider discovery and menu cancellation, with only Flea's own persistence redirected.
+case_providersinstalled() (
+    local menu_box="$fixture_root/providersinstalled" menu_dir="$fixture_root/providersinstalled/list" menus_checks=0
+    local name target state peer_count clipboard_before
+    sandbox_scratch "$menu_box"
+    : > "$menu_box/.flea-test-sandbox" || fail 'providersinstalled: sandbox marker write failed'
+    for target in list state config cache data; do
+        menus_guard "$menu_box/$target"
+        mkdir "$menu_box/$target" || fail 'providersinstalled: private directory creation failed'
+    done
+    providers_write list/provider.txt 'provider observation only'
+    for name in tailscale omarchy-tailscale-send dropbox-cli; do
+        target=$(command -v "$name") || fail "providersinstalled: $name is not installed"
+        [[ "$target" == /* && -x "$target" ]] || fail "providersinstalled: $name is not an absolute executable"
+        printf 'PROVIDERS_INSTALLED_COMMAND %s %s\n' "$name" "$target"
+    done
+    export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config"
+    export XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
+    "$flea_bin" --ui-state '{"view":"list","keys":"default"}' >/dev/null \
+        || fail 'providersinstalled: private settings seed failed'
+    trap 'kill_flea || exit 1' EXIT
+    launch "$menu_dir"
+    wait_listing 1
+    clipboard_before=$(ipc keyDeliveryState | jq -c .clipboard) || fail 'providersinstalled: internal clipboard observer failed'
+    providers_open provider.txt pointer
+    providers_expect '.facts.taildrop.installed and .facts.taildropSend.installed and .facts.dropbox.installed and .dropbox.ready' 'native menu resolves the actual installed providers and ready Dropbox account'
+    menus_expect menuState 'any(.entries[]; .action == "dropbox" and (.disabled | not) and .mark == "dropbox")' 'real Dropbox account exposes its official menu mark and enabled move'
+    menus_expect menuState 'any(.entries[]; .action == "taildrop" and .mark == "tailscale")' 'real Tailscale installation exposes its official menu mark'
+    providers_geometry
+    menus_shot providers-installed-menu
+    state=$(ipc providerState) || fail 'providersinstalled: actual peer observer failed'
+    peer_count=$(jq -er '.taildrop.peers | length' <<< "$state") || fail 'providersinstalled: actual peers invalid'
+    if (( peer_count > 0 )); then
+        providers_seek taildrop
+        key -k Right >/dev/null || fail 'providersinstalled: real-peer flyout failed'
+        menus_expect menuState ".submenu and (.submenuEntries | length) == $peer_count and .submenuCursor == 0" 'real eligible peer identities populate the native flyout'
+        menus_equal 'flyout keeps the actual provider peer identities' \
+            "$(jq -c '[.taildrop.peers[].id]' <<< "$state")" "$(ipc menuState | jq -c '[.submenuEntries[].id]')"
+        menus_shot providers-installed-flyout
+        key -k Escape >/dev/null || fail 'providersinstalled: peer cancellation failed'
+        menus_expect menuState '.opened and (.submenu | not)' 'Escape cancels the real peer flyout without selecting a receiver'
+    else
+        menus_expect menuState 'any(.entries[]; .action == "taildrop" and .disabled and (.hint | length) > 0)' 'no eligible real peer leaves a visible reason'
+        printf 'PROVIDERS_INSTALLED_UNVERIFIED no currently eligible real peer; populated flyout not exercised\n'
+    fi
+    providers_close
+    providers_expect '(.pendingActivation | not) and (.refreshing | not) and .listFocus' 'provider observation leaves no queued activation and restores listing focus'
+    menus_expect statusActivityState '.errors == 0 and (.activities | length) == 0 and (.notice | test("Sending|Moved|Share link") | not)' 'cancelled provider menus produce no operation or dispatch confirmation'
+    menus_equal 'cancelled provider menus preserve the internal clipboard' "$clipboard_before" "$(ipc keyDeliveryState | jq -c .clipboard)"
+    menus_equal 'cancelled provider menus preserve fixture bytes' 'provider observation only' "$(cat "$menu_dir/provider.txt")"
+    printf 'PROVIDERS_INSTALLED checks=%s eligible_peers=%s input=menu,flyout,Escape no_send_move_sharelink_activation=true visual_inspection=pending\n' "$menus_checks" "$peer_count"
 )

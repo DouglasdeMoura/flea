@@ -19,6 +19,11 @@ function account(raw, error) {
     return { path: "", reason: "Dropbox is signed out" }
 }
 
+function contains(root, path) {
+    return typeof root === "string" && root.length > 1 && root.charAt(0) === "/"
+        && typeof path === "string" && (path === root || path.indexOf(root + "/") === 0)
+}
+
 // Sample output: dropbox-cli status prints "Up to date" or "Dropbox isn't running!" even with exit status zero.
 function status(output, exitCode, error) {
     var text = String(output || "").trim(), detail = String(error || "").trim()

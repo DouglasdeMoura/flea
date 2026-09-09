@@ -1,7 +1,6 @@
 use crate::backend::{regfile, sandbox};
 use crate::oflags::O_NOFOLLOW;
 use std::io::{self, Read};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -50,18 +49,13 @@ fn run(path: &Path, arguments: &mut [String], cancel: &AtomicBool) -> io::Result
             *argument = "/input".into();
         }
     }
-    // Bind the held descriptor to /input so replacing the source name cannot change the decoder's input.
-    let descriptor = PathBuf::from(format!(
-        "/proc/{}/fd/{}",
-        std::process::id(),
-        input.as_raw_fd()
-    ));
-    let mut wrapped = sandbox::wrap_readonly(arguments, &descriptor);
+    // Pass the held file through stdin: the sandbox cannot inspect its parent's protected /proc descriptors.
+    let mut wrapped = sandbox::wrap_readonly(arguments, Path::new("/proc/self/fd/0"));
     let destination = wrapped.len() - arguments.len() - 1;
     wrapped[destination] = "/input".into();
     let mut child = Command::new(&wrapped[0])
         .args(&wrapped[1..])
-        .stdin(Stdio::null())
+        .stdin(Stdio::from(input))
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
@@ -107,6 +101,20 @@ fn run(path: &Path, arguments: &mut [String], cancel: &AtomicBool) -> io::Result
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+
+    #[test]
+    fn preview_worker_reads_held_source_in_readonly_sandbox() {
+        assert!(sandbox::available(), "preview worker test requires bwrap and prlimit");
+        let root = TestDir::new("tui-preview-held");
+        let path = root.file("source.txt", "held preview source\n");
+        let job = Job::start(path.clone(), vec![
+            "/usr/bin/bash".into(), "-c".into(),
+            "test ! -w /input && /usr/bin/cat /input".into(),
+        ]);
+        let result = job.result.recv_timeout(Duration::from_secs(5)).expect("preview worker did not finish");
+        assert_eq!(result.unwrap(), b"held preview source\n");
+        assert_eq!(std::fs::read(path).unwrap(), b"held preview source\n");
+    }
 
     #[test]
     fn missing_preview_source_reports_plain_worker_error() {

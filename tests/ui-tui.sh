@@ -710,8 +710,13 @@ class Native:
             guard(self.case, self.case / "evidence/undriven.json").write_text(json.dumps(self.undriven))
             print("TUI_UNDRIVEN " + json.dumps(gap), flush=True)
         try:
+            # Calibrate the new grid while its separator is unobscured, before reopening the menu.
+            self.key("-k", "Escape")
             self.resize_window(original["size"][0], round(original["size"][1] + (6 - cells[0]) * cell_y), "tiny-menu-window")
             self.wait("tiny-menu-six-rows", lambda: self.terminal_size()[:2] == (6, cells[1]))
+            self.snapshot("tiny-menu-chrome", lambda text: "5 items" in text and self.menu_entry("show hidden") is None)
+            self.click_cell(1, 2, "tiny-menu-chrome-calibration")
+            self.key("m")
             self.snapshot("tiny-menu-open", lambda text: (entry := self.menu_entry("open")) is not None and entry["selected"]
                           and self.menu_entry("show hidden") is not None)
             self.key("-k", "Down")

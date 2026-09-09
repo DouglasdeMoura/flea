@@ -74,7 +74,7 @@ fn linux_io_message(code: Option<i32>) -> &'static str {
         Some(EISDIR) => "item is a folder",
         Some(ENFILE | EMFILE) => "too many files are open",
         Some(EFBIG) => "file is too large",
-        Some(ENOSPC) => "no space left on device",
+        Some(ENOSPC) => "disk full",
         Some(EROFS) => "filesystem is read-only",
         Some(ENAMETOOLONG) => "file name is too long",
         Some(ENOTEMPTY) => "folder is not empty",
@@ -127,7 +127,7 @@ mod tests {
         for (code, expected) in [
             (18, "source and destination are on different filesystems"),
             (20, "a path component is not a folder"),
-            (28, "no space left on device"),
+            (28, "disk full"),
             (30, "filesystem is read-only"),
             (36, "file name is too long"),
             (40, "too many symbolic links"),

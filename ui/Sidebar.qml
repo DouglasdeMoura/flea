@@ -12,6 +12,7 @@ Item {
     id: root
 
     property bool focused: false
+    property var backend: null
     property Item navigationPane: null
     property bool trashActive: false
     // ui/Pane.qml's one ui/ContextMenu.qml, handed in rather than built here: a second instance in
@@ -118,6 +119,7 @@ Item {
 
     NetworkMounts {
         id: mounts
+        backend: root.backend
         origin: root.navigationPane
         bookmarksText: bookmarksFile.text()
         onOpened: function (path, origin) { root.networkOpened(path, origin) }

@@ -394,7 +394,25 @@ empty_hero_capture() {
         if [[ ! "$x $y $width $height" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || (( width <= 0 || height <= 0 )); then
             fail "empty hero: invalid painted-mark rectangle"
         fi
-        lit=$(lit_in_rect "$target" "$x" "$y" "$width" "$height")
+        lit=$(python3 - "$target" "$x $y $width $height" "$(jq -er .markColor <<< "$after")" <<'PY'
+from PIL import Image, ImageColor
+import sys
+
+image = Image.open(sys.argv[1]).convert("RGB")
+# Sample input: "192 280 48 48" and "#787e91" come from the read-only native observers.
+x, y, width, height = map(int, sys.argv[2].split())
+if min(x, y) < 0 or min(width, height) <= 0 or x + width > image.width or y + height > image.height:
+    raise SystemExit("empty hero: mark rectangle is outside its native image")
+mark = ImageColor.getrgb(sys.argv[3])
+if len(mark) != 3:
+    raise SystemExit("empty hero: expected an opaque mark color")
+crop = image.crop((x, y, x + width, y + height))
+# The 24-grid spiral leaves a two-unit margin, so its top-left corner measures the painted background.
+background = crop.getpixel((0, 0))
+distance = lambda pixel, color: sum((channel - target) ** 2 for channel, target in zip(pixel, color))
+print(sum(distance(pixel, mark) < distance(pixel, background) for pixel in crop.getdata()))
+PY
+        ) || fail "empty hero: native mark contrast measurement failed"
         (( lit > 0 )) || fail "empty hero: settled mark painted no visible pixels"
         menus_checks=$((menus_checks + 1))
         printf 'EMPTY_HERO_CAPTURE check=%s label=%s state=%s mark=%s hero=%s lit=%s\n' \
@@ -403,6 +421,125 @@ empty_hero_capture() {
     done
     fail "empty hero: no capture stayed settled across its observation window: $before"
 }
+
+empty_hero_late_query() (
+    local directory="$1" reduced_directory="$2" query_root="$fixture_root/empty-motion-query"
+    local real_hyprctl response pid before observed deadline started elapsed hidden_offset menus_checks=0
+    local release_fd="" key_job="" query_wait_seconds=15
+    real_hyprctl=$(type -P hyprctl) || fail "empty hero late query: native hyprctl is unavailable"
+    [[ "$real_hyprctl" == /* && -x "$real_hyprctl" && "$real_hyprctl" != "$query_root/"* ]] \
+        || fail "empty hero late query: native hyprctl path is invalid: $real_hyprctl"
+    response=$("$real_hyprctl" -j getoption animations:enabled) || fail "empty hero late query: compositor read failed"
+    jq -e '.option == "animations:enabled" and .bool == false' <<< "$response" >/dev/null \
+        || fail "EMPTY_HERO_LATE_BLOCKED: actual compositor animations must already be disabled; unchanged response=$response"
+    sandbox_scratch "$query_root"
+    mkdir "$query_root/bin" || fail "empty hero late query: helper directory creation failed"
+    printf 'empty hero query gate\n' > "$query_root/.flea-test-sandbox"
+    mkfifo "$query_root/release" || fail "empty hero late query: release FIFO creation failed"
+    cat > "$query_root/bin/hyprctl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" != 3 || "$1" != -j || "$2" != getoption || "$3" != animations:enabled ]]; then
+    exec "$FLEA_HERO_REAL_HYPRCTL" "$@"
+fi
+. "$FLEA_HERO_REPO/tools/flea-sandbox-guard"
+sandbox_require "$FLEA_HERO_QUERY_ROOT"
+query_root=$SANDBOX_PATH
+[[ -f "$query_root/.flea-test-sandbox" && -p "$query_root/release" && ! -L "$query_root/release" ]] \
+    || { printf 'empty hero query: owned marker or FIFO missing\n' >&2; exit 1; }
+set -o noclobber
+query_status=0
+"$FLEA_HERO_REAL_HYPRCTL" "$@" > "$query_root/response.json" 2> "$query_root/response.stderr" || query_status=$?
+printf '%s\n' "$query_status" > "$query_root/status"
+cat "$query_root/response.stderr" >&2
+(( query_status == 0 )) || exit "$query_status"
+jq -e '.option == "animations:enabled" and .bool == false' "$query_root/response.json" >/dev/null \
+    || { printf 'empty hero query: actual compositor response changed; refusing synthetic output\n' >&2; exit 1; }
+exec 3<>"$query_root/release"
+printf '%s\n' "$$" > "$query_root/ready"
+IFS= read -r release <&3
+[[ "$release" == release ]] || { printf 'empty hero query: invalid release token\n' >&2; exit 1; }
+cat "$query_root/response.json"
+SH
+    chmod +x "$query_root/bin/hyprctl" || fail "empty hero late query: helper could not become executable"
+    # shellcheck disable=SC2329
+    late_query_cleanup() {
+        local outcome=$?
+        trap - EXIT
+        if [[ -n "$key_job" ]]; then wait "$key_job" || outcome=1; fi
+        sandbox_require "$query_root/release"
+        [[ -p "$SANDBOX_PATH" && ! -L "$SANDBOX_PATH" && -f "$query_root/.flea-test-sandbox" ]] \
+            || fail "empty hero late query: cleanup FIFO is not owned"
+        # Hold both ends until the native process drains so a query arriving late can still read its release.
+        if [[ -z "$release_fd" ]]; then
+            exec {release_fd}<>"$SANDBOX_PATH" || fail "empty hero late query: cleanup could not open release"
+        fi
+        printf 'release\n' >&"$release_fd" || outcome=1
+        ( kill_flea ) || outcome=1
+        exec {release_fd}>&-
+        exit "$outcome"
+    }
+    trap 'late_query_cleanup' EXIT
+    unset FLEA_REDUCED_MOTION
+    PATH="$query_root/bin:$PATH" FLEA_HERO_REAL_HYPRCTL="$real_hyprctl" FLEA_HERO_REPO="$repo" \
+        FLEA_HERO_QUERY_ROOT="$query_root" launch "$directory"
+    wait_listing 2
+    pid=$(flea_pid) || fail "empty hero late query: native PID unavailable"
+    flea_process_owned "$pid" || fail "empty hero late query: native PID is not owned"
+    menus_equal "late query starts with its nonempty fixture" "$directory" "$(ipc path)"
+    permissions_viewport 880 620
+    deadline=$((SECONDS + query_wait_seconds))
+    while [[ ! -s "$query_root/ready" ]]; do
+        (( SECONDS < deadline )) || fail "empty hero late query: real query did not reach the gate; evidence=$query_root"
+        sleep 0.05
+    done
+    before=$(qs ipc --pid "$pid" call flea emptyHeroState) || fail "empty hero late query: hidden observer failed"
+    jq -e '(.visible | not) and (.reducedMotion | not) and .opacity == 0' <<< "$before" >/dev/null \
+        || fail "empty hero late query: query was not held before the empty entrance: $before"
+    hidden_offset=$(jq -er '.offset | numbers' <<< "$before") || fail "empty hero late query: hidden offset unavailable"
+    key -k Home >/dev/null
+    menus_equal "late query entry targets its empty folder" 'reduced|dir' "$(ipc rowAt 0 | cut -d '|' -f 1,2)"
+    exec {release_fd}<>"$query_root/release" || fail "empty hero late query: release FIFO unavailable"
+    assert_focus
+    started=$(date +%s%3N)
+    # Observe concurrently with native delivery so the command's own return cannot consume the entrance.
+    timeout "$query_wait_seconds" omarchy-drive key --window flea -k Return > "$query_root/key.log" 2>&1 &
+    key_job=$!
+    deadline=$((SECONDS + query_wait_seconds))
+    while :; do
+        before=$(qs ipc --pid "$pid" call flea emptyHeroState) || fail "empty hero late query: entrance observer failed"
+        if jq -e '.visible and (.reducedMotion | not) and (.opacity < 1 or .offset != 0)' <<< "$before" >/dev/null; then break; fi
+        jq -e '.visible' <<< "$before" >/dev/null \
+            && fail "EMPTY_HERO_LATE_UNVERIFIED: native observation missed the actual entrance: $before"
+        (( SECONDS < deadline )) || fail "empty hero late query: empty entrance never became visible: $before"
+    done
+    printf 'release\n' >&"$release_fd" || fail "empty hero late query: could not release actual response"
+    exec {release_fd}>&-
+    release_fd=""
+    while :; do
+        observed=$(qs ipc --pid "$pid" call flea emptyHeroState) || fail "empty hero late query: reduced observer failed"
+        if jq -e '.reducedMotion' <<< "$observed" >/dev/null; then break; fi
+        (( SECONDS < deadline )) || fail "empty hero late query: actual response was never applied: $observed"
+    done
+    elapsed=$(( $(date +%s%3N) - started ))
+    jq -e '.visible and .settled and .opacity == 1 and .offset == 0 and .captionOpacity == 1' <<< "$observed" >/dev/null \
+        || fail "empty hero late query: first reduced observation retained an entrance animation: $observed"
+    if wait "$key_job"; then key_job=""
+    else key_job=""; fail "empty hero late query: native Return delivery failed; evidence=$query_root/key.log"; fi
+    menus_equal "late reduced query retains its native path" "$reduced_directory" "$(ipc path)"
+    printf 'EMPTY_HERO_LATE_FIRST_REDUCED elapsed_ms=%s before=%s after=%s response=%s\n' \
+        "$elapsed" "$before" "$observed" "$(cat "$query_root/response.json")"
+    empty_hero_capture empty-state-reduced-late
+    key -k Backspace >/dev/null
+    wait_listing 2
+    menus_expect emptyHeroState "(.visible | not) and .opacity == 0 and .offset == $hidden_offset" "late reduced motion preserves hidden bindings"
+    key -k Home >/dev/null
+    key -k Return >/dev/null
+    menus_expect emptyHeroState '.visible and .settled and .reducedMotion and .opacity == 1 and .offset == 0' \
+        "late reduced motion preserves reopened bindings"
+    empty_hero_capture empty-state-reduced-late-reopened
+    printf 'EMPTY_HERO_LATE checks=%s actual_query=held-and-released native_negative_control=pending\n' "$menus_checks"
+)
 
 case_emptystate() (
     local directory="$fixture_root/empty-state" permissions_listing="$fixture_root/empty-state" menus_checks=0 mode chord
@@ -493,5 +630,6 @@ PY
         then fail "empty hero: static native pixel comparison failed"; fi
     done
     kill_flea
-    printf 'EMPTY_STATE checks=%s views=3 populated=ok missing=ok recovery=ok reduced=first-visible-static-reopening\n' "$menus_checks"
+    empty_hero_late_query "$directory" "$reduced_directory" || exit $?
+    printf 'EMPTY_STATE checks=%s views=3 populated=ok missing=ok recovery=ok reduced=first-visible-static-reopening late=separate-receipt\n' "$menus_checks"
 )

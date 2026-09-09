@@ -49,7 +49,7 @@ Item {
         root.transientIsError && root.stickyHere ? root.sticky : "",
         root.activities.slice(1).map(function (entry) { return entry.text }).join(" · "),
         (root.transientIsError || root.stickyHere) && root.searching ? root.searchText() : "",
-        root.retryLine]
+        root.transientIsError ? "" : root.retryLine]
         .filter(function (s) { return s.length > 0 }).map(function (s) { return " · " + s }).join("")
     readonly property real slotWidth: Math.max(0, root.width - Theme.spacing.rowPaddingX
         - counts.x - counts.width - 3 * Theme.spacing.gap - root.spiralSize)

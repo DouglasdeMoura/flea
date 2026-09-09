@@ -4340,22 +4340,53 @@ EOS
     shot network-second-pane-shares
     local network_geometry_rect network_geometry_checks=0
     network_share_reflow
-    local destruction_log_start
-    destruction_log_start=$(wc -l < "$flea_log")
+    local exit_log_start retained_secondary retained_shares retained_entries retained_rect rx ry rw rh menus_checks=0
+    retained_secondary=$(ipc dualState | jq -c '.panes[1] | del(.focused)')
+    retained_shares=$(ipc shareBrowserState | jq -c '{active,owner,baseUri,cursor}')
+    retained_entries=$(ipc shareBrowserEntries)
+    retained_rect="$network_geometry_rect"
+    exit_log_start=$(wc -l < "$flea_log")
     click_chrome list
-    network_wait_panes '(.active | not) and .focused == 0 and .panes[1] == null'
-    ipc shareBrowserState | jq -e '(.active | not) and .owner == -1' >/dev/null \
-        || fail "network: destroying the second pane left its shares active: $(ipc shareBrowserState)"
-    key j >/dev/null
-    settle
-    [[ "$(ipc cursor)" == 1 ]] || fail "network: closing second-pane shares did not restore primary-list keys"
-    tail -n "+$((destruction_log_start + 1))" "$flea_log" > "$fake_root/second-pane-destruction.log"
-    if grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot' "$fake_root/second-pane-destruction.log"; then
-        fail "network: second-pane destruction produced native QML errors"
+    network_wait_panes "(.active | not) and .focused == 0 and (.panes[1].focused | not) and ((.panes[1] | del(.focused)) == $retained_secondary)"
+    menus_expect shareBrowserState "{active,owner,baseUri,cursor} == $retained_shares" 'leaving dual retains the secondary share listing session'
+    key -k Home >/dev/null || fail 'network: primary Home delivery failed after dual exit'
+    network_wait_panes '.focused == 0 and .panes[0].cursor == 0'
+    key j >/dev/null || fail 'network: primary j delivery failed after dual exit'
+    network_wait_panes ".focused == 0 and .panes[0].cursor == 1 and ((.panes[1] | del(.focused)) == $retained_secondary)"
+    menus_expect shareBrowserState "{active,owner,baseUri,cursor} == $retained_shares" 'hidden secondary shares cannot consume primary-list keys'
+    read -r rx ry rw rh <<< "$(ipc rowRect 0)"
+    [[ "$rw" -gt 0 && "$rh" -gt 0 ]] || fail 'network: primary row has no pointer target after dual exit'
+    menus_point "$((rx + rw * 3 / 4)) $((ry + rh / 2))"
+    network_wait_panes ".focused == 0 and .panes[0].cursor == 0 and .panes[0].selected == [0] and ((.panes[1] | del(.focused)) == $retained_secondary)"
+    menus_expect shareBrowserState "{active,owner,baseUri,cursor} == $retained_shares" 'pointer selects the expanded primary listing without activating hidden shares'
+    key -k Escape >/dev/null || fail 'network: primary Escape delivery failed after dual exit'
+    network_wait_panes '.focused == 0 and .panes[0].selected == []'
+    menus_expect shareBrowserState "{active,owner,baseUri,cursor} == $retained_shares" 'primary Escape clears selection without dismissing the retained secondary session'
+    shot network-shares-owner-hidden
+
+    click_chrome dual
+    network_wait_panes ".active and .focused == 0 and ((.panes[1] | del(.focused)) == $retained_secondary)"
+    network_share_geometry 'reopening dual restores retained shares geometry' "$retained_rect"
+    menus_equal 'reopening dual preserves the original share names' "$retained_entries" "$(ipc shareBrowserEntries)"
+    key -k Tab >/dev/null || fail 'network: reopened secondary focus delivery failed'
+    network_wait_panes '.focused == 1'
+    key j >/dev/null || fail 'network: reopened share cursor delivery failed'
+    menus_expect shareBrowserState '.active and .owner == 1 and .cursor == 1' 'reopened secondary shares receive their own cursor key'
+    network_wait_panes ".focused == 1 and .panes[0].cursor == 0 and ((.panes[1] | del(.focused)) == $retained_secondary)"
+    shot network-shares-owner-reopened
+    key -k Escape >/dev/null || fail 'network: reopened share Escape delivery failed'
+    menus_expect shareBrowserState '(.active | not) and .owner == 1' 'Escape in the owning pane dismisses shares without destroying its pane'
+    key j >/dev/null || fail 'network: secondary listing j failed after dismissing shares'
+    network_wait_panes '.focused == 1 and .panes[1].focused and .panes[1].cursor == 1 and .panes[0].cursor == 0'
+    shot network-shares-owner-dismissed
+    click_chrome list
+    network_wait_panes '(.active | not) and .focused == 0 and (.panes[1].focused | not)'
+    tail -n "+$((exit_log_start + 1))" "$flea_log" > "$fake_root/second-pane-exit.log"
+    if grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot' "$fake_root/second-pane-exit.log"; then
+        fail "network: second-pane exit or reopen produced native QML errors"
     fi
-    shot network-shares-owner-destroyed
     [[ "$(cat "$bookmarks")" == "$legacy_before" ]] || fail "network: origin races changed GTK bookmarks"
-    printf 'NETWORK second-pane-destruction=closed focus=restored qml-log=clean\n'
+    printf 'NETWORK second-pane-session=retained hidden-keys-pointer=primary reopen=owner-and-geometry Escape=focused-owner focus=restored qml-log=clean checks=%s\n' "$menus_checks"
     export PATH="$saved_path"
     if [[ -n "$real_state" ]]; then export XDG_STATE_HOME="$real_state"; else unset XDG_STATE_HOME; fi
     if [[ -n "$real_config" ]]; then export XDG_CONFIG_HOME="$real_config"; else unset XDG_CONFIG_HOME; fi
@@ -7761,6 +7792,7 @@ case_previewviews() {
 . "$repo/tests/ui-trash.sh"
 . "$repo/tests/ui-menus.sh"
 . "$repo/tests/ui-providers.sh"
+. "$repo/tests/ui-dropbox-roots.sh"
 . "$repo/tests/ui-settings-layout.sh"
 . "$repo/tests/ui-settings-places.sh"
 . "$repo/tests/ui-card-layout.sh"

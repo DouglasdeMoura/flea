@@ -400,6 +400,8 @@ places_external_failure() {
         || fail "places: missing live store did not report its read failure"
     ipc uiSettings | jq -e --argjson expected "$expected" '.places.favourites == $expected' >/dev/null \
         || fail "places: missing live store erased visible records"
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc statusError)" == false ]] || fail "places: missing-store acknowledgement left an unexplained error: $(ipc statusActivityState)"
     places_require_store
     sandbox_require "$dir/removed-ui.json"
     mv "$dir/removed-ui.json" "$doc"
@@ -414,6 +416,8 @@ places_external_failure() {
         || fail "places: empty live bytes were treated as a valid empty store"
     ipc uiSettings | jq -e --argjson expected "$expected" '.places.favourites == $expected' >/dev/null \
         || fail "places: empty live bytes dropped previously visible records"
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc statusError)" == false ]] || fail "places: empty-store acknowledgement left an unexplained error: $(ipc statusActivityState)"
     places_require_store
     cp "$dir/live-store.original" "$doc"
     places_wait_records "$expected"
@@ -430,6 +434,8 @@ places_external_failure() {
         || fail "places: malformed external state dropped previously visible records"
     cmp "$doc" "$dir/malformed.original" || fail "places: watcher rewrote malformed original bytes"
     shot places-malformed-retained
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc statusError)" == false ]] || fail "places: malformed-store acknowledgement left an unexplained error: $(ipc statusActivityState)"
     settings_open_key; settle
     settings_section places
     settings_focus_row favouriteActions
@@ -444,17 +450,35 @@ places_external_failure() {
     cp "$doc" "$dir/readable.original"
     places_require_store
     chmod 000 "$doc"
-    key -k Return >/dev/null; settle
     for attempt in $(seq 1 30); do
-        [[ "$(ipc lastMessage)" == *'could not be read, so the state file was not written'* ]] && break
+        [[ "$(ipc lastMessage)" == *'ui.json could not be read'* ]] && break
         sleep 0.1
     done
+    [[ "$(ipc statusError)" == true && "$(ipc lastMessage)" == *'ui.json could not be read'* ]] \
+        || fail "places: unreadable live store did not report its read failure: $(ipc statusActivityState)"
+    key -k Return >/dev/null; settle
+    for attempt in $(seq 1 30); do
+        ipc statusActivityState | jq -e '.errors == 2' >/dev/null && break
+        sleep 0.1
+    done
+    ipc statusActivityState | jq -e '.errors == 2' >/dev/null \
+        || fail "places: unreadable Add did not queue its write refusal: $(ipc statusActivityState)"
+    [[ "$(ipc lastMessage)" == *'ui.json could not be read'* ]] || fail "places: Add displaced the unacknowledged read error"
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc settingsOpen)" == false ]] || fail "places: Escape did not close Settings before acknowledging errors"
+    key -k Escape >/dev/null; settle
     places_require_store
     chmod "$mode" "$doc"
     [[ "$(ipc statusError)" == true && "$(ipc lastMessage)" == *'could not be read, so the state file was not written'* ]] \
         || fail "places: unreadable store did not refuse the real Add operation"
     places_wait_records "$expected"
     cmp "$doc" "$dir/readable.original" || fail "places: failed Add replaced an unreadable store"
+    key -k Escape >/dev/null; settle
+    [[ "$(ipc statusError)" == false ]] || fail "places: Add refusal acknowledgement left an unexplained error: $(ipc statusActivityState)"
+    settings_open_key; settle
+    settings_section places
+    settings_focus_row favouriteActions
+    key h >/dev/null
     key -k Return >/dev/null; settle
     expected=$(jq -c '. + .' <<< "$expected")
     places_wait_records "$expected"

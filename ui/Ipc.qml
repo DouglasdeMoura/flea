@@ -150,7 +150,8 @@ QtObject {
         function contextMenuModel(): string { return JSON.stringify(root.pane.contextMenu().entries) }
         function providerState(): string {
             var pane = root.pane, actions = pane.menuActions, taildrop = pane.taildropService, dropbox = pane.dropboxService
-            return JSON.stringify({facts: pane.backend.providers, refreshing: actions.providersRefreshing,
+            return JSON.stringify({facts: pane.backend.providers, formatsRequests: pane.backend.formatsToken,
+                refreshing: actions.providersRefreshing,
                 pendingActivation: actions.pendingActivation, menuFocus: pane.contextMenu().keyboardFocused,
                 listFocus: pane.listArea.activeFocus, path: pane.path, cursor: pane.cursorIndex,
                 cursorPath: pane.cursorRow ? pane.join(pane.path, pane.cursorRow.n) : "",
@@ -161,6 +162,7 @@ QtObject {
                 taildrop: {checking: taildrop.checking, reason: taildrop.reason, peers: taildrop.peers,
                     timeoutSeconds: taildrop.statusTimeoutSeconds},
                 dropbox: dropbox ? {checking: dropbox.dropboxChecking, ready: dropbox.dropboxReady,
+                    metadataBusy: dropbox._dropboxMetadataRequest !== 0 || dropbox._dropboxMetadataAgain,
                     reason: dropbox.dropboxReason, path: dropbox.dropboxPath,
                     timeoutSeconds: dropbox.dropboxStatusTimeoutSeconds} : null})
         }
@@ -438,6 +440,18 @@ QtObject {
         function viewContentY(): int { return Math.round(root.pane.viewMode === "columns" && root.columns ? root.columns.activeContentY() : root.pane.listArea.contentY) }
         function listAreaRect(): string { return root.fleaWindow.rectOf(root.pane.listArea) }
         function rowRect(i: int): string { return root.fleaWindow.rectOf(root.pane.visibleItemFor(i)) }
+        function dragPaneGeometry(side: int, index: int): string {
+            var pane = side >= 0 && side < root.panes.length ? root.panes[side] : null
+            if (!pane || index < 0 || index >= pane.total) return "{}"
+            var folder = pane.rowFor(index), last = pane.rowFor(pane.total - 1)
+            return JSON.stringify({side: side, active: ViewState.state.view === "dual", focused: root.pane === pane,
+                path: pane.path, view: pane.viewMode, loading: pane.listInFlight, total: pane.total,
+                area: root.fleaWindow.rectOf(pane.listArea),
+                folder: {index: index, name: folder ? folder.n : "", directory: !!folder && folder.d === true,
+                    rect: root.fleaWindow.rectOf(pane.visibleItemFor(index))},
+                last: {index: pane.total - 1, name: last ? last.n : "",
+                    rect: root.fleaWindow.rectOf(pane.visibleItemFor(pane.total - 1))}})
+        }
         // Ready is the decoded image on screen; a path alone is not a thumbnail, see GridTile.thumbDrawn.
         function rowThumbReady(i: int): bool { var item = root.pane.visibleItemFor(i); return item && item.iconStatus !== undefined ? item.iconStatus === Image.Ready : false }
         function columnPlayerLoaded(): bool { return root.columns ? root.columns.playerLoaded() : false }
@@ -488,6 +502,7 @@ QtObject {
             var empty = root.emptyState
             if (!empty) return "{}"
             return JSON.stringify({visible: empty.visible, settled: empty.markItem.settled && empty.opacity === 1,
+                opacity: empty.opacity, offset: empty.captionItem.parent.anchors.verticalCenterOffset,
                 caption: empty.captionItem.text, captionOpacity: empty.captionItem.opacity,
                 captionColor: String(empty.captionItem.color), markColor: String(empty.markItem.color),
                 foreground: String(Theme.color.foreground), muted: String(Theme.color.muted),

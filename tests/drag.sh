@@ -635,6 +635,7 @@ echo
 [ "$fail" = 0 ] || exit 1
 
 # ---------------------------------------------------------------- shared source/target ownership
+dual_destination_side=""
 expect_feedback() {
   local owner="$1" line="$2" state attempt
   for ((attempt=1; attempt<=40; attempt++)); do
@@ -647,6 +648,7 @@ expect_feedback() {
     fi
     sleep 0.25
   done
+  if [[ -n "${dual_destination_side:-}" ]]; then dual_drag_diagnostic; fi
   die "drag ownership owner=[$owner] line=[$line], observed $state"
 }
 
@@ -712,6 +714,78 @@ target_points() {
   read -r x y <<< "$point"
   (( x > 0 && x < WW && y > 0 && y < WH )) || die "neutral chrome target is outside the owned window"
   neutral_x=$((WX + x)); neutral_y=$((WY + y))
+}
+
+dual_target_points() {
+  local phase="$1" geometry point x y
+  owned_path "$destination"
+  geometry=$(ipc dragPaneGeometry "$dual_destination_side" 0) || die "dual drag geometry observer failed"
+  if [[ "$phase" == saved-before ]]; then dual_before="$geometry"; else dual_after="$geometry"; fi
+  printf 'DRAG_DUAL_GEOMETRY phase=%s state=%s\n' "$phase" "$geometry"
+  point=$(python3 - "$geometry" "$destination" "$dual_destination_side" "$phase" "$WX" "$WY" "$WW" "$WH" "$pointer_tolerance" <<'PY'
+import json, re, sys
+
+state = json.loads(sys.argv[1])
+destination, side, phase = sys.argv[2:5]
+wx, wy, width, height, tolerance = map(int, sys.argv[5:])
+def require(condition, message):
+    if not condition:
+        raise SystemExit("dual drag geometry: " + message)
+
+require(state.get("side") == int(side) and state.get("active") is True and state.get("path") == destination,
+        "destination pane identity changed")
+require(state.get("focused") is (phase == "saved-before") and state.get("view") == "list" and state.get("loading") is False,
+        "destination focus, view or listing readiness changed")
+require(state.get("total") == 3, "fixture no longer contains its folder and two files")
+folder, last = state.get("folder", {}), state.get("last", {})
+require(folder.get("index") == 0 and folder.get("name") == "folder" and folder.get("directory") is True,
+        "first fixture row is not the destination folder")
+require(last.get("index") == 2 and bool(last.get("name")), "last fixture row identity is unavailable")
+def rectangle(value):
+    # Native rectOf output: "1365 108 1172 37", rounded at its actual edges.
+    require(isinstance(value, str) and re.fullmatch(r"[0-9]+(?: [0-9]+){3}", value), "invalid native rectangle")
+    x, y, w, h = map(int, value.split())
+    require(w > 0 and h > 0 and x + w <= width and y + h <= height, "rectangle is outside the owned window")
+    return x, y, w, h
+
+ax, ay, aw, ah = rectangle(state.get("area"))
+fx, fy, fw, fh = rectangle(folder.get("rect"))
+lx, ly, lw, lh = rectangle(last.get("rect"))
+for x, y, w, h in [(fx, fy, fw, fh), (lx, ly, lw, lh)]:
+    require(x >= ax and y >= ay and x + w <= ax + aw and y + h <= ay + ah, "row is outside the destination listing")
+bottom = ly + lh
+require(ay + ah - bottom > 2 * tolerance, "destination has insufficient empty floor")
+print(wx + fx + (fw + 1) // 2, wy + fy + (fh + 1) // 2, wx + lx + lw // 2, wy + (bottom + ay + ah) // 2)
+PY
+  ) || { dual_drag_diagnostic; die "dual target geometry refused; state=$geometry"; }
+  read -r folder_x folder_y floor_x floor_y <<< "$point"
+  printf 'DRAG_DUAL_POINTS phase=%s folder=%s,%s floor=%s,%s\n' "$phase" "$folder_x" "$folder_y" "$floor_x" "$floor_y"
+  point=$(ipc chromeButtonCentre sliders) || die "dual neutral chrome target is unavailable"
+  [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "dual neutral chrome target has invalid geometry"
+  read -r x y <<< "$point"
+  (( x > 0 && x < WW && y > 0 && y < WH )) || die "dual neutral chrome target is outside the owned window"
+  neutral_x=$((WX + x)); neutral_y=$((WY + y))
+}
+
+dual_drag_diagnostic() {
+  local evidence window address pointer current
+  [[ "$(myid)" == "$MYID $MYPID" ]] || { bad "dual drag diagnostic lost its owned instance"; return 1; }
+  evidence=$(mktemp -d /tmp/flea-drag-failure.XXXXXX) || return 1
+  [[ "$evidence" == /tmp/flea-drag-failure.* && -d "$evidence" && ! -L "$evidence" ]] || return 1
+  printf 'dual drag failure evidence\n' > "$evidence/.flea-test-sandbox"
+  printf '%s\n' "${dual_before:-}" > "$evidence/saved-before.json"
+  printf '%s\n' "${dual_after:-}" > "$evidence/fresh-after.json"
+  pointer=$(hyprctl cursorpos -j) || { bad "dual drag diagnostic cursor read failed"; return 1; }
+  current=$(ipc dragPaneGeometry "$dual_destination_side" 0) || return 1
+  window=$(hyprctl clients -j | jq -ce --argjson pid "$MYPID" '[.[] | select(.pid == $pid)] | if length == 1 then .[0] else error("owned window missing or ambiguous") end') || return 1
+  address=$(jq -er .address <<< "$window") || return 1
+  printf '%s\n' "$pointer" > "$evidence/pointer.json"
+  printf '%s\n' "$current" > "$evidence/current.json"
+  printf '%s\n' "$window" > "$evidence/window.json"
+  printf 'DRAG_DUAL_MISMATCH evidence=%s pointer=%s current=%s\n' "$evidence" "$pointer" "$current"
+  [[ -f "$evidence/.flea-test-sandbox" && ! -e "$evidence/window.png" && ! -L "$evidence/window.png" ]] || return 1
+  omarchy-drive shot "$evidence/window.png" "$address" || { bad "dual drag failure screenshot failed"; return 1; }
+  [[ -s "$evidence/window.png" ]] || { bad "dual drag failure screenshot is missing"; return 1; }
 }
 
 visit_targets() {
@@ -830,16 +904,19 @@ for direction in left right; do
       and all(.panes[]; .loading | not)' <<< "$state" >/dev/null || die "dual fixtures lost their independent listing identity: $state"
   if [[ "$direction" == left ]]; then
     source="$left"; destination="$right"; name=feedback-left; verb=Copy
-    target_points
+    dual_destination_side=1
+    dual_target_points saved-before
     native_key -k Tab
   else
     source="$right"; destination="$left"; name=feedback-right; verb=Move
+    dual_destination_side=0
     native_key -k Tab
-    target_points
+    dual_target_points saved-before
     native_key -k Tab
   fi
   expect_ipc path "$source"
   begin_pair "$name" "$verb"
+  dual_target_points fresh-after
   visit_targets "$destination" "$verb"
   owned_path "$source/$name-a.txt"; owned_path "$source/$name-b.txt"; owned_path "$destination/folder"
   release

@@ -12,6 +12,7 @@ Item {
     id: root
 
     property string bookmarksText: ""
+    property var backend: null
     property var entries: []
     // Secrets live only here for this QML process lifetime; the map is never serialized or exposed.
     property var _passwords: ({})
@@ -64,6 +65,7 @@ Item {
     onBookmarksTextChanged: root.rebuild()
 
     property string dropboxPath: ""
+    onDropboxPathChanged: root.rebuild()
     property string dropboxReason: "Checking Dropbox"
     property bool dropboxChecking: false
     property bool _dropboxAwaitingStart: false
@@ -73,14 +75,48 @@ Item {
     readonly property int dropboxStatusTimeoutSeconds: 4
     signal dropboxRefreshed()
     readonly property bool dropboxReady: dropboxPath.length > 0 && dropboxReason.length === 0 && !dropboxChecking
+    property int _dropboxMetadataRequest: 0
+    property bool _dropboxMetadataAgain: false
+
+    function readDropboxAccount(facts) {
+        if (!facts || facts.dropboxInfo === undefined) return
+        var account = Dropbox.account(facts.dropboxInfo, facts.dropboxError)
+        if (dropboxPath !== account.path || account.reason)
+            dropboxReason = account.reason || "Checking Dropbox"
+        dropboxPath = account.path
+    }
+
+    function refreshDropboxAccount() {
+        if (!backend) return
+        if (_dropboxMetadataRequest) { _dropboxMetadataAgain = true; return }
+        _dropboxMetadataRequest = backend.askFormats()
+    }
+
+    function rearmDropboxAccount() {
+        dropboxAccountFile.path = Quickshell.env("HOME") + "/.dropbox/info.json"
+        root.refreshDropboxAccount()
+    }
+
+    onBackendChanged: if (backend) root.readDropboxAccount(backend.providers)
+    Connections {
+        target: root.backend
+        function onProvidersChanged() { root.readDropboxAccount(root.backend.providers) }
+        function onFormatsResult(message) {
+            if (message.id !== root._dropboxMetadataRequest) return
+            root._dropboxMetadataRequest = 0
+            if (root._dropboxMetadataAgain) {
+                root._dropboxMetadataAgain = false
+                root.refreshDropboxAccount()
+            }
+        }
+    }
 
     function refreshDropbox(facts) {
         if (dropboxChecking) return false
         var provider = facts.dropbox || {}
-        var account = Dropbox.account(facts.dropboxInfo, facts.dropboxError)
-        dropboxPath = account.path
-        dropboxReason = provider.reason || account.reason || "Checking Dropbox"
-        if (!provider.command || account.reason) return true
+        root.readDropboxAccount(facts)
+        dropboxReason = provider.reason || (dropboxPath ? "Checking Dropbox" : dropboxReason)
+        if (!provider.command || !dropboxPath) return true
         dropboxChecking = true
         _dropboxAwaitingStart = true
         _dropboxOutput = ""
@@ -114,12 +150,25 @@ Item {
     }
 
     FileView {
-        id: dropboxFile
-        path: Quickshell.env("HOME") + "/Dropbox"
+        id: dropboxAccountFile
+        path: Quickshell.env("HOME") + "/.dropbox/info.json"
+        // Watch only; providers.rs owns the regular-file check and bounded metadata read.
+        preload: false
         watchChanges: true
         printErrors: false
-        onLoaded: root.rebuild()
-        onLoadFailed: root.rebuild()
+        onFileChanged: Qt.callLater(root.refreshDropboxAccount)
+    }
+
+    FileView {
+        path: Quickshell.env("HOME") + "/.dropbox"
+        preload: false
+        watchChanges: true
+        printErrors: false
+        onFileChanged: {
+            // FileView must observe the empty path for an event turn before it can re-arm a new parent.
+            dropboxAccountFile.path = ""
+            Qt.callLater(root.rearmDropboxAccount)
+        }
     }
 
     // The five second "gio mount -l" poll is ui/MountListing.qml's: this Service reads its listing
@@ -151,7 +200,6 @@ Item {
     // Three sources, deduped on the normalized uri (see ui/js/Mounts.js "normalize"): a live gio mount wins over a bookmark for the same share even when the trailing slash differs.
     // The bookmark's own label wins on that merged row, or a rename of a mounted share would be written to the file and never drawn again; see ui/js/Mounts.js "railLabel".
     function rebuild() {
-        var home = Quickshell.env("HOME")
         var out = []
         var seen = {}
         var mounts = Mounts.parseMounts(root._mountListing)
@@ -178,8 +226,8 @@ Item {
             seen[bkey] = true
             out.push({ path: "", label: marks[k].label, group: "network", kind: "share", editable: false, uri: marks[k].uri, mounted: false, glyph: "server" })
         }
-        if (dropboxFile.loaded) {
-            out.push({ path: home + "/Dropbox", label: "Dropbox", group: "network", kind: "dropbox", uri: "", mounted: true, glyph: "" })
+        if (root.dropboxPath.length > 0) {
+            out.push({ path: root.dropboxPath, label: "Dropbox", group: "network", kind: "dropbox", uri: "", mounted: true, glyph: "" })
         }
         // Every five seconds forever, so an unchanged poll must not assign: see Mounts.sameEntries.
         if (!Mounts.sameEntries(root.entries, out))

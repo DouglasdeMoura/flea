@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import "." as Flea
 import "js/DirSizes.js" as DirSizes
+import "js/Dropbox.js" as Dropbox
 import "js/Filter.js" as Filter
 import "js/Focus.js" as Focus
 import "js/Menu.js" as Menu
@@ -346,6 +347,7 @@ FocusScope {
         width: item ? item.implicitWidth : 0
         active: !root.listOnly && root.sharedSidebar === null
         sourceComponent: Flea.Sidebar {
+            backend: root.backend
             navigationPane: root.railPane
             focused: root.railPane.focusView === Focus.RAIL
             trashActive: root.railPane.trash.opened
@@ -549,8 +551,8 @@ FocusScope {
         dropboxInstalled: !root.backend.providers.dropbox || root.backend.providers.dropbox.installed !== false
         dropboxPath: root.dropboxService && root.dropboxService.dropboxReady ? root.dropboxService.dropboxPath : ""
         dropboxReason: root.dropboxService ? root.dropboxService.dropboxReason : "Dropbox service unavailable"
-        rowInDropbox: root.dropboxService && root.dropboxService.dropboxPath.length > 0
-            && (root.path === root.dropboxService.dropboxPath || root.path.indexOf(root.dropboxService.dropboxPath + "/") === 0)
+        rowInDropbox: root.dropboxService && root.cursorRow
+            && Dropbox.contains(root.dropboxService.dropboxPath, root.join(root.path, root.cursorRow.n))
         onChosen: function (action) {
             menuActions.activate(action, menu.hasRow && !menu.forHeader)
         }

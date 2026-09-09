@@ -73,7 +73,7 @@ Item {
     Flea.ShareLink {
         id: shareLink
         onCopied: pane.message("Share link copied to the clipboard.", false)
-        onFailed: pane.message("Dropbox could not make a share link for that file.", true)
+        onFailed: function(reason) { pane.message(reason, true) }
     }
 
     Flea.Taildrop {
