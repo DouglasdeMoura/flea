@@ -30,7 +30,7 @@ pub enum Request {
     // selection wider than the window it renders; see docs/protocol.md "paths".
     Paths { rows: Vec<usize> },
     Locate { path: String },
-    LocateMany { paths: Vec<String>, id: usize, menu_id: usize },
+    LocateMany { paths: Vec<String>, id: usize, menu_id: usize, transfer_id: usize },
     // The preview column's own extras for one row: pixels, line count, symlink target.
     Meta { row: usize, text: bool, media: bool, archive: bool, token: usize },
     // The status bar's filesystem line for the directory the pane is on.
@@ -43,6 +43,7 @@ pub enum Request {
     // Which archive formats this box actually offers, and whether a converter is installed at all.
     Formats,
     Permissions { line: String },
+    Picker { line: String },
     MenuAction { line: String, rows: Vec<usize> },
     TrashBrowse { line: String },
     Quit,
@@ -54,6 +55,7 @@ pub fn parse_request(line: &str) -> Request {
     match field_str(line, "c").as_deref() {
         Some("trashbrowse") => Request::TrashBrowse { line: line.to_string() },
         Some("permissions") => Request::Permissions { line: line.to_string() },
+        Some("picker") => Request::Picker { line: line.to_string() },
         Some("menuaction") => Request::MenuAction { line: line.to_string(), rows: field_usize_array(line, "rows") },
         Some("list") => Request::List {
             path: field_str(line, "path").unwrap_or_default(),
@@ -116,7 +118,8 @@ pub fn parse_request(line: &str) -> Request {
         Some("locate") => match field_str(line, "path") {
             Some(path) => Request::Locate { path },
             None => Request::LocateMany { paths: field_str_array(line, "paths"),
-                id: field_usize(line, "id").unwrap_or(0), menu_id: field_usize(line, "menuId").unwrap_or(0) },
+                id: field_usize(line, "id").unwrap_or(0), menu_id: field_usize(line, "menuId").unwrap_or(0),
+                transfer_id: field_usize(line, "transferId").unwrap_or(0) },
         },
         Some("fsinfo") => Request::FsInfo,
         Some("archive") => Request::Archive {
@@ -159,11 +162,11 @@ pub fn located_line(directory: &str, path: &str, index: Option<usize>) -> String
         escape(directory), escape(path), index)
 }
 
-pub fn located_many_line(directory: &str, id: usize, matches: &[(&str, usize)], error: Option<&str>) -> String {
+pub fn located_many_line(directory: &str, id: usize, transfer_id: usize, matches: &[(&str, usize)], error: Option<&str>) -> String {
     let matches: Vec<_> = matches.iter().map(|(path, index)|
         format!(r#"{{"path":"{}","index":{}}}"#, escape(path), index)).collect();
-    format!(r#"{{"t":"located","directory":"{}","id":{},"matches":[{}],"ok":{},"error":"{}"}}"#,
-        escape(directory), id, matches.join(","), error.is_none(), escape(error.unwrap_or_default()))
+    format!(r#"{{"t":"located","directory":"{}","id":{},"transferId":{},"matches":[{}],"ok":{},"error":"{}"}}"#,
+        escape(directory), id, transfer_id, matches.join(","), error.is_none(), escape(error.unwrap_or_default()))
 }
 
 pub fn listed_line(n: usize, read_ms: f64, sort_ms: f64, dev: u64) -> String {
@@ -246,9 +249,11 @@ mod tests {
         assert_eq!(located_line("/a", "/a/file", Some(3)), r#"{"t":"located","directory":"/a","path":"/a/file","index":3}"#);
         assert_eq!(located_line("/a", "/a/\"\n", None), r#"{"t":"located","directory":"/a","path":"/a/\"\n","index":-1}"#);
         assert!(matches!(parse_request(r#"{"c":"locate","paths":["/a/file"],"id":2,"menuId":7}"#),
-            Request::LocateMany { paths, id: 2, menu_id: 7 } if paths == ["/a/file"]));
-        assert_eq!(located_many_line("/a", 2, &[("/a/\"\n", 3)], None),
-            r#"{"t":"located","directory":"/a","id":2,"matches":[{"path":"/a/\"\n","index":3}],"ok":true,"error":""}"#);
+            Request::LocateMany { paths, id: 2, menu_id: 7, transfer_id: 0 } if paths == ["/a/file"]));
+        assert!(matches!(parse_request(r#"{"c":"locate","paths":["/a/file"],"transferId":12}"#),
+            Request::LocateMany { paths, id: 0, menu_id: 0, transfer_id: 12 } if paths == ["/a/file"]));
+        assert_eq!(located_many_line("/a", 2, 0, &[("/a/\"\n", 3)], None),
+            r#"{"t":"located","directory":"/a","id":2,"transferId":0,"matches":[{"path":"/a/\"\n","index":3}],"ok":true,"error":""}"#);
     }
 
     #[test]

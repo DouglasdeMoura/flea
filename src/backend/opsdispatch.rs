@@ -7,9 +7,9 @@ use crate::backend::opsreq::{
 };
 use crate::backend::listing::Listing;
 use crate::backend::proto::error_line;
-use crate::backend::undo::{Entry, Journal};
+use crate::backend::undo::{Entry, ItemIdentity, Journal};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -19,8 +19,10 @@ use std::thread;
 pub(crate) struct Ops {
     pub journal: Journal,
     pub permissions: super::permissions::Permissions,
+    pub picker: Option<super::picker::Picker>,
     pub menuactions: Option<super::menu_actions::MenuActions>,
     pub trashbrowser: Option<super::trashbrowse::TrashBrowser>,
+    pub transfer_retry: (usize, Vec<(PathBuf, ItemIdentity)>),
     pub next_id: usize,
     // The id of the operation on the thread, or None when none is running; the cap is one at a time.
     pub running: Option<usize>,
@@ -30,7 +32,8 @@ pub(crate) struct Ops {
 
 impl Ops {
     pub fn new(tx: Sender<OpMsg>) -> Ops {
-        Ops { journal: Journal::new(), permissions: super::permissions::Permissions::default(), menuactions: None, trashbrowser: None, next_id: 1, running: None, cancel: Arc::new(AtomicBool::new(false)), tx }
+        Ops { journal: Journal::new(), permissions: super::permissions::Permissions::default(), picker: None, menuactions: None, trashbrowser: None,
+              transfer_retry: (0, Vec::new()), next_id: 1, running: None, cancel: Arc::new(AtomicBool::new(false)), tx }
     }
 
     // An id with no slot claimed: archive and convert are id-keyed and run concurrently by design,
@@ -119,6 +122,7 @@ fn start_transfer_checked(out: &mut impl Write, ops: &mut Ops, op: &str, paths: 
     // Anything that is not exactly "move" is a copy, so a malformed op can never remove a source.
     let moving = op == "move";
     let n = paths.len();
+    ops.transfer_retry = (0, Vec::new());
     let (id, cancel) = ops.claim();
     writeln!(out, "{}", transferstarted_line(id, n, moving)).ok();
     out.flush().ok();
@@ -269,10 +273,11 @@ pub(crate) fn report_op(out: &mut impl Write, ops: &mut Ops, msg: OpMsg) {
         OpMsg::Item { id, index, name, ok, err } => {
             writeln!(out, "{}", transferitem_line(id, index, &name, ok, &err)).ok();
         }
-        OpMsg::TransferDone { id, ok, failed, skipped, cancelled, entry } => {
+        OpMsg::TransferDone { id, ok, failed, skipped, cancelled, entry, retry } => {
             ops.journal.push(entry);
             ops.running = None;
-            writeln!(out, "{}", transferdone_line(id, ok, failed, skipped, cancelled)).ok();
+            ops.transfer_retry = (id, retry);
+            writeln!(out, "{}", transferdone_line(id, ok, failed, skipped, cancelled, &ops.transfer_retry.1)).ok();
         }
         OpMsg::Trashed { ok, failed, entry } => {
             ops.journal.push(entry);

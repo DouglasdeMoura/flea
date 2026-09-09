@@ -152,7 +152,7 @@ FocusScope {
             : (current + (back ? -1 : 1) + items.length) % items.length
         items[next].forceActiveFocus()
     }
-    Keys.onTabPressed: function(event) { root.stepFocus(false); event.accepted = true }
+    Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0); event.accepted = true }
     Keys.onBacktabPressed: function(event) { root.stepFocus(true); event.accepted = true }
     Keys.onEscapePressed: function(event) { root.close(); event.accepted = true }
     Keys.onPressed: function(event) { event.accepted = true }
@@ -228,7 +228,7 @@ FocusScope {
                         clip: true
                         selectByMouse: true
                         Accessible.name: root.action === "newFile" ? "Filename" : "Destination folder"
-                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.submit()
                         Keys.onEnterPressed: root.submit()
@@ -240,7 +240,7 @@ FocusScope {
                     width: parent.width
                     height: appsColumn.implicitHeight
                     activeFocusOnTab: root.applications.length > 0 && !root.busy
-                    Keys.onTabPressed: root.stepFocus(false)
+                    Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                     Keys.onBacktabPressed: root.stepFocus(true)
                     Keys.onPressed: function(event) {
                         var action = Keymap.lookup(event.key, event.text, event.modifiers, "menu")
@@ -303,7 +303,7 @@ FocusScope {
                         width: closeButton.implicitWidth
                         height: closeButton.implicitHeight
                         activeFocusOnTab: !(root.busy && root.committing && root.action === "newFile")
-                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
@@ -315,7 +315,7 @@ FocusScope {
                         height: submitButton.implicitHeight
                         visible: root.action !== "properties" && root.action !== "deletePermanently"
                         activeFocusOnTab: root.canSubmit
-                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.submit()
                         Keys.onSpacePressed: root.submit()

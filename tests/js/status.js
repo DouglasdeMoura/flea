@@ -28,6 +28,7 @@ function run(check) {
 
     var searching = slot({ searching: true, searchKeys: "esc cancels" })
     check("a search on its own owns the slot", Status.rightText(searching), "esc cancels")
+    check("a running search uses foreground text", Status.rightRole(searching), "foreground")
 
     var working = slot({ stickyHere: true, sticky: "Compressing 2 of 5" })
     check("a running operation owns the slot", Status.rightText(working), "Compressing 2 of 5")
@@ -79,4 +80,30 @@ function run(check) {
     check("errorHere is the one test for an unacknowledged failure",
           Status.errorHere(failed), true)
     check("and a plain notice is not one", Status.errorHere(noticeWhileSearching), false)
+    check("a completion notice uses the board's running-text role",
+          Status.rightRole(slot({transient: "Moved 4 items to Trash"})), "foreground")
+
+    var left = {}, right = {}
+    var transfer = { id: 1, running: true }
+    var activities = Status.activityChanged([], left, "Copying 1 of 5", transfer)
+    activities = Status.cancelActivity(activities)
+    check("cancel marks its active owner", activities[0].cancelling, true)
+    check("repeated cancel keeps the same state", Status.cancelActivity(activities) === activities, true)
+    activities = Status.activityChanged(activities, right, "Moving 1 of 3", transfer)
+    check("a second owner cannot replace the running primary", activities[0].owner === left, true)
+    check("identical ids from another backend do not inherit cancellation", activities[1].cancelling, false)
+    activities = Status.activityChanged(activities, left, "Copying 2 of 5", transfer)
+    check("progress cannot re-enable a cancelled transfer", activities[0].cancelling, true)
+    activities = Status.activityChanged(activities, right, "", { id: 0, running: false })
+    check("foreign completion does not clear the active transfer", activities[0].owner === left, true)
+    activities = Status.activityChanged(activities, right, "Moving 1 of 2", { id: 2, running: true })
+    activities = Status.activityChanged(activities, left, "", { id: 0, running: false })
+    check("completion reveals the other running transfer", activities[0].owner === right, true)
+    check("the next owner's cancellation remains available", activities[0].cancelling, false)
+    activities = Status.cancelActivity(activities)
+    activities = Status.activityChanged(activities, right, "Moving 1 of 1", { id: 3, running: true })
+    check("a new transfer id clears that owner's old cancellation", activities[0].cancelling, false)
+    activities = Status.activityChanged(activities, right, "", { id: 0, running: false })
+    check("completed activities release their owner references", activities.length, 0)
+    check("an idle cancel is harmless", Status.cancelActivity(activities).length, 0)
 }

@@ -193,7 +193,7 @@ ShellRoot {
                 onMessage: function (text, isError) { bar.say(text, isError) }
                 onOperationResult: function (headline, detail, isError) { bar.say(headline, isError, detail) }
                 // A running operation's line, which stands until the operation replaces it; see ui/StatusBar.qml.
-                onSticky: function (text) { bar.sticky = text; bar.transfer = primaryPane.transfer; bar.transferOwner = primaryPane }
+                onSticky: function (text) { bar.setActivity(primaryPane, text, primaryPane.transfer) }
                 onConvertRequested: function (name) { convertDialog.open(name, primaryPane) }
                 onPermissionsRequested: function (path) { permissionsDialog.open(path, primaryPane) }
                 onPathBarRequested: chrome.startEdit()
@@ -237,7 +237,7 @@ ShellRoot {
                         onClipboardChanged: if (primaryPane.clipboard !== clipboard) primaryPane.clipboard = clipboard
                         onMessage: function(text, error) { bar.say(text, error) }
                         onOperationResult: function(headline, detail, error) { bar.say(headline, error, detail) }
-                        onSticky: function(text) { bar.sticky = text; bar.transfer = otherPane.transfer; bar.transferOwner = otherPane }
+                        onSticky: function(text) { bar.setActivity(otherPane, text, otherPane.transfer) }
                         onConvertRequested: function(name) { convertDialog.open(name, otherPane) }
                         onPermissionsRequested: function(path) { permissionsDialog.open(path, otherPane) }
                         onPathBarRequested: chrome.startEdit()
@@ -265,7 +265,6 @@ ShellRoot {
 
             Flea.StatusBar {
                 id: bar
-                property var transferOwner: primaryPane
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom

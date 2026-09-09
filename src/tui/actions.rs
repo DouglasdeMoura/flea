@@ -445,10 +445,12 @@ fn act(m: &mut Model, action: &str, w: &mut Wire) -> io::Result<()> {
             } else {
                 m.sort = match m.sort.as_str() {
                     "name" => "size",
-                    "size" => "mtime",
+                    "size" => "date",
+                    "date" => "kind",
                     _ => "name",
                 }
                 .into();
+                m.reverse = false;
             }
             w.send(vec![
                 ("c", word("sort")),

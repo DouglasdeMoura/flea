@@ -341,12 +341,18 @@ class Native:
         self.snapshot("filter-accepted", lambda text: "filter:" not in text and "1 matches in 5 loaded rows" in text)
         self.key("-k", "Escape")
         self.snapshot("filter-cleared", lambda text: "Filter " not in text and "5 items" in text)
-        for sort in ("size", "mtime", "name"):
+        for sort in ("size", "date", "kind", "name"):
             self.key("s")
-            self.snapshot("sort-" + sort, lambda text: "\u00b7 " + sort + " \u25b4" in text.splitlines()[0])
+            self.snapshot("sort-" + sort, lambda text: "\u00b7 " + sort + " \u25b4" in text.splitlines()[0]
+                          and self.cursor_is("charlie.txt") and "Could not save settings" not in text)
+            self.wait("sort-" + sort + "-persisted", lambda: json.loads((self.case / "state/flea/ui.json").read_text())["sort"]
+                      == {"key": sort, "reverse": False})
         for label, glyph in [("reverse", "\u25be"), ("forward", "\u25b4")]:
-            self.chord("s", "shift")
-            self.snapshot("sort-" + label, lambda text: "name " + glyph in text.splitlines()[0])
+            self.chord("S", "shift")
+            self.snapshot("sort-" + label, lambda text: "name " + glyph in text.splitlines()[0]
+                          and self.cursor_is("charlie.txt") and "Could not save settings" not in text)
+            self.wait("sort-" + label + "-persisted", lambda: json.loads((self.case / "state/flea/ui.json").read_text())["sort"]
+                      == {"key": "name", "reverse": label == "reverse"})
         self.key(".")
         self.snapshot("hidden-shown", lambda text: ".hidden-proof" in text and "6 items" in text)
         self.key(".")

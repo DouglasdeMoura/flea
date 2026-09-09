@@ -39,6 +39,10 @@ Item {
     property bool stale: false
     // What the cursor sat on across a watched re-read, or null; ui/js/Nav.js owns both ends of it.
     property var anchor: null
+    property int retryId: 0
+    property var retryPaths: []
+    property string retryFolder: ""
+    property string retryListing: ""
     // One burst of writes is one re-read: the timer absorbs later notifications instead of being
     // restarted by them, so a directory under continuous change settles rather than never firing.
     readonly property int watchMs: 400
@@ -108,7 +112,17 @@ Item {
             root.stale = false
             root.anchor = null
             watchSettle.stop()
+            root.retryId = 0
+            root.retryPaths = []
         }
+        function onListInFlightChanged() { if (!pane.listInFlight) root.locateRetry() }
+    }
+
+    function locateRetry() {
+        if (!root.retryId || root.retryListing || pane.listInFlight || pane.searchRunning) return
+        if (pane.path !== root.retryFolder) { root.retryId = 0; root.retryPaths = []; return }
+        root.retryListing = pane.menuSelectionIdentity
+        pane.backend.send({c: "locate", paths: root.retryPaths, transferId: root.retryId})
     }
 
     // Only when the cursor really landed on the folder that was made: on a listing wider than the
@@ -168,6 +182,22 @@ Item {
                 pane.listInFlight = false
                 pane.listedSeen = false
             }
+            root.locateRetry()
+        }
+
+        function onLocated(message) {
+            if (!root.retryId || message.transferId !== root.retryId) return
+            root.retryId = 0
+            root.retryPaths = []
+            if (message.directory !== pane.path || pane.path !== root.retryFolder
+                    || root.retryListing !== pane.menuSelectionIdentity || pane.listInFlight) return
+            if (!message.ok) { pane.message(message.error, true); return }
+            var matches = message.matches || []
+            if (!matches.length) return
+            pane.selection.clear()
+            for (var i = 0; i < matches.length; i++) pane.selection.toggle(matches[i].index)
+            pane.selectionVersion++
+            pane.setCursor(matches[0].index)
         }
 
         // Sample input: {"t":"searching","n":812,"scanned":41200,"ms":300.114}
@@ -229,6 +259,8 @@ Item {
         // The verb comes off the wire, never off the clipboard: paste spends a cut before this line
         // arrives, and a Dropbox move never touches the clipboard at all.
         function onTransferStarted(id, n, moving) {
+            root.retryId = 0
+            root.retryPaths = []
             pane.transfer = Ops.started(id, moving, n)
             pane.sticky(Ops.progressLine(pane.transfer))
         }
@@ -244,25 +276,38 @@ Item {
             pane.sticky(Ops.progressLine(pane.transfer))
         }
 
-        // The item's own terminal line: it advances the sticky count, and a failure is data, not a dialog.
+        // One named failure per transfer owns the status slot until acknowledged; later failures remain in its summary.
         function onTransferItem(id, index, name, ok, err) {
             if (id !== pane.transfer.id) {
                 return
             }
-            pane.transfer = Transfer.itemDone(pane.transfer, index, name)
+            var firstFailure = !ok && err !== "cancelled" && !pane.transfer.failureReported
+            pane.transfer = Object.assign(Transfer.itemDone(pane.transfer, index, name),
+                                          { failureReported: pane.transfer.failureReported || firstFailure })
+            if (firstFailure)
+                pane.message(Ops.transferFailure(pane.transfer, name, err), true)
             pane.sticky(Ops.progressLine(pane.transfer))
         }
 
         // Sample input: {"t":"transferdone","id":12,"ok":1,"failed":1,"skipped":0,"cancelled":false}
-        function onTransferDone(id, ok, failed, skipped, cancelled) {
+        function onTransferDone(id, ok, failed, skipped, cancelled, retryPaths) {
             if (id !== pane.transfer.id) {
                 return
             }
-            var line = Ops.transferDone(pane.transfer, ok, failed, cancelled)
+            var line = Ops.transferDone(pane.transfer, ok, failed, skipped, cancelled)
+            var unreportedFailure = failed > 1 || (failed > 0 && !pane.transfer.failureReported)
             pane.transfer = Ops.emptyTransfer()
             pane.sticky("")
-            pane.message(line, failed > 0 && ok === 0)
-            pane.refresh("")
+            pane.message(line, unreportedFailure)
+            if (unreportedFailure) pane.message(line, false)
+            root.retryId = retryPaths.length ? id : 0
+            root.retryPaths = retryPaths
+            root.retryFolder = pane.path
+            root.retryListing = ""
+            if (pane.searchMode === Search.RESULTS) {
+                root.stale = true
+                root.locateRetry()
+            } else pane.refresh("")
         }
 
         function onTrashed(ok, failed) {

@@ -176,8 +176,8 @@ pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellati
         .filter(|m| !m.is_empty()).ok_or("GIO did not report the selected item's content type.")?;
     let output = registry.query(&["mime".as_ref(), mime.as_ref()], cancel)?;
     let mut apps = Vec::new();
-    // Sample GIO mime registry row: "  org.gnome.TextEditor.desktop".
-    for line in output.lines().filter(|line| line.starts_with("  ")) {
+    // Sample GIO mime registry row: "\torg.gnome.TextEditor.desktop".
+    for line in output.lines().filter(|line| line.starts_with('\t') || line.starts_with("  ")) {
         cancelled(cancel)?;
         let id = line.trim();
         if !id.ends_with(".desktop") || id.contains('/') || id.contains('\0') || apps.iter().any(|a: &Application| a.id == id) { continue; }

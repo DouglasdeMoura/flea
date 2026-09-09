@@ -158,6 +158,10 @@ fn handle_line(
 ) -> Control {
     match parse_request(line) {
         Request::Permissions { line } => say(out, &ops.permissions.handle(&line)),
+        Request::Picker { line } => {
+            let replies = ops.tx.clone();
+            ops.picker.get_or_insert_with(|| super::picker::Picker::new(replies)).request(line);
+        }
         Request::MenuAction { line, rows } => {
             let paths = resolve_rows(Vec::new(), &rows, &st.base, &st.listing);
             super::opsdispatch::request_menu_action(out, ops, line, paths);
@@ -175,6 +179,7 @@ fn handle_line(
             watch.begin(Path::new(&path));
             match scan(&path, hidden) {
                 Ok((mut l, read_ms)) => {
+                    super::picker::filter_listing(&mut l, &tb.mime, line);
                     let (pass_ms, sort_ms) = match ordering::request(&mut l, Path::new(&path), &tb.mime, line) {
                         Ok(timing) => timing,
                         Err(msg) => {
@@ -209,7 +214,7 @@ fn handle_line(
         // A set of named paths is not a directory, so the watch stops rather than following its base.
         Request::ListPaths { paths, first } => {
             watch.stop();
-            listpaths::answer(out, st, pool, tb, &paths, first)
+            listpaths::answer(out, st, pool, tb, &paths, first, line)
         }
         Request::Window { start, count } => {
             write_window(out, st, start, count, tb);
@@ -322,14 +327,21 @@ fn handle_line(
             let index = st.listing.index_of(&st.base, Path::new(&path));
             say(out, &super::proto::located_line(&st.base.to_string_lossy(), &path, index));
         }
-        Request::LocateMany { paths, id, menu_id } => {
+        Request::LocateMany { paths, id, menu_id, transfer_id } => {
             let mut matches = st.listing.indices_of(&st.base, &paths);
-            let error = if menu_id == 0 { None } else {
+            let error = if transfer_id > 0 {
+                if ops.transfer_retry.0 != transfer_id {
+                    Some("Transfer retry identities expired; select the items again.".to_string())
+                } else {
+                    super::opsreq::retain_retry(&ops.transfer_retry.1, &mut matches);
+                    None
+                }
+            } else if menu_id == 0 { None } else {
                 ops.menuactions.as_ref().ok_or_else(|| "Deletion survivor identities expired; select the items again.".to_string())
                     .and_then(|menu| menu.retain_survivors(menu_id, &mut matches)).err()
             };
             if error.is_some() { matches.clear(); }
-            say(out, &super::proto::located_many_line(&st.base.to_string_lossy(), id, &matches, error.as_deref()));
+            say(out, &super::proto::located_many_line(&st.base.to_string_lossy(), id, transfer_id, &matches, error.as_deref()));
         }
         Request::Quit => return Control::Quit,
         // corner: an unrecognised line is answered with silence, see AGENTS.md.

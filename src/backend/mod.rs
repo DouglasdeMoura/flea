@@ -32,6 +32,7 @@ pub mod owner;
 pub mod peek;
 pub mod proto;
 pub mod permissions;
+pub mod picker;
 pub mod menu_actions;
 mod menu_registry;
 mod menudelete;

@@ -293,6 +293,30 @@ menus_open_with() {
     kill -0 "$pid" 2>/dev/null && fail "menus: cancelled owned launcher remains alive"
 }
 
+menus_dialog_keys() {
+    local preset="$1" action first name before
+    before=$(stat -c '%d:%i:%u:%g:%a:%s:%Y' "$menu_dir/a.txt")
+    for action in moveTo copyTo openWith; do
+        first=Field
+        [[ "$action" == openWith ]] && first=Applications
+        menus_file_menu a.txt key
+        menus_choose "$action"
+        menus_expect menuDialogState ".opened and (.busy | not) and .action == \"$action\" and any(.controls[]; .name == \"$first\" and .focused)" "$preset $action initial focus"
+        for name in Cancel Submit "$first"; do
+            key -k Tab >/dev/null
+            menus_expect menuDialogState "any(.controls[]; .name == \"$name\" and .focused and .visible and .enabled)" "$preset $action Tab focuses $name"
+        done
+        for name in Submit Cancel "$first"; do
+            key -M shift -k Tab -m shift >/dev/null
+            menus_expect menuDialogState "any(.controls[]; .name == \"$name\" and .focused and .visible and .enabled)" "$preset $action Shift+Tab focuses $name"
+        done
+        key -k Escape >/dev/null
+        menus_expect menuDialogState '.opened | not' "$preset $action traversal dismisses without submitting"
+        menus_equal "$preset $action restores listing focus" list "$(ipc focusView)"
+    done
+    menus_equal "$preset dialog traversal preserves the source" "$before" "$(stat -c '%d:%i:%u:%g:%a:%s:%Y' "$menu_dir/a.txt")"
+}
+
 menus_actions() {
     local preset="$1" directory="$menu_box/actions-$1" target open_count
     menus_guard "$directory"
@@ -514,6 +538,7 @@ case_menuscoverage() (
         key -k Escape >/dev/null
         menus_confirmation a.txt "$preset"
         menus_permissions a.txt "$preset"
+        menus_dialog_keys "$preset"
         menus_file_menu link
         menus_expect menuState 'any(.entries[]; .action == "permissions" and .disabled and .hint == "Symlink target not changed")' "symlink permissions stays disabled"
         key -k Escape >/dev/null

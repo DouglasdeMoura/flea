@@ -24,7 +24,7 @@ Item {
     signal transferStarted(int id, int n, bool moving)
     signal transferProgress(int id, int index, string name, real bytes, real total)
     signal transferItem(int id, int index, string name, bool ok, string err)
-    signal transferDone(int id, int ok, int failed, int skipped, bool cancelled)
+    signal transferDone(int id, int ok, int failed, int skipped, bool cancelled, var retryPaths)
     signal trashed(int ok, int failed)
     signal renamed(bool ok, string path)
     signal made(bool ok, string path)
@@ -34,6 +34,7 @@ Item {
     signal located(var message)
     signal trashResult(var message)
     signal permissionsResult(var message)
+    signal pickerResult(var message)
     signal menuResult(var message)
     signal redone(string op, bool ok)
     signal redoStarted(int id, int n, string op)
@@ -320,7 +321,7 @@ Item {
             // err rides only on a failure, so an ok item has no field to read here.
             root.transferItem(message.id, message.index, message.name, message.ok, message.err || "")
         } else if (message.t === "transferdone") {
-            root.transferDone(message.id, message.ok, message.failed, message.skipped, message.cancelled)
+            root.transferDone(message.id, message.ok, message.failed, message.skipped, message.cancelled, message.retryPaths || [])
         } else if (message.t === "trashed") {
             root.trashed(message.ok, message.failed)
         } else if (message.t === "renamed") {
@@ -343,6 +344,8 @@ Item {
             root.trashResult(message)
         } else if (message.t === "permissions") {
             root.permissionsResult(message)
+        } else if (message.t === "picker") {
+            root.pickerResult(message)
         } else if (message.t === "menuaction") {
             root.menuResult(message)
         } else if (message.t === "meta") {

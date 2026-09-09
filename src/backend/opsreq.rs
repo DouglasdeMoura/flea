@@ -5,6 +5,7 @@ use crate::backend::trash;
 use crate::backend::undo::{self, Entry, ItemIdentity, Step};
 use crate::error::FleaError;
 use crate::json::escape;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -18,7 +19,8 @@ pub(crate) const PROGRESS_EVERY: Duration = Duration::from_millis(150);
 pub enum OpMsg {
     Progress { id: usize, index: usize, name: String, bytes: u64, total: u64 },
     Item { id: usize, index: usize, name: String, ok: bool, err: String },
-    TransferDone { id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool, entry: Entry },
+    TransferDone { id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool, entry: Entry,
+                   retry: Vec<(PathBuf, ItemIdentity)> },
     Trashed { ok: usize, failed: usize, entry: Entry },
     Duplicated { ok: bool, path: String, err: String, entry: Entry },
     RedoDone { journal: super::undo::Journal, result: Result<String, FleaError> },
@@ -56,11 +58,20 @@ pub fn transferitem_line(id: usize, index: usize, name: &str, ok: bool, err: &st
     )
 }
 
-pub fn transferdone_line(id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool) -> String {
+pub fn transferdone_line(id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool,
+                         retry: &[(PathBuf, ItemIdentity)]) -> String {
+    let paths: Vec<_> = retry.iter().map(|(path, _)| format!("\"{}\"", escape(&path.to_string_lossy()))).collect();
     format!(
-        r#"{{"t":"transferdone","id":{},"ok":{},"failed":{},"skipped":{},"cancelled":{}}}"#,
-        id, ok, failed, skipped, cancelled
+        r#"{{"t":"transferdone","id":{},"ok":{},"failed":{},"skipped":{},"cancelled":{},"retryPaths":[{}]}}"#,
+        id, ok, failed, skipped, cancelled, paths.join(",")
     )
+}
+
+// Permission repair may change ctime; retry selects the original inode and link kind, never a replacement at its name.
+pub fn retain_retry(retry: &[(PathBuf, ItemIdentity)], matches: &mut Vec<(&str, usize)>) {
+    let originals: HashMap<_, _> = retry.iter().map(|(path, identity)| (path.as_path(), identity)).collect();
+    matches.retain(|(path, _)| originals.get(Path::new(path)).is_some_and(|original|
+        ItemIdentity::inspect(Path::new(path)).is_ok_and(|current| original.same_item(&current))));
 }
 
 pub fn trashed_line(ok: usize, failed: usize) -> String {
@@ -124,6 +135,7 @@ pub(crate) fn run_transfer_checked(
     cancel: Arc<AtomicBool>, tx: Sender<OpMsg>, selection: Option<Vec<super::menu_actions::Selected>>,
 ) {
     let mut steps: Vec<Step> = Vec::new();
+    let mut retry = Vec::new();
     let (mut ok, mut failed, mut skipped) = (0usize, 0usize, 0usize);
     let mut was_cancelled = false;
     // Resolved once: a destination reached through a symlinked directory names the same inode under
@@ -138,23 +150,30 @@ pub(crate) fn run_transfer_checked(
         let src = PathBuf::from(raw);
         let name = base_name(&src);
         let dst = dest.join(&name);
-        if let Some(items) = &selection {
-            let checked = items.get(index).filter(|item| item.path == src)
+        let checked = if let Some(items) = &selection {
+            items.get(index).filter(|item| item.path == src)
                 .ok_or_else(|| "Menu selection no longer matches this transfer.".to_string())
-                .and_then(|item| item.current().map(|_| ()));
-            if let Err(err) = checked {
+                .and_then(|item| item.current())
+        } else {
+            src.symlink_metadata().map_err(|error| error.to_string())
+        };
+        let metadata = match checked {
+            Ok(metadata) => metadata,
+            Err(err) => {
                 failed += 1;
                 let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err });
                 continue;
             }
-        }
+        };
+        let source = ItemIdentity::record(&metadata);
         // A symlink is copied or moved as the link itself (copy_any, move_any), so it holds nothing and its target's tree is not its own; only a real directory can contain the destination.
-        let src_is_link = src.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
+        let src_is_link = metadata.file_type().is_symlink();
         let src_real = if src_is_link { src.clone() } else { src.canonicalize().unwrap_or_else(|_| src.clone()) };
         // A folder into itself or its own subtree: copy_dir would read its own fresh copy until the disk
         // is full, so the refusal ui/js/Drag.js canDropInto makes is made again here, per item.
         if !src_is_link && dest_real.starts_with(&src_real) {
             failed += 1;
+            retry.push((src, source));
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: INTO_ITSELF.to_string() });
             continue;
         }
@@ -166,10 +185,11 @@ pub(crate) fn run_transfer_checked(
         // An item dropped into the folder it already lives in: copy_file would truncate it onto itself.
         if dst == src || dest_real.join(&name) == src_here {
             failed += 1;
+            retry.push((src, source));
             let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: ALREADY_THERE.to_string() });
             continue;
         }
-        match one_item(id, index, &name, moving, &src, &dst, &cancel, &tx, &mut steps) {
+        match one_item(id, index, &name, moving, &src, &dst, source.clone(), &cancel, &tx, &mut steps) {
             Ok(()) => {
                 ok += 1;
                 let _ = tx.send(OpMsg::Item { id, index, name, ok: true, err: String::new() });
@@ -177,14 +197,17 @@ pub(crate) fn run_transfer_checked(
             Err(e) => {
                 if e.msg == "cancelled" {
                     was_cancelled = true;
+                    skipped += 1;
+                } else {
+                    failed += 1;
+                    retry.push((src, source));
                 }
-                failed += 1;
                 let _ = tx.send(OpMsg::Item { id, index, name, ok: false, err: e.msg });
             }
         }
     }
     let entry = Entry { op: if moving { "move".to_string() } else { "copy".to_string() }, steps };
-    let _ = tx.send(OpMsg::TransferDone { id, ok, failed, skipped, cancelled: was_cancelled, entry });
+    let _ = tx.send(OpMsg::TransferDone { id, ok, failed, skipped, cancelled: was_cancelled, entry, retry });
 }
 
 // A directory has no total without a sweep, so only a file item reports bytes at all. Its journal
@@ -196,11 +219,11 @@ fn one_item(
     moving: bool,
     src: &Path,
     dst: &Path,
+    source: ItemIdentity,
     cancel: &AtomicBool,
     tx: &Sender<OpMsg>,
     steps: &mut Vec<Step>,
 ) -> Result<(), FleaError> {
-    let source = ItemIdentity::inspect(src)?;
     let is_file = src.symlink_metadata().map(|m| m.is_file()).unwrap_or(false);
     let mut last = Instant::now() - PROGRESS_EVERY;
     let mut sink = |done: u64, total: u64| {

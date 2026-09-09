@@ -11,6 +11,7 @@ pub struct Span {
     pub off: u32,
     pub len: u32,
     pub is_dir: bool,
+    pub is_symlink: bool,
 }
 
 #[derive(Debug)]
@@ -36,6 +37,7 @@ impl Listing {
             off,
             len: (self.names.len() as u32) - off,
             is_dir,
+            is_symlink: false,
         });
     }
 
@@ -81,6 +83,13 @@ fn relative_name<'a>(base: &Path, path: &'a Path) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn symlink_type_uses_the_existing_span_padding() {
+        #[allow(dead_code)]
+        struct OriginalSpan { off: u32, len: u32, is_dir: bool }
+        assert_eq!(std::mem::size_of::<Span>(), std::mem::size_of::<OriginalSpan>());
+    }
 
     #[test]
     fn stores_and_returns_names_in_order() {

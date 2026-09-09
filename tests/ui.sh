@@ -3493,7 +3493,32 @@ EOS
     settle
     [[ "$(ipc networkUri)" == "sftp://uu@hh/ssXX" ]] \
         || fail "network: Shift-Tab did not skip the hidden Domain and reach Path, URI is $(ipc networkUri)"
-    printf 'NETWORK traversal=ok wrap=ok skip=ok chip-enter=ok\n'
+    # Repeat the reverse walk with a physical Shift+Tab chord, which can arrive as Tab plus Shift.
+    key -k Tab -k Tab -k Tab -k Tab >/dev/null
+    local expected_focus
+    for expected_focus in "" Password Username Path; do
+        key -M shift -k Tab -m shift >/dev/null
+        settle
+        [[ "$(ipc networkFocus)" == "$expected_focus" ]] \
+            || fail "network: Shift+Tab expected '$expected_focus', got '$(ipc networkFocus)'"
+    done
+    key "YY" >/dev/null
+    settle
+    [[ "$(ipc networkUri)" == "sftp://uu@hh/ssXXYY" ]] \
+        || fail "network: Shift+Tab did not return typing to Path, URI is $(ipc networkUri)"
+    click_chip FTPS
+    settle
+    [[ "$(ipc networkFocus)" == Path ]] || fail "network: protocol change moved the visible Path focus"
+    key -k Tab -k Tab -k Tab >/dev/null
+    settle
+    [[ "$(ipc networkFocus)" == TLS ]] || fail "network: forward traversal did not reach TLS"
+    key -M shift -k Tab -m shift >/dev/null
+    settle
+    [[ "$(ipc networkFocus)" == Password ]] || fail "network: Shift+Tab from TLS did not reach Password"
+    key -k Tab -k Backtab >/dev/null
+    settle
+    [[ "$(ipc networkFocus)" == Password ]] || fail "network: Backtab from TLS did not reach Password"
+    printf 'NETWORK traversal=ok wrap=ok skip=ok chip-enter=ok shift-tab=ok tls-reverse=ok\n'
     shot network-traversal
     key -k Escape >/dev/null
     settle
@@ -7269,6 +7294,7 @@ case_previewviews() {
 . "$repo/tests/ui-card-layout.sh"
 . "$repo/tests/ui-preview-visibility.sh"
 . "$repo/tests/ui-permissions.sh"
+. "$repo/tests/ui-operations-design.sh"
 
 declare -a wanted=("$@")
 [[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)

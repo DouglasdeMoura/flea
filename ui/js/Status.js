@@ -19,5 +19,29 @@ function rightText(slot) {
 function rightRole(slot) {
     if (errorHere(slot))
         return "error"
-    return slot.stickyHere ? "foreground" : "muted"
+    return slot.stickyHere || slot.searching || slot.transient.length > 0 ? "foreground" : "muted"
+}
+
+// Each backend numbers its own transfers, so an id is meaningful only with its pane owner.
+function activityChanged(activities, owner, text, transfer) {
+    var next = activities.slice()
+    var at = next.findIndex(function (activity) { return activity.owner === owner })
+    if (!text) {
+        if (at >= 0) next.splice(at, 1)
+        return next
+    }
+    var previous = at >= 0 ? next[at] : null
+    var activity = { owner: owner, text: text, transfer: transfer,
+                     cancelling: !!(previous && previous.transfer.id === transfer.id && previous.cancelling) }
+    if (at >= 0) next[at] = activity
+    else next.push(activity)
+    return next
+}
+
+function cancelActivity(activities) {
+    if (!activities.length || !activities[0].transfer.running || activities[0].cancelling)
+        return activities
+    var next = activities.slice()
+    next[0] = Object.assign({}, next[0], { cancelling: true })
+    return next
 }

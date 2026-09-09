@@ -110,7 +110,7 @@ FocusScope {
         items[next].forceActiveFocus()
         body.reveal(items[next])
     }
-    Keys.onTabPressed: function(event) { root.stepFocus(false); event.accepted = true }
+    Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0); event.accepted = true }
     Keys.onBacktabPressed: function(event) { root.stepFocus(true); event.accepted = true }
     Keys.onPressed: function(event) { event.accepted = true }
     Keys.onEscapePressed: function(event) { root.close(); event.accepted = true }
@@ -175,7 +175,7 @@ FocusScope {
                 accessName: "Close permissions"
                 activeFocusOnTab: true
                 keyboardFocused: activeFocus
-                Keys.onTabPressed: root.stepFocus(false)
+                Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                 Keys.onBacktabPressed: root.stepFocus(true)
                 Keys.onReturnPressed: root.close()
                 Keys.onSpacePressed: root.close()
@@ -242,7 +242,7 @@ FocusScope {
                                 Accessible.onToggleAction: toggle()
                                 function toggle() { if (root.editable) { root.modeText = Permissions.toggle(root.modeText, bit); forceActiveFocus() } }
                                 Keys.onSpacePressed: toggle()
-                                Keys.onTabPressed: root.stepFocus(false)
+                                Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                                 Keys.onBacktabPressed: root.stepFocus(true)
                                 Rectangle {
                                     anchors.centerIn: parent
@@ -286,7 +286,7 @@ FocusScope {
                             font { family: Theme.font.family; pixelSize: Theme.font.body }
                             clip: true
                             selectByMouse: true
-                            Keys.onTabPressed: root.stepFocus(false)
+                            Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                             Keys.onBacktabPressed: root.stepFocus(true)
                             onTextEdited: root.modeText = text
                             onAccepted: if (root.editable && root.modeValue >= 0) applyFocus.forceActiveFocus()
@@ -356,7 +356,7 @@ FocusScope {
                         width: cancelButton.implicitWidth; height: cancelButton.implicitHeight
                         activeFocusOnTab: true
                         enabled: !root.applying
-                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
@@ -367,7 +367,7 @@ FocusScope {
                         width: applyButton.implicitWidth; height: applyButton.implicitHeight
                         activeFocusOnTab: true
                         enabled: root.editable && root.modeValue >= 0
-                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.apply()
                         Keys.onSpacePressed: root.apply()

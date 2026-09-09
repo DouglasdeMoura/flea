@@ -78,8 +78,8 @@ fn every_operation_line_matches_the_shape_the_operations_design_names() {
         r#"{"t":"transferprogress","id":12,"index":0,"name":"a.txt","bytes":40000000,"total":120000000}"#
     );
     assert_eq!(
-        transferdone_line(12, 1, 1, 0, false),
-        r#"{"t":"transferdone","id":12,"ok":1,"failed":1,"skipped":0,"cancelled":false}"#
+        transferdone_line(12, 1, 1, 0, false, &[]),
+        r#"{"t":"transferdone","id":12,"ok":1,"failed":1,"skipped":0,"cancelled":false,"retryPaths":[]}"#
     );
     assert_eq!(trashed_line(1, 0), r#"{"t":"trashed","ok":1,"failed":0}"#);
     assert_eq!(renamed_line(true, "/home/gm/new.txt"), r#"{"t":"renamed","ok":true,"path":"/home/gm/new.txt"}"#);
@@ -321,7 +321,62 @@ fn a_cancelled_transfer_skips_the_rest_and_says_so() {
         Arc::new(AtomicBool::new(true)),
         tx,
     );
-    let (ok, _, skipped, cancelled, _) = done_line(rx);
-    assert_eq!((ok, skipped, cancelled), (0, 2, true));
+    let (ok, failed, skipped, cancelled, _) = done_line(rx);
+    assert_eq!((ok, failed, skipped, cancelled), (0, 0, 2, true));
     assert!(!dest.join("a.txt").exists(), "a cancel before the first item copies nothing");
+}
+
+#[test]
+fn failed_transfer_retry_retains_only_original_sources_after_permission_repair() {
+    let d = TestDir::new("transfer-retry");
+    let failed_source = d.file("failed.txt", "original");
+    let good = d.file("good.txt", "copied");
+    let dest = d.dir("out");
+    let collision = d.file("out/failed.txt", "occupied");
+    let (tx, rx) = channel();
+    run_transfer(9, false, vec![failed_source.to_string_lossy().into(), good.to_string_lossy().into()],
+        dest.clone(), Arc::new(AtomicBool::new(false)), tx);
+    let retry = rx.into_iter().find_map(|message| match message {
+        OpMsg::TransferDone { ok, failed, skipped, cancelled, retry, .. } => {
+            assert_eq!((ok, failed, skipped, cancelled), (1, 1, 0, false));
+            Some(retry)
+        }
+        _ => None,
+    }).expect("transfer terminal event");
+    assert_eq!(retry.len(), 1);
+    assert_eq!(retry[0].0, failed_source);
+    std::fs::set_permissions(&failed_source, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut matches = vec![(failed_source.to_str().unwrap(), 3), (collision.to_str().unwrap(), 4), (good.to_str().unwrap(), 5)];
+    retain_retry(&retry, &mut matches);
+    assert_eq!(matches, vec![(failed_source.to_str().unwrap(), 3)]);
+    let line = transferdone_line(9, 1, 1, 0, false, &retry);
+    assert_eq!(crate::json::field_str_array(&line, "retryPaths"), [failed_source.to_string_lossy().into_owned()]);
+    assert_eq!(std::fs::read_to_string(&collision).unwrap(), "occupied");
+    assert_eq!(std::fs::read_to_string(dest.join("good.txt")).unwrap(), "copied");
+
+    assert!(failed_source.is_absolute() && failed_source.starts_with(d.path()) && d.path().join(".flea-test-sandbox").is_file());
+    std::fs::rename(&failed_source, d.join("original-moved.txt")).unwrap();
+    d.file("failed.txt", "replacement");
+    let mut replaced = vec![(failed_source.to_str().unwrap(), 3)];
+    retain_retry(&retry, &mut replaced);
+    assert!(replaced.is_empty(), "a replacement at the failed name is never selected for retry");
+    assert_eq!(std::fs::read_to_string(&failed_source).unwrap(), "replacement");
+}
+
+#[test]
+fn retry_preserves_a_symlink_identity_without_following_its_target() {
+    let d = TestDir::new("transfer-retry-link");
+    let target = d.file("target.txt", "first target");
+    let link = d.join("link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let retry = vec![(link.clone(), ItemIdentity::inspect(&link).unwrap())];
+    std::fs::write(&target, "changed target").unwrap();
+    let mut matches = vec![(link.to_str().unwrap(), 2)];
+    retain_retry(&retry, &mut matches);
+    assert_eq!(matches.len(), 1);
+    assert!(link.is_absolute() && link.starts_with(d.path()) && d.path().join(".flea-test-sandbox").is_file());
+    std::fs::rename(&link, d.join("original-link")).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    retain_retry(&retry, &mut matches);
+    assert!(matches.is_empty());
 }

@@ -29,22 +29,23 @@ function started(id, moving, n) {
              done: 0, bytes: 0, total: 0 }
 }
 
-// The canvas's own line: "Copying 2 of 5, photo.heic". The count comes from the card's own
-// headline so the bar and the card can never word the same operation two different ways.
+// The count comes from the card's headline so both surfaces name the same progress sample.
 function progressLine(t) {
-    return t.name.length > 0 ? Transfer.head(t) + ", " + t.name : Transfer.head(t)
+    return t.name.length > 0 ? Transfer.head(t) + " · " + t.name : Transfer.head(t)
 }
 
-function transferDone(t, ok, failed, cancelled) {
-    if (cancelled) {
-        return ok > 0 ? "Cancelled after " + items(ok) + UNDO_HINT : "Cancelled."
-    }
+function transferDone(t, ok, failed, skipped, cancelled) {
     var verb = t.moving ? "Moved " : "Copied "
-    if (failed > 0) {
-        var line = verb + items(ok) + ", " + failed + " failed"
-        return ok > 0 ? line + UNDO_HINT : line
-    }
-    return verb + items(ok) + UNDO_HINT
+    var partial = failed > 0 || skipped > 0 || cancelled
+    var line = verb + (partial ? ok + " of " + t.n : items(ok))
+    if (failed > 0) line += " · " + failed + " failed"
+    if (skipped > 0) line += " · " + skipped + " skipped"
+    if (cancelled) line += " · cancelled"
+    return line + (ok > 0 ? UNDO_HINT : "")
+}
+
+function transferFailure(t, name, error) {
+    return (t.moving ? "Move" : "Copy") + " failed: " + name + " · " + error
 }
 
 // The canvas draws this one verbatim: "Moved 4 items to Trash · z undoes".

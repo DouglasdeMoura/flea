@@ -19,10 +19,14 @@ Item {
     readonly property string transient_: root.errors.length ? root.errors[0].text : root.notice
     readonly property string errorDetail: root.errors.length ? root.errors[0].detail : ""
     readonly property var dismissItem: dismissAction
+    readonly property var cancelItem: cancelAction
+    readonly property var undoItem: undoAction
     readonly property bool transientIsError: root.errors.length > 0
-    property string sticky: ""
-    property var transfer: Ops.emptyTransfer()
-    property int cancellingId: 0
+    property var activities: []
+    readonly property var activity: root.activities.length ? root.activities[0] : null
+    readonly property string sticky: root.activity ? root.activity.text : ""
+    readonly property var transfer: root.activity ? root.activity.transfer : Ops.emptyTransfer()
+    readonly property var transferOwner: root.activity ? root.activity.owner : null
     readonly property bool stickyHere: root.sticky.length > 0
     property string searchLine: ""
     property string searchKeys: ""
@@ -32,9 +36,10 @@ Item {
     readonly property int messageMs: 4000
     readonly property bool hasUndo: !root.transientIsError && !root.stickyHere && !root.searching
                                     && root.notice.indexOf(Ops.UNDO_HINT) >= 0
-    readonly property string secondaryText: root.transientIsError || root.stickyHere
-        ? [root.transientIsError && root.stickyHere ? root.sticky : "", root.searching ? "search " + root.searchLine : ""].filter(function (s) { return s.length > 0 }).join(" · ")
-        : ""
+    readonly property string secondaryText: [root.transientIsError && root.stickyHere ? root.sticky : "",
+        root.activities.slice(1).map(function (entry) { return entry.text }).join(" · "),
+        (root.transientIsError || root.stickyHere) && root.searching ? "search " + root.searchLine : ""]
+        .filter(function (s) { return s.length > 0 }).join(" · ")
     signal transferCancelRequested(int id)
     signal undoRequested()
     implicitHeight: Theme.chromeHeight + detailView.height
@@ -47,8 +52,7 @@ Item {
             return
         }
         root.notice = text
-        if (text.indexOf(Ops.UNDO_HINT) >= 0) clear.stop()
-        else clear.restart()
+        root.syncNoticeTimer()
     }
 
     function dismiss() {
@@ -56,10 +60,19 @@ Item {
         else root.notice = ""
     }
 
-    function settle(text, isError) {
-        root.sticky = ""
-        root.say(text, isError)
+    function setActivity(owner, text, transfer) {
+        root.activities = Status.activityChanged(root.activities, owner, transfer.running ? Ops.progressLine(transfer) : text, transfer)
     }
+
+    // A completion hidden by an error or live activity keeps its full display time after acknowledgement.
+    function syncNoticeTimer() {
+        if (root.notice && !root.transientIsError && !root.stickyHere && !root.searching && !root.hasUndo)
+            clear.restart()
+        else clear.stop()
+    }
+    onTransientIsErrorChanged: root.syncNoticeTimer()
+    onStickyHereChanged: root.syncNoticeTimer()
+    onSearchingChanged: root.syncNoticeTimer()
 
     function countText() {
         if (root.listingState === "empty") return "empty"
@@ -104,7 +117,7 @@ Item {
         anchors.verticalCenter: strip.verticalCenter
         width: Math.min(implicitWidth, root.width / 4)
         text: root.path
-        color: Theme.color.muted
+        color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         elide: Text.ElideMiddle
@@ -119,15 +132,16 @@ Item {
         spacing: Theme.spacing.gap
 
         StatusAction {
+            id: cancelAction
             visible: root.transfer.running
-            label: root.cancellingId === root.transfer.id ? "Cancelling" : root.transfer.moving ? "Cancel move" : "Cancel copy"
-            available: root.cancellingId !== root.transfer.id
+            label: root.activity && root.activity.cancelling ? "Cancelling" : root.transfer.moving ? "Cancel move" : "Cancel copy"
+            available: root.activity !== null && !root.activity.cancelling
             onActivated: {
-                root.cancellingId = root.transfer.id
+                root.activities = Status.cancelActivity(root.activities)
                 root.transferCancelRequested(root.transfer.id)
             }
         }
-        StatusAction { visible: root.hasUndo; label: "Undo · z"; onActivated: root.undoRequested() }
+        StatusAction { id: undoAction; visible: root.hasUndo; label: "Undo · z"; onActivated: root.undoRequested() }
         StatusAction { id: dismissAction; visible: root.transientIsError; label: "Dismiss error"; onActivated: root.dismiss() }
     }
 
@@ -138,19 +152,30 @@ Item {
         anchors.verticalCenter: strip.verticalCenter
         width: root.secondaryText.length ? Math.min(implicitWidth, root.width / 4) : 0
         text: root.secondaryText
-        color: Theme.color.muted
+        color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         elide: Text.ElideRight
         textFormat: Text.PlainText
     }
 
+    Rectangle {
+        id: separator
+        visible: secondary.width > 0
+        anchors.right: secondary.left
+        anchors.rightMargin: Theme.spacing.gap
+        anchors.verticalCenter: strip.verticalCenter
+        width: visible ? Theme.spacing.hairline : 0
+        height: secondary.height
+        color: Theme.color.muted
+    }
+
     Text {
         id: primary
-        anchors.right: secondary.left
+        anchors.right: separator.visible ? separator.left : secondary.left
         anchors.rightMargin: secondary.width ? Theme.spacing.gap : 0
         anchors.verticalCenter: strip.verticalCenter
-        width: Math.max(0, Math.min(implicitWidth, secondary.x - location.x - location.width - 3 * Theme.spacing.gap - root.spiralSize))
+        width: Math.max(0, Math.min(implicitWidth, (separator.visible ? separator.x : secondary.x) - location.x - location.width - 3 * Theme.spacing.gap - root.spiralSize))
         text: root.rightText() || root.countText()
         color: root.rightColor()
         font.family: Theme.font.family

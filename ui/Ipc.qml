@@ -77,6 +77,14 @@ QtObject {
         function statusError(): bool { return root.bar.transientIsError }
         function statusDetail(): string { return root.bar.errorDetail }
         function statusDismissCentre(): string { return root.fleaWindow.centreOf(root.bar.dismissItem) }
+        function statusActivityState(): string {
+            return JSON.stringify({activities: root.bar.activities.map(function(activity) {
+                return {id: activity.transfer.id, text: activity.text, running: activity.transfer.running,
+                    cancelling: activity.cancelling, ownerPath: activity.owner.path, ownerFocused: activity.owner.paneFocused}
+            }), errors: root.bar.errors.length, notice: root.bar.notice,
+                cancel: root.controlState("Cancel", root.bar.cancelItem), undo: root.controlState("Undo", root.bar.undoItem),
+                dismiss: root.controlState("Dismiss error", root.bar.dismissItem)})
+        }
         function menuState(): string {
             var menu = root.pane.contextMenu()
             return JSON.stringify({opened: menu.visible, entries: menu.entries, cursor: menu.cursor,

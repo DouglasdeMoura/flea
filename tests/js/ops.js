@@ -12,37 +12,43 @@ function run(check) {
           Ops.items(1) + " / " + Ops.items(2) + " / " + Ops.items(0),
           "1 item / 2 items / 0 items")
 
-    // The canvas's own line, drawn on the Operations artboard: "Copying 2 of 5, photo.heic".
+    // The Operations board separates its live item name with a middle dot.
     check("a copy in flight reads the way the canvas draws it",
           Ops.progressLine({ moving: false, n: 5, index: 1, name: "photo.heic" }),
-          "Copying 2 of 5, photo.heic")
+          "Copying 2 of 5 · photo.heic")
     check("a move says so instead",
           Ops.progressLine({ moving: true, n: 5, index: 1, name: "photo.heic" }),
-          "Moving 2 of 5, photo.heic")
+          "Moving 2 of 5 · photo.heic")
     // A directory item reports no name until its first line arrives, and the count still reads.
     check("an item with no name yet still counts",
           Ops.progressLine({ moving: false, n: 2, index: 0, name: "" }),
           "Copying 1 of 2")
 
     check("a finished copy names its own reversal",
-          Ops.transferDone({ moving: false }, 2, 0, false),
+          Ops.transferDone({ moving: false, n: 2 }, 2, 0, 0, false),
           "Copied 2 items · z undoes")
     check("a finished move says moved",
-          Ops.transferDone({ moving: true }, 1, 0, false),
+          Ops.transferDone({ moving: true, n: 1 }, 1, 0, 0, false),
           "Moved 1 item · z undoes")
     check("a partial failure reports both halves and is still undoable",
-          Ops.transferDone({ moving: false }, 1, 1, false),
-          "Copied 1 item, 1 failed · z undoes")
+          Ops.transferDone({ moving: false, n: 2 }, 1, 1, 0, false),
+          "Copied 1 of 2 · 1 failed · z undoes")
     // Nothing landed, so there is nothing for z to reverse and the line does not offer it.
     check("a transfer where every item failed does not offer an undo",
-          Ops.transferDone({ moving: false }, 0, 2, false),
-          "Copied 0 items, 2 failed")
-    check("a cancel that copied nothing says only that",
-          Ops.transferDone({ moving: false }, 0, 0, true),
-          "Cancelled.")
+          Ops.transferDone({ moving: false, n: 2 }, 0, 2, 0, false),
+          "Copied 0 of 2 · 2 failed")
+    check("a cancel that copied nothing reports skipped sources",
+          Ops.transferDone({ moving: false, n: 2 }, 0, 0, 2, true),
+          "Copied 0 of 2 · 2 skipped · cancelled")
     check("a cancel that copied something still offers the undo",
-          Ops.transferDone({ moving: false }, 3, 0, true),
-          "Cancelled after 3 items · z undoes")
+          Ops.transferDone({ moving: false, n: 5 }, 3, 0, 2, true),
+          "Copied 3 of 5 · 2 skipped · cancelled · z undoes")
+    check("mixed outcomes retain the board's complete count inventory",
+          Ops.transferDone({ moving: false, n: 5 }, 2, 1, 2, false),
+          "Copied 2 of 5 · 1 failed · 2 skipped · z undoes")
+    check("a named failure retains the backend cause",
+          Ops.transferFailure({ moving: true }, "photo.heic", "disk full"),
+          "Move failed: photo.heic · disk full")
 
     // The canvas draws this one verbatim on the Operations artboard's status strip.
     check("trash reads exactly as the canvas draws it",
@@ -288,7 +294,7 @@ function run(check) {
     // The status bar's own line is built from the same headline, so the two cannot drift apart.
     check("the status line is that headline plus the name",
           Ops.progressLine({ moving: false, n: 23, index: 8, name: "panel-demo.mp4" }),
-          "Copying 9 of 23, panel-demo.mp4")
+          "Copying 9 of 23 · panel-demo.mp4")
 
     check("the card names the file under way and how big it is",
           Transfer.fileLine({ name: "panel-demo.mp4", total: 48000000 }),
