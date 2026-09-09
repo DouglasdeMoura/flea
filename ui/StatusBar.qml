@@ -91,7 +91,8 @@ Item {
 
     // A completion hidden by an error or live activity keeps its full display time after acknowledgement.
     function syncNoticeTimer() {
-        if (root.notice && !root.transientIsError && !root.stickyHere && !root.searching && !root.hasUndo)
+        if (root.notice && !root.transientIsError && !root.stickyHere && !root.searching
+                && root.notice.indexOf(Ops.UNDO_HINT) < 0)
             clear.restart()
         else clear.stop()
     }
