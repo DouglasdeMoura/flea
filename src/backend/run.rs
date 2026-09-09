@@ -15,7 +15,8 @@ use crate::backend::events::{spawn_forwarder, spawn_op_forwarder, spawn_reader, 
 use crate::backend::fsinfo::{fsinfo_line, read as read_fsinfo};
 use crate::backend::fsinfo::dev_of;
 use crate::backend::listpaths;
-use crate::backend::proto::{error_line, error_line_with_mode, listed_line, parse_request, paths_line, thumbed_line, Request};
+use crate::backend::proto::{error_line, error_line_with_mode, listed_line, paths_line, thumbed_line};
+use crate::backend::request::{parse_request, Request};
 use crate::backend::rows::rows_line;
 use crate::backend::sandbox;
 use crate::backend::scan::{mode_of, scan};

@@ -30,6 +30,8 @@ pub mod metasort;
 pub mod owner;
 pub mod peek;
 pub mod proto;
+// The wire's requests, out of proto.rs when delete pushed it past the file budget's hard cap.
+pub mod request;
 pub mod rows;
 pub mod run;
 pub mod md5;
