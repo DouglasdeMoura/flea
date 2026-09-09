@@ -105,7 +105,12 @@ fn a_destination_that_is_not_an_existing_directory_is_refused_before_any_item_is
         "a destination must be an absolute path",
         "a relative destination is never resolved here"
     );
-    assert!(usable_dest(&d.join("missing").to_string_lossy()).is_err(), "Flea does not create the destination");
+    let missing = d.join("missing");
+    let error = usable_dest(&missing.to_string_lossy()).unwrap_err();
+    assert_eq!(error.where_, "transfer");
+    assert_eq!(error.path, missing.to_string_lossy());
+    assert_eq!(error.msg, "file or folder not found");
+    assert!(!missing.exists(), "Flea does not create the destination");
 }
 
 #[test]
@@ -259,12 +264,13 @@ fn one_failing_item_is_data_and_the_batch_carries_on() {
     for msg in rx.iter() {
         match msg {
             OpMsg::TransferDone { ok, failed, .. } => counts = Some((ok, failed)),
-            OpMsg::Item { ok: false, err, .. } => errs.push(err),
+            OpMsg::Item { id, index, name, ok: false, err } => errs.push((id, index, name, err)),
             _ => {}
         }
     }
     assert_eq!(counts, Some((1, 1)));
-    assert_eq!(errs.len(), 1, "the failure is one item's data, not the operation's");
+    assert_eq!(errs, vec![(3, 0, "never-existed.txt".into(), "file or folder not found".into())],
+        "the plain failure cause retains its operation and item identity");
 }
 
 // A file with no permission bits answers EACCES to open(2) for every uid but root, so it forces

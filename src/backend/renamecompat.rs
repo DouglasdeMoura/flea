@@ -192,8 +192,8 @@ mod tests {
         d.assert_contains(&from);
         d.assert_contains(&to);
         let error = copy_then_remove(&from, &to).expect_err("the fallback must refuse an existing destination");
-        assert!(
-            error.msg.contains(&format!("os error {}", EEXIST)),
+        assert_eq!(
+            error.msg, "already exists",
             "the exclusive create's EEXIST is what tells this refusal from any other copy failure"
         );
         assert_eq!(std::fs::read_to_string(&to).unwrap(), "target body");
@@ -209,8 +209,8 @@ mod tests {
         d.assert_contains(&target);
         let error = copy_then_remove(&source, &target).expect_err("must refuse");
         assert_eq!(error.where_, "rename");
-        assert!(
-            error.msg.contains(&format!("os error {}", EEXIST)),
+        assert_eq!(
+            error.msg, "already exists",
             "the directory create's EEXIST is what tells this refusal from any other copy failure"
         );
         assert!(source.join("source.txt").is_file(), "the source tree stays complete");
@@ -314,8 +314,8 @@ mod tests {
         let error = copy_then_remove(&source, &target).expect_err("source removal must fail");
         std::fs::set_permissions(&hold, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(error.where_, "rename", "remove_file is atomic, so the source is provably whole");
-        assert!(
-            error.msg.contains(&format!("os error {}", EACCES)),
+        assert_eq!(
+            error.msg, "permission denied",
             "the removal's EACCES is what tells this arm from a copy failure, which answers rename too"
         );
         assert_eq!(std::fs::read_to_string(&source).unwrap(), "body");
@@ -337,8 +337,8 @@ mod tests {
         let error = copy_then_remove(&source, &target).expect_err("source removal must fail");
         std::fs::set_permissions(&hold, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(error.where_, "rename", "one unlink removes a symlink too, so the source is provably whole");
-        assert!(
-            error.msg.contains(&format!("os error {}", EACCES)),
+        assert_eq!(
+            error.msg, "permission denied",
             "the removal's EACCES is what tells this arm from a copy failure, which answers rename too"
         );
         assert_eq!(std::fs::read_link(&source).unwrap(), payload);

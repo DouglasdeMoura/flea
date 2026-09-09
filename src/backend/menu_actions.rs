@@ -140,7 +140,7 @@ impl Selected {
         if !path.is_absolute() || path.file_name().is_none() {
             return Err("Menu selection requires an absolute item path.".into());
         }
-        let meta = path.symlink_metadata().map_err(|e| format!("Could not inspect selected item {}: {}.", path.display(), e))?;
+        let meta = path.symlink_metadata().map_err(|e| format!("Could not inspect selected item {}: {}.", path.display(), crate::error::io_message(&e)))?;
         Ok(Self { path, dev: meta.dev(), ino: meta.ino(), kind: meta.mode() & 0o170000 })
     }
     pub(crate) fn current(&self) -> Result<Metadata, String> {
@@ -289,8 +289,8 @@ pub fn create_file(parent: &Path, name: &str) -> Result<(PathBuf, super::undo::I
     }
     let path = parent.join(name);
     let file = OpenOptions::new().write(true).create_new(true).open(&path)
-        .map_err(|e| format!("Could not create {}: {}.", path.display(), e))?;
-    let meta = file.metadata().map_err(|e| format!("Created {}, but could not record its identity: {}.", path.display(), e))?;
+        .map_err(|e| format!("Could not create {}: {}.", path.display(), crate::error::io_message(&e)))?;
+    let meta = file.metadata().map_err(|e| format!("Created {}, but could not record its identity: {}.", path.display(), crate::error::io_message(&e)))?;
     Ok((path, super::undo::ItemIdentity::record(&meta)))
 }
 

@@ -116,9 +116,8 @@ QtObject {
                     color: String(item.color), fontSize: item.font.pixelSize}
             }
             return JSON.stringify({path: root.bar.path, total: root.bar.total, selected: root.bar.selectionCount,
-                listingState: root.bar.listingState, filesystem: root.bar.fsText(), countsLeft: root.bar.countsLeft,
-                countGap: root.bar.countGap, left: textState(root.bar.locationItem),
-                selection: textState(root.bar.selectionItem), right: textState(root.bar.primaryItem)})
+                listingState: root.bar.listingState, filesystem: root.bar.fsText(), counts: root.bar.countText(),
+                left: textState(root.bar.countsItem), right: textState(root.bar.primaryItem)})
         }
         function menuState(): string {
             var menu = root.pane.contextMenu()

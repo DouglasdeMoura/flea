@@ -412,9 +412,9 @@ for bad in 'a/b' '.' '..'; do
   check "a name of $bad is refused before any syscall" "a name cannot be . or .., or contain a separator" "$(mkdir_refusal "$bad")"
 done
 long=$(head -c 256 /dev/zero | tr '\0' a)
-check "a name past NAME_MAX carries the OS sentence" "File name too long (os error 36)" "$(mkdir_refusal "$long")"
+check "a name past NAME_MAX names the cause in words" "file name is too long" "$(mkdir_refusal "$long")"
 check "a relative parent is refused" "a parent must be an absolute path" "$(printf '{"c":"mkdir","path":"relative","name":"x"}\n{"c":"quit"}\n' | $BIN --backend | grep -oE '"msg":"[^"]+"' | cut -d'"' -f4)"
-check "a parent that vanished since the listing carries the OS sentence" "No such file or directory (os error 2)" "$(printf '{"c":"mkdir","path":"%s/gone","name":"x"}\n{"c":"quit"}\n' "$MK" | $BIN --backend | grep -oE '"msg":"[^"]+"' | cut -d'"' -f4)"
+check "a parent that vanished since the listing names the cause in words" "file or folder not found" "$(printf '{"c":"mkdir","path":"%s/gone","name":"x"}\n{"c":"quit"}\n' "$MK" | $BIN --backend | grep -oE '"msg":"[^"]+"' | cut -d'"' -f4)"
 check "no refusal made anything" "$before" "$(ls -A "$MK" | wc -l | tr -d ' ')"
 
 # A name of only spaces is legal, the same as it is for rename; the field trims, the wire does not.
@@ -425,7 +425,7 @@ check "a name of only spaces is created as sent" "yes" "$([ -d "$MK/   " ] && ec
 mkdir -p "$MK/locked"; chmod 0555 "$MK/locked"
 out=$(printf '{"c":"mkdir","path":"%s/locked","name":"x"}\n{"c":"quit"}\n' "$MK" | $BIN --backend)
 chmod 0755 "$MK/locked"
-check "a parent the user cannot write answers permission denied honestly" "Permission denied (os error 13)" "$(echo "$out" | grep -oE '"msg":"[^"]+"' | cut -d'"' -f4)"
+check "a parent the user cannot write answers permission denied honestly" "permission denied" "$(echo "$out" | grep -oE '"msg":"[^"]+"' | cut -d'"' -f4)"
 
 # Undo, in the one process that holds the journal: an empty new folder goes, a filled one stays.
 out=$(printf '{"c":"mkdir","path":"%s","name":"empty"}\n{"c":"undo"}\n{"c":"quit"}\n' "$MK" | $BIN --backend)

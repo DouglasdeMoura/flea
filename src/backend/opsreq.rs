@@ -3,7 +3,7 @@ use crate::backend::copyfile::{copy_any, move_any, Progress};
 use crate::backend::ops;
 use crate::backend::trash;
 use crate::backend::undo::{self, Entry, ItemIdentity, Step};
-use crate::error::FleaError;
+use crate::error::{from_io, io_message, FleaError};
 use crate::json::escape;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -103,7 +103,7 @@ pub fn usable_dest(dest: &str) -> Result<PathBuf, FleaError> {
     match p.metadata() {
         Ok(m) if m.is_dir() => Ok(p),
         Ok(_) => Err(op_err("transfer", dest, "the destination is not a directory")),
-        Err(e) => Err(op_err("transfer", dest, &e.to_string())),
+        Err(e) => Err(from_io("transfer", dest, &e)),
     }
 }
 
@@ -155,7 +155,7 @@ pub(crate) fn run_transfer_checked(
                 .ok_or_else(|| "Menu selection no longer matches this transfer.".to_string())
                 .and_then(|item| item.current())
         } else {
-            src.symlink_metadata().map_err(|error| error.to_string())
+            src.symlink_metadata().map_err(|error| io_message(&error))
         };
         let metadata = match checked {
             Ok(metadata) => metadata,

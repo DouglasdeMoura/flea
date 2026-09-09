@@ -21,8 +21,7 @@ Item {
     readonly property var dismissItem: dismissAction
     readonly property var cancelItem: cancelAction
     readonly property var undoItem: undoAction
-    readonly property var locationItem: location
-    readonly property var selectionItem: selected
+    readonly property var countsItem: counts
     readonly property var primaryItem: primary
     readonly property bool transientIsError: root.errors.length > 0
     property var activities: []
@@ -46,10 +45,6 @@ Item {
         (root.transientIsError || root.stickyHere) && root.searching ? "search " + root.searchLine : "",
         root.retryLine]
         .filter(function (s) { return s.length > 0 }).join(" · ")
-    readonly property bool countsLeft: (root.listingState === "ready" || root.listingState === "empty")
-        && root.fsName.length > 0 && !root.transient_.length
-        && !root.stickyHere && !root.searching && !root.secondaryText.length
-    readonly property int countGap: Theme.space(16)
     signal transferCancelRequested(int id)
     signal undoRequested()
     implicitHeight: Theme.chromeHeight + detailView.height
@@ -134,27 +129,12 @@ Item {
     }
 
     Text {
-        id: location
+        id: counts
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: strip.verticalCenter
         width: Math.min(implicitWidth, root.width / 4)
-        text: root.countsLeft ? root.itemText() : root.path
-        color: Theme.color.foreground
-        font.family: Theme.font.family
-        font.pixelSize: Theme.font.caption
-        elide: Text.ElideMiddle
-        textFormat: Text.PlainText
-    }
-
-    Text {
-        id: selected
-        visible: root.countsLeft && root.listingState === "ready" && root.selectionCount > 0
-        anchors.left: location.right
-        anchors.leftMargin: root.countGap
-        anchors.verticalCenter: strip.verticalCenter
-        width: Math.min(implicitWidth, root.width / 4)
-        text: root.selectionCount + " selected"
+        text: root.countText()
         color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
@@ -205,7 +185,8 @@ Item {
         anchors.verticalCenter: strip.verticalCenter
         width: visible ? Theme.spacing.hairline : 0
         height: secondary.height
-        color: Theme.color.muted
+        color: Theme.color.foreground
+        opacity: root.ruleOpacity
     }
 
     Text {
@@ -214,9 +195,9 @@ Item {
         anchors.rightMargin: secondary.width ? Theme.spacing.gap : 0
         anchors.verticalCenter: strip.verticalCenter
         width: Math.max(0, Math.min(implicitWidth, (separator.visible ? separator.x : secondary.x)
-            - (selected.visible ? selected.x + selected.width : location.x + location.width)
+            - (counts.x + counts.width)
             - 3 * Theme.spacing.gap - root.spiralSize))
-        text: root.rightText() || root.countText()
+        text: root.rightText()
         color: root.rightColor()
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption

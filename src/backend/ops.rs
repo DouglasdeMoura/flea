@@ -311,16 +311,16 @@ mod tests {
 
     // corner: runs as a plain user, where a directory without its write bit refuses a new entry.
     #[test]
-    fn mkdir_under_a_vanished_or_unwritable_parent_carries_the_os_sentence() {
+    fn mkdir_under_a_vanished_or_unwritable_parent_names_the_cause() {
         let d = TestDir::new("mkdirparent");
         let err = mkdir(&d.join("gone"), "x").expect_err("no parent");
         assert_eq!(err.where_, "mkdir");
-        assert!(err.msg.starts_with("No such file or directory"), "{}", err.msg);
+        assert_eq!(err.msg, "file or folder not found");
         let locked = d.dir("locked");
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
         let err = mkdir(&locked, "x").expect_err("denied");
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(err.msg.starts_with("Permission denied"), "{}", err.msg);
+        assert_eq!(err.msg, "permission denied");
         assert!(!locked.join("x").exists());
     }
 }

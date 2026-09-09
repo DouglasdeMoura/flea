@@ -27,17 +27,13 @@ operations_secondary() {
 operations_idle_footer() {
     local total="$1" selected="$2" label="$3" items="$1 items"
     [[ "$total" == 1 ]] && items="1 item"
-    menus_expect statusFooterState ".total == $total and .selected == $selected and .countsLeft and .filesystem != \"\" and .left.text == \"$items\" and .right.text == .filesystem and .right.width > 0 and .right.color == .left.color and .right.fontSize == .left.fontSize" "$label"
-    if [[ "$selected" == 0 ]]; then
-        menus_expect statusFooterState '(.selection.visible | not) and .right.x >= .left.x + .left.width' "$label has no selection label"
-    else
-        menus_expect statusFooterState ".selection.visible and .selection.text == \"$selected selected\" and .selection.x == .left.x + .left.width + .countGap and .right.x >= .selection.x + .selection.width" "$label has separate nonoverlapping counts"
-    fi
+    [[ "$selected" == 0 ]] || items+=" · $selected selected"
+    menus_expect statusFooterState ".total == $total and .selected == $selected and .filesystem != \"\" and .left.text == \"$items\" and .right.text == .filesystem and .right.width > 0 and .right.color == .left.color and .right.fontSize == .left.fontSize and .right.x >= .left.x + .left.width" "$label"
     menus_equal "$label foreground" "$(ipc themeForeground)" "$(ipc statusColor)"
 }
 
-operations_path_footer() {
-    menus_expect statusFooterState '(.countsLeft | not) and .left.text == .path and (.selection.visible | not) and .right.text != .filesystem' "$1 retains the path beside activity"
+operations_counts_footer() {
+    menus_expect statusFooterState '.left.text == .counts and .left.text != .path and .right.text != .filesystem and .right.x >= .left.x + .left.width' "$1 retains counts beside activity"
 }
 
 operations_missing_footer() {
@@ -47,7 +43,7 @@ operations_missing_footer() {
     launch "$missing"
     menus_expect statusFooterState '.listingState == "error" and .filesystem == ""' "missing directory has no filesystem information"
     menus_acknowledge
-    menus_expect statusFooterState '(.countsLeft | not) and .left.text == .path and .right.text == "unavailable" and (.selection.visible | not)' "missing filesystem retains path-left and unavailable fallback-right"
+    menus_expect statusFooterState '.left.text == "unavailable" and .right.text == ""' "missing filesystem reports unavailable on the left without invented capacity"
     menus_equal "missing filesystem fallback foreground" "$(ipc themeForeground)" "$(ipc statusColor)"
     shot operations-no-filesystem
     kill_flea
@@ -74,7 +70,7 @@ operations_loading_footer() (
     done
     [[ "$state" == T* ]] || fail "operations: listing backend did not stop"
     key -M ctrl -k l -m ctrl "$destination" -k Return >/dev/null
-    menus_expect statusFooterState '.listingState == "loading" and .filesystem != "" and (.countsLeft | not) and .left.visible and .left.width > 0 and .left.text == .path and (.selection.visible | not)' "native refresh preserves its path while the backend cannot reply"
+    menus_expect statusFooterState '.listingState == "loading" and .filesystem != "" and .left.text == "" and .left.text == .counts and .right.text == .filesystem' "native refresh clears stale counts while the backend cannot reply"
     shot operations-loading-footer
     permissions_resume_stopped "$operations_stopped" || fail "operations: listing backend could not resume"
     operations_stopped=""
@@ -120,7 +116,7 @@ operations_mixed() {
     operations_copy_to "$destination"
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1 and (.notice | contains("Copied 4 of 5") and contains("1 failed"))' "mixed completion retains all counts behind its named error"
     menus_error 'Copy failed: c.txt' 'collision names the failed source'
-    operations_path_footer "persistent error"
+    operations_counts_footer "persistent error"
     menus_expect selectionCount '. == 1' "failed original is selected for retry"
     selected=$(ipc selectedIndices)
     [[ "$selected" == "$(row_index_of c.txt)" ]] || fail "operations: retry selected a different source"
@@ -133,7 +129,7 @@ operations_mixed() {
     operations_status_control dismiss
     menus_message 'Copied 4 of 5' 'acknowledgement reveals the complete outcome'
     menus_expect statusActivityState '.undo.visible and .undo.enabled and .errors == 0' "successful items retain their native Undo control"
-    operations_path_footer "acknowledged completion"
+    operations_counts_footer "acknowledged completion"
     operations_secondary "c.txt selected for retry" "acknowledged completion retains its selected-retry secondary"
     shot operations-mixed-acknowledged
     key -k Escape >/dev/null
@@ -319,7 +315,7 @@ operations_cancel() (
     jq -e '.state == "stopped" and .bytes < .total and .threads > 0' <<< "$receipt" >/dev/null || fail "operations: invalid interruption receipt: $receipt"
     printf 'OPERATIONS_GATE %s\n' "$receipt"
     menus_expect statusActivityState '.activities[0].running and .cancel.enabled' "real in-flight transfer remains cancellable while interrupted"
-    operations_path_footer "interrupted transfer"
+    operations_counts_footer "interrupted transfer"
     key -k Escape >/dev/null
     menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "Escape leaves the named transfer running"
     shot operations-transfer-paused
@@ -327,7 +323,7 @@ operations_cancel() (
     menus_guard "$destination/b-after.txt"
     operations_status_control cancel
     menus_expect statusActivityState '.activities[0].cancelling and .cancel.visible and (.cancel.enabled | not)' "Cancel disables immediately while the backend is interrupted"
-    operations_path_footer "pending cancellation"
+    operations_counts_footer "pending cancellation"
     operations_status_control cancel
     menus_expect statusActivityState '.activities[0].cancelling and (.cancel.enabled | not)' "repeated pointer Cancel cannot resubmit"
     shot operations-cancelling

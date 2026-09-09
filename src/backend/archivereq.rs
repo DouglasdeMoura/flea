@@ -5,6 +5,7 @@ use crate::backend::archive::Formats;
 use crate::backend::archiveops::{compress, convert_one, extract, split_paths};
 use crate::backend::convert;
 use crate::backend::opsreq::{op_err, OpMsg};
+use crate::error::io_message;
 use crate::json::escape;
 use std::path::PathBuf;
 use crate::backend::opsdispatch::Ops;
@@ -43,11 +44,11 @@ fn check_convert(input: &std::path::Path, dest: &std::path::Path, selection: Opt
         return Err("Conversion requires absolute source and output paths.".into());
     }
     validate_sources(selection, std::slice::from_ref(&input.to_path_buf()))?;
-    input.symlink_metadata().map_err(|error| format!("Could not inspect {}: {}.", input.display(), error))?;
+    input.symlink_metadata().map_err(|error| format!("Could not inspect {}: {}.", input.display(), io_message(&error)))?;
     match dest.symlink_metadata() {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("Could not inspect output {}: {}.", dest.display(), error)),
+        Err(error) => Err(format!("Could not inspect output {}: {}.", dest.display(), io_message(&error))),
     }
 }
 
@@ -224,6 +225,23 @@ mod tests {
         let e = convert_one(&src, &src, false).unwrap_err();
         assert!(e.msg.contains("already exists"));
         assert_eq!(std::fs::read_to_string(&src).unwrap(), "pixels");
+    }
+
+    #[test]
+    fn conversion_inspection_reports_plain_causes_before_running_a_tool() {
+        let d = TestDir::new("convert-inspection-errors");
+        let missing = d.join("missing.png");
+        let output = d.join("output.jpg");
+        assert_eq!(check_convert(&missing, &output, None).unwrap_err(),
+            format!("Could not inspect {}: file or folder not found.", missing.display()));
+        let source = d.file("photo.png", "source");
+        let blocked = d.file("not-a-folder", "keep");
+        let invalid_output = blocked.join("output.jpg");
+        assert_eq!(check_convert(&source, &invalid_output, None).unwrap_err(),
+            format!("Could not inspect output {}: a path component is not a folder.", invalid_output.display()));
+        assert!(!output.exists());
+        assert_eq!(std::fs::read_to_string(source).unwrap(), "source");
+        assert_eq!(std::fs::read_to_string(blocked).unwrap(), "keep");
     }
 
     #[test]
