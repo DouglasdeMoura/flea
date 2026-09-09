@@ -128,7 +128,6 @@ function act(action, root, menuId, paths) {
         return
     case "undo": Ops.undo(root); return
     case "redo": root.backend.send({c: "redo"}); return
-    case "rename": Ops.startRename(root, menuId); return
     // m. Mounts.raiseMenu says why a favourite has no menu; here the pane says whether a row was
     // under the cursor at all, and an empty or fully filtered listing gets the sentence, not silence.
     case "menu":

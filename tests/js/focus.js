@@ -348,10 +348,9 @@ function run(check) {
     check("menu cut keeps the captured paths and move intent", menu.clipboard.moving, true)
     for (var action of ["duplicate", "trash", "extract", "dropbox", "convert", "compress:zip"])
         Focus.act(action, menu, 42, selectedPaths)
-    Focus.act("rename", menu, 42, selectedPaths)
     check("menu dispatch keeps the identity through each mutation consumer",
-          menuRequests.join("|") + "|rename:" + menu.renameMenuId,
-          "duplicate:42|trash:42|extract:42|dropbox:42|convert:42|/d/captured.txt,/d/second.txt:42|rename:42")
+          menuRequests.join("|"),
+          "duplicate:42|trash:42|extract:42|dropbox:42|convert:42|/d/captured.txt,/d/second.txt:42")
 
     // Y copies root.path, the same thing Ctrl+T opens a terminal on, so it answers from the rail
     // too; without the interception RailKeys.act ate it and the key did nothing and said nothing.
