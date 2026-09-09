@@ -159,19 +159,19 @@ Item {
         root.send({ c: "transfercancel", id: id })
     }
 
-    function trash(rows) {
+    function trash(rows, menuId) {
         if (rows.length === 0) {
             return
         }
-        root.send({ c: "trash", rows: rows })
+        root.send({ c: "trash", rows: rows, menuId: menuId || 0 })
     }
 
-    function rename(path, to) {
-        root.send({ c: "rename", path: path, to: to })
+    function rename(path, to, menuId) {
+        root.send({ c: "rename", path: path, to: to, menuId: menuId || 0 })
     }
 
-    function duplicate(path) {
-        root.send({ c: "duplicate", path: path })
+    function duplicate(path, menuId) {
+        root.send({ c: "duplicate", path: path, menuId: menuId || 0 })
     }
 
     // No name field: omitting it is what makes the backend take the first free "New Folder", so the
@@ -214,17 +214,17 @@ Item {
     }
 
     // paths are absolute and share a parent, which is what a selection from one listing is.
-    function compress(paths, dest, format) {
-        root.send({ c: "archive", op: "compress", paths: paths, dest: dest, format: format })
+    function compress(paths, dest, format, menuId) {
+        root.send({ c: "archive", op: "compress", paths: paths, dest: dest, format: format, menuId: menuId || 0 })
     }
 
-    function extract(path, dest) {
-        root.send({ c: "archive", op: "extract", path: path, dest: dest })
+    function extract(path, dest, menuId) {
+        root.send({ c: "archive", op: "extract", path: path, dest: dest, menuId: menuId || 0 })
     }
 
     // No format field: magick reads the codec off dest's own extension, see docs/protocol.md "convert".
-    function convertImage(path, dest, strip) {
-        root.send({ c: "convert", path: path, dest: dest, strip: strip })
+    function convertImage(path, dest, strip, menuId) {
+        root.send({ c: "convert", path: path, dest: dest, strip: strip, menuId: menuId || 0 })
     }
 
     function thumb(rows) {

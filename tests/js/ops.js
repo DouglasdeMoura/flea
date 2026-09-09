@@ -106,8 +106,8 @@ function run(check) {
                 send: function (msg) { sent.push(msg) },
                 askPaths: function (rows) { sent.push({ c: "paths", rows: rows }) },
                 mkdir: function (path) { sent.push({ c: "mkdir", path: path }) },
-                compress: function (paths, dest, format) {
-                    sent.push({ c: "archive", paths: paths, dest: dest, format: format })
+                compress: function (paths, dest, format, menuId) {
+                    sent.push({ c: "archive", paths: paths, dest: dest, format: format, menuId: menuId })
                 }
             },
             message: function () {},
@@ -171,6 +171,21 @@ function run(check) {
           String(zipPane.pathsPending),
           "null")
 
+    var captured = ["/d/captured.txt", "/d/second.txt"]
+    var capturedRequests = []
+    var capturedPane = windowedPane(capturedRequests)
+    Ops.clip(capturedPane, true, captured)
+    check("a menu clipboard action retains captured paths without resolving the current listing",
+          capturedPane.clipboard.paths.join(",") + "|" + capturedPane.clipboard.moving + "|" + capturedRequests.length,
+          "/d/captured.txt,/d/second.txt|true|0")
+    Ops.compressResolved(capturedPane, captured, "zip", 31)
+    check("compression carries the captured paths and menu identity into the worker",
+          capturedRequests[0].paths.join(",") + "|" + capturedRequests[0].menuId,
+          "/d/captured.txt,/d/second.txt|31")
+    Ops.moveToDropbox(capturedPane, "/dropbox", 32)
+    check("Dropbox transfer retains the menu identity alongside the full selection",
+          capturedRequests[1].menuId + "|" + capturedRequests[1].rows.length, "32|40")
+
     var t = Ops.started(12, true, 3)
     check("a started transfer carries its id, its direction and its count",
           t.id + "/" + t.moving + "/" + t.n + "/" + t.running,
@@ -220,6 +235,31 @@ function run(check) {
     Ops.commitRename(gone, "x")
     check("a commit over a row the window no longer holds sends nothing and still closes",
           stale.length + "|" + gone.renamingIndex, "0|-1")
+    var menuRename = renamePane(2, -1, [])
+    var renameIdentity = 0
+    menuRename.backend.rename = function (from, to, menuId) { renameIdentity = menuId }
+    Ops.startRename(menuRename, 33)
+    check("menu rename retains its identity for the editor lifetime", menuRename.renameMenuId, 33)
+    Object.defineProperty(menuRename, "renamingIndex", {get: function () { return 2 },
+        set: function () { menuRename.renameMenuId = 0 }})
+    Ops.commitRename(menuRename, "renamed.txt")
+    check("committing retains the menu identity before closing the editor clears it", renameIdentity, 33)
+
+    var operationIds = []
+    var menuPane = windowedPane([])
+    menuPane.backend.duplicate = function (path, id) { operationIds.push("duplicate:" + id) }
+    menuPane.backend.trash = function (rows, id) { operationIds.push("trash:" + id) }
+    menuPane.backend.extract = function (path, dest, id) { operationIds.push("extract:" + id) }
+    menuPane.backend.convertImage = function (path, dest, strip, id) { operationIds.push("convert:" + id) }
+    menuPane.convertRequested = function () {}
+    Ops.duplicate(menuPane, 34)
+    Ops.trash(menuPane, 35)
+    Ops.extract(menuPane, 36)
+    Ops.openConvert(menuPane, 37)
+    Ops.convert(menuPane, "png", false)
+    check("menu mutations forward the selected identity to their operation workers",
+          operationIds.join(","), "duplicate:34,trash:35,extract:36,convert:37")
+    check("conversion consumes its retained menu identity", menuPane.convertMenuId, 0)
 
     // ---- the new folder, the one operation whose name the backend chooses ----
 

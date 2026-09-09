@@ -69,7 +69,7 @@ function lookup(event, root) {
 
 // Lifted from Pane.qml's Keys.onPressed: the map holds the keys, this holds the behaviour.
 // Takes the Pane root because every case is a method call or a property read on it.
-function act(action, root) {
+function act(action, root, menuId, paths) {
     switch (action) {
     // One row in the list, one row of tiles in the grid: a grid that stepped linearly on Down would
     // move the cursor sideways, which is not what the key looks like it does.
@@ -110,12 +110,12 @@ function act(action, root) {
     case "filter": Filter.start(root); return
     case "reveal": Search.reveal(root); return
     // The write operations; every one of them is reversible with undo, so none of them confirms.
-    case "duplicate": Ops.duplicate(root); return
-    case "trash": Ops.trash(root); return
+    case "duplicate": Ops.duplicate(root, menuId); return
+    case "trash": Ops.trash(root, menuId); return
     case "trashArm": Trash.arm(root); return
-    case "copy": Ops.clip(root, false); return
+    case "copy": Ops.clip(root, false, paths); return
     case "copydirpath": root.copyDirPath(); return
-    case "cut": Ops.clip(root, true); return
+    case "cut": Ops.clip(root, true, paths); return
     case "paste": Ops.paste(root); return
     case "movePaste":
         if (root.clipboard.paths.length === 0) { root.message("The clipboard is empty.", false); return }
@@ -124,18 +124,18 @@ function act(action, root) {
         return
     case "undo": Ops.undo(root); return
     case "redo": root.backend.send({c: "redo"}); return
-    case "rename": Ops.startRename(root); return
+    case "rename": Ops.startRename(root, menuId); return
     // m. Mounts.raiseMenu says why a favourite has no menu; here the pane says whether a row was
     // under the cursor at all, and an empty or fully filtered listing gets the sentence, not silence.
     case "menu":
         if (!root.openCursorMenu())
             root.message("No row under the cursor to open a menu on.", false)
         return
-    case "extract": Ops.extract(root); return
-    case "dropbox": root.moveToDropbox(); return
+    case "extract": Ops.extract(root, menuId); return
+    case "dropbox": root.moveToDropbox(menuId); return
     case "sharelink": root.copyShareLink(); return
     // Convert opens the one popup this whole design has; every other operation answers without one.
-    case "convert": root.openConvert(); return
+    case "convert": root.openConvert(menuId); return
     // The header answers the same two through ui/Pane.qml, so the key and the click share one route.
     case "sortNext": Sort.next(root); return
     case "sortReverse": Sort.reverse(root); return
@@ -151,7 +151,8 @@ function act(action, root) {
     }
     // A submenu row fires "<action>:<id>", which is how one signal covers Taildrop and Compress both.
     if (action.indexOf("compress:") === 0) {
-        Ops.compress(root, action.substring("compress:".length))
+        if (paths) Ops.compressResolved(root, paths, action.substring("compress:".length), menuId)
+        else Ops.compress(root, action.substring("compress:".length))
         return
     }
     // The background menu's Sort by flyout, routed to the header click's own function so an aimed

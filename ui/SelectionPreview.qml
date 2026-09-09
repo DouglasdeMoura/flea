@@ -54,6 +54,7 @@ Flea.PreviewColumn {
     }
 
     function clear() {
+        settle.stop()
         root.pendingToken = 0
         root.loadedIndex = -1
         root.loadedDirectory = ""
@@ -67,12 +68,12 @@ Flea.PreviewColumn {
     }
 
     function followSelection() {
-        if (!ViewState.previewAutomatic || !root.canRead) return
+        if (!root.canRead) return
         var candidate = root.pane.rowFor(root.pane.cursorIndex)
         if (root.loadedDirectory === root.pane.path && root.loadedIndex === root.pane.cursorIndex
                 && root.loadedIdentity === root.identity(candidate)) return
         root.clear()
-        settle.restart()
+        if (ViewState.previewAutomatic) settle.restart()
     }
 
     // Ctrl+Space calls this directly; automatic selection reaches it only after selection settles.
@@ -107,12 +108,15 @@ Flea.PreviewColumn {
         onTriggered: if (ViewState.previewAutomatic) root.loadSelection()
     }
     onCanReadChanged: {
-        if (!root.canRead) { settle.stop(); root.clear() }
+        if (!root.canRead) root.clear()
         else root.followSelection()
     }
     Connections {
         target: ViewState
-        function onPreviewAutomaticChanged() { if (ViewState.previewAutomatic) root.followSelection() }
+        function onPreviewAutomaticChanged() {
+            if (ViewState.previewAutomatic) root.followSelection()
+            else settle.stop()
+        }
     }
     Connections {
         target: root.pane
@@ -123,7 +127,7 @@ Flea.PreviewColumn {
             root.followSelection()
         }
         function onPathChanged() { root.clear(); root.followSelection() }
-        function onSelectionVersionChanged() { if (ViewState.previewAutomatic && root.canRead) settle.restart() }
+        function onSelectionVersionChanged() { root.clear(); root.followSelection() }
     }
     Connections {
         target: root.pane ? root.pane.backend : null

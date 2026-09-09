@@ -109,12 +109,12 @@ function leaf(path) {
 // ---- the actions, each taking the pane the way Search.js's own do ----
 
 // Duplicate acts on the cursor row alone: the operations design gives it one path, not a batch.
-function duplicate(pane) {
+function duplicate(pane, menuId) {
     var row = pane.rowFor(pane.cursorIndex)
     if (!row) {
         return
     }
-    pane.backend.duplicate(pane.join(pane.path, row.n))
+    pane.backend.duplicate(pane.join(pane.path, row.n), menuId)
 }
 
 // No name field: the backend answers with the first free "New Folder", so there is no retry loop.
@@ -125,12 +125,13 @@ function newFolder(pane) {
 // r on a row the client holds opens the editor over that row's name column. Only ui/Row.qml draws
 // one, so a rename started in the grid or the columns would set ui/js/Focus.js's guard with nothing
 // left to ever clear it, and every later key would be swallowed for the life of the window.
-function startRename(pane) {
+function startRename(pane, menuId) {
     if (pane.viewMode !== "list") {
         pane.message("Rename needs the list view.", false)
         return
     }
     if (pane.rowFor(pane.cursorIndex)) {
+        pane.renameMenuId = menuId || 0
         pane.renamingIndex = pane.cursorIndex
     }
 }
@@ -138,24 +139,30 @@ function startRename(pane) {
 // The row is read before the index is cleared, because clearing it is what closes the editor.
 function commitRename(pane, newName) {
     var row = pane.rowFor(pane.renamingIndex)
+    var menuId = pane.renameMenuId || 0
     pane.renamingIndex = -1
     if (row) {
-        pane.backend.rename(pane.join(pane.path, row.n), newName)
+        pane.backend.rename(pane.join(pane.path, row.n), newName, menuId)
     }
 }
 
 // Indices, not paths: trash acts on the listing that is up right now, so the backend resolves them.
-function trash(pane) {
+function trash(pane, menuId) {
     var idx = targetIndices(pane)
     if (idx.length === 0) {
         return
     }
-    pane.backend.trash(idx)
+    pane.backend.trash(idx, menuId)
 }
 
 // The clipboard has to hold absolute paths, because a paste happens in a different directory and the
 // listing those indices belonged to is gone by then. The backend resolves them while it still can.
-function clip(pane, moving) {
+function clip(pane, moving, paths) {
+    if (paths) {
+        pane.clipboard = {paths: paths, moving: moving}
+        pane.message(copied(paths.length, moving), false)
+        return
+    }
     var idx = targetIndices(pane)
     if (idx.length === 0) {
         return
@@ -228,7 +235,7 @@ function compress(pane, format) {
 }
 
 // The answer to the askPaths above, and the only place an archive request is built.
-function compressResolved(pane, list, format) {
+function compressResolved(pane, list, format, menuId) {
     if (list.length === 0) {
         return
     }
@@ -237,7 +244,7 @@ function compressResolved(pane, list, format) {
         names.push(leaf(list[i]))
     }
     var stem = Archive.archiveStem(names, leaf(pane.path))
-    pane.backend.compress(list, pane.join(pane.path, stem + "." + format), format)
+    pane.backend.compress(list, pane.join(pane.path, stem + "." + format), format, menuId)
     pane.sticky("Compressing " + items(list.length) + " to ." + format)
 }
 
@@ -254,20 +261,21 @@ function pathsResolved(pane, list) {
 }
 
 // Extract unpacks beside the archive, into a directory named after it.
-function extract(pane) {
+function extract(pane, menuId) {
     var row = pane.rowFor(pane.cursorIndex)
     if (!row) {
         return
     }
     var path = pane.join(pane.path, row.n)
-    pane.backend.extract(path, pane.join(pane.path, Archive.extractDir(row.n)))
+    pane.backend.extract(path, pane.join(pane.path, Archive.extractDir(row.n)), menuId)
     pane.sticky("Extracting " + row.n)
 }
 
 // A directory has nothing to convert, so the popup never opens on one.
-function openConvert(pane) {
+function openConvert(pane, menuId) {
     var row = pane.rowFor(pane.cursorIndex)
     if (row && !row.d) {
+        pane.convertMenuId = menuId || 0
         pane.convertRequested(row.n)
     }
 }
@@ -278,13 +286,14 @@ function convert(pane, format, strip) {
         return
     }
     pane.backend.convertImage(pane.join(pane.path, row.n),
-                              pane.join(pane.path, Convert.destName(row.n, format)), strip)
+                              pane.join(pane.path, Convert.destName(row.n, format)), strip, pane.convertMenuId)
+    pane.convertMenuId = 0
     pane.sticky("Converting " + row.n + " to ." + format)
 }
 
 // Move to Dropbox is the transfer request with a destination filled in, which is the concrete case
 // where "does this need to exist at all" answers no: no new wire, no new Rust.
-function moveToDropbox(pane, dropboxPath) {
+function moveToDropbox(pane, dropboxPath, menuId) {
     var idx = targetIndices(pane)
     if (idx.length === 0 || dropboxPath.length === 0) {
         return
@@ -293,6 +302,6 @@ function moveToDropbox(pane, dropboxPath) {
     // operator cut or copied earlier would lose it with no way back.
     // Rows, not paths: a selection reaches past the window the client holds, and targetPaths drops
     // every index outside it in silence, so a wide move relocated a few files and abandoned the rest.
-    pane.backend.send({ c: "transfer", op: "move", rows: idx, dest: dropboxPath })
+    pane.backend.send({ c: "transfer", op: "move", rows: idx, dest: dropboxPath, menuId: menuId || 0 })
     pane.sticky("Moving " + items(idx.length) + " to Dropbox")
 }

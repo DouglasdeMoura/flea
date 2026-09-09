@@ -15,6 +15,8 @@ Loader {
     property string folder: ""
     property bool ready: false
     property string pendingAction: ""
+    property bool pendingActivation: false
+    property bool activationUsed: false
     property int launchingId: 0
     property var survivors: []
     property int survivorId: 0
@@ -26,6 +28,8 @@ Loader {
         requestId++
         ready = false
         pendingAction = ""
+        pendingActivation = false
+        activationUsed = false
         identity = pane.menuSelectionIdentity
         folder = pane.path
         pane.backend.send({c: "menuaction", op: "snapshot", id: requestId, rows: Ops.targetIndices(pane)})
@@ -41,7 +45,27 @@ Loader {
         }
         if (!requestId || identity !== pane.menuSelectionIdentity) snapshot()
         pendingAction = action
+        pendingActivation = false
         if (ready) show(action)
+    }
+    function activate(action, selected) {
+        if (!selected) { pane.performMenu(action, 0, null); return }
+        if (activationUsed) return
+        if (deleting || survivorId) { pane.message("The deletion is still finishing.", false); return }
+        if (!requestId || identity !== pane.menuSelectionIdentity) {
+            pane.message("Selected items changed; reopen the menu.", true)
+            return
+        }
+        activationUsed = true
+        pendingAction = action
+        pendingActivation = true
+        if (ready) validateActivation()
+    }
+    function validateActivation() {
+        var action = pendingAction
+        pendingAction = ""
+        pendingActivation = false
+        pane.backend.send({c: "menuaction", op: "activate", id: requestId, action: action})
     }
     function show(action) {
         pendingAction = ""
@@ -89,7 +113,22 @@ Loader {
                     root.pendingAction = ""
                     root.identity = ""
                     root.pane.message(message.error || "Selected items changed; reopen the menu.", true)
-                } else if (root.pendingAction) root.show(root.pendingAction)
+                } else if (root.pendingAction) {
+                    if (root.pendingActivation) root.validateActivation()
+                    else root.show(root.pendingAction)
+                }
+                return
+            }
+            if (message.op === "activate") {
+                if (!message.ok || root.identity !== root.pane.menuSelectionIdentity) {
+                    root.pane.message(message.error || "Selected items changed; reopen the menu.", true)
+                    return
+                }
+                var split = message.action.indexOf(":")
+                var action = split < 0 ? message.action : message.action.substring(0, split)
+                var subId = split < 0 ? "" : message.action.substring(split + 1)
+                if (root.pane.contextMenu().validateChoice(action, subId))
+                    root.pane.performMenu(message.action, message.id, message.paths)
                 return
             }
             if (root.item) root.item.receive(message)

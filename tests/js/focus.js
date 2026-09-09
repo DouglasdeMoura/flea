@@ -267,6 +267,35 @@ function run(check) {
     Focus.act("openTerminal", fromMenu)
     check("the menu row reaches the same terminal through act", fromMenu.asked + "|" + fromMenu.said, "1|")
 
+    var menu = listPane(true)
+    var menuRequests = []
+    menu.path = "/d"
+    menu.cursorIndex = 0
+    menu.rowFor = function () { return {n: "selected.txt"} }
+    menu.selectedIndices = function () { return [] }
+    menu.join = function (parent, name) { return parent + "/" + name }
+    menu.sticky = function () {}
+    menu.backend = {
+        duplicate: function (path, id) { menuRequests.push("duplicate:" + id) },
+        trash: function (rows, id) { menuRequests.push("trash:" + id) },
+        extract: function (path, dest, id) { menuRequests.push("extract:" + id) },
+        compress: function (paths, dest, format, id) { menuRequests.push(paths.join(",") + ":" + id) }
+    }
+    menu.moveToDropbox = function (id) { menuRequests.push("dropbox:" + id) }
+    menu.openConvert = function (id) { menuRequests.push("convert:" + id) }
+    var selectedPaths = ["/d/captured.txt", "/d/second.txt"]
+    Focus.act("copy", menu, 42, selectedPaths)
+    check("menu dispatch copies the captured paths without another asynchronous lookup",
+          menu.clipboard.paths.join(",") + "|" + menu.clipboard.moving, "/d/captured.txt,/d/second.txt|false")
+    Focus.act("cut", menu, 42, selectedPaths)
+    check("menu cut keeps the captured paths and move intent", menu.clipboard.moving, true)
+    for (var action of ["duplicate", "trash", "extract", "dropbox", "convert", "compress:zip"])
+        Focus.act(action, menu, 42, selectedPaths)
+    Focus.act("rename", menu, 42, selectedPaths)
+    check("menu dispatch keeps the identity through each mutation consumer",
+          menuRequests.join("|") + "|rename:" + menu.renameMenuId,
+          "duplicate:42|trash:42|extract:42|dropbox:42|convert:42|/d/captured.txt,/d/second.txt:42|rename:42")
+
     // Y copies root.path, the same thing Ctrl+T opens a terminal on, so it answers from the rail
     // too; without the interception RailKeys.act ate it and the key did nothing and said nothing.
     var copyKey = key(Qt.Key_Y, "Y", shift)

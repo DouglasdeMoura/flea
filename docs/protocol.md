@@ -52,6 +52,52 @@ The client must match both `directory` and the requested `path` before using the
 fetch only the viewport containing that row. This is location in the current listing, not proof
 that the filesystem object still exists or has the same identity for a later operation.
 
+`{"c":"locate","paths":["/directory/selected.txt"],"id":7,"menuId":4}` resolves a batch
+in one scan of the name arena. The reply carries `directory`, the request `id`, `ok`, `error`,
+and `matches:[{"path":"/directory/selected.txt","index":42}]`. Missing paths are omitted,
+duplicates produce one match, and results follow listing order. No unrequested path is returned.
+Without `menuId`, this has the same name-only semantics as the single-path form. With `menuId`,
+each matched survivor must still have the device, inode and file type captured by that completed
+permanent deletion. This explicitly requested survivor check stats only matched paths.
+The backend retains one completed deletion's identities for this read-only purpose even after
+`menuaction/close` has expired the mutable selection. An expired restoration identity returns
+`ok:false` and no matches. Clients must also reject replies after navigation, selection changes,
+or replacement of the pending request, and fetch metadata only for the visible window.
+
+### menuaction identity and deletion
+
+`{"c":"menuaction","op":"activate","id":4,"action":"duplicate"}` revalidates the
+selection captured by `snapshot` before the GUI dispatches a selected-item menu action.
+The response echoes `id`, `op`, and `action`, with `ok` and `error`. Only clipboard, Copy Path,
+and compression actions return captured `paths`; other actions do not serialize unused paths.
+The client also rechecks its listing identity and current action eligibility before dispatch.
+
+An optional `menuId` on `transfer`, `trash`, `duplicate`, `rename`, `archive`, or `convert`
+binds that operation to the captured selection. An expired selection, replacement object,
+or uncaptured requested source is refused. Transfer uses the captured sources directly;
+Trash, Duplicate, Archive, and Convert require the entire requested source set to match.
+Identity checks compare the device, inode and file type at the worker boundary; Trash checks again immediately before its existing GIO
+batch handoff. These checks do not make subsequent external-helper filesystem operations
+atomic. Omitting `menuId` preserves the existing keyboard and protocol entry paths.
+
+`{"c":"menuaction","op":"snapshot","id":4,"rows":[0,2]}` captures the selected identities
+from the active listing. `prepareDelete` with that `id` reviews the captured trees and returns a
+fresh `token`, selected `count`, and total `bytes`. `checkDelete` with the `id` and `token` returns
+`valid` without mutating files. A changed set requires `refreshDelete`: it reviews only the same
+captured paths, drops missing paths, captures replacement identities, and issues a fresh token.
+Unrelated paths cannot widen that confirmation. The client shows this new confirmation with
+Cancel initially focused; no prior destructive activation authorizes the replacement token.
+
+`{"c":"menuaction","op":"delete","id":4,"token":12}` consumes that exact token and reserves
+the ordinary mutation slot. A failed preflight returns `stale:true` and requires a fresh review;
+it does not delete any item. A completed attempt returns `deleted`, `failed`, `cancelled`,
+`error`, and `remaining` absolute paths whose original identities survive. Results report partial
+completion rather than implying rollback. The caller can use the identity-checked batched
+`locate` form to select survivors after refreshing the listing.
+`close` expires the token and cancels pending work. An already claimed deletion root completes
+or restores its survivors before cancellation stops the next root. The undo journal does not
+cover permanent deletion.
+
 ### listpaths
 
 `{"c":"listpaths","paths":[<string>,...],"first":<uint>}`

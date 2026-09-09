@@ -285,9 +285,9 @@ fn handle_line(
             }
         }
         Request::TransferCancel { id } => cancel_transfer(ops, id),
-        Request::Trash { paths, rows } => {
+        Request::Trash { paths, rows, menu_id } => {
             let named = resolve_rows(paths, &rows, &st.base, &st.listing);
-            start_trash(out, ops, named)
+            start_trash(out, ops, named, menu_id)
         }
         Request::Rename { path, to, menu_id } => {
             if menu_id == 0 { do_rename(out, ops, &path, &to); }
@@ -295,18 +295,18 @@ fn handle_line(
         }
         Request::MkDir { path, name } => do_mkdir(out, ops, &path, &name),
         Request::NewFile { path, name, id } => do_newfile(out, ops, &path, &name, id),
-        Request::Duplicate { path } => start_duplicate(out, ops, &path),
+        Request::Duplicate { path, menu_id } => start_duplicate(out, ops, &path, menu_id),
         Request::Undo => do_undo(out, ops),
         Request::Redo => start_redo(out, ops),
         // Never touches st.listing, which is the whole point: a column is not the pane's own listing.
         Request::Peek { path, first, hidden, focus } =>
             say(out, &peek_line(&path, first, hidden, &focus, &tb.mime, &tb.icons)),
         // A compress names absolute paths and no path; an extract names the one archive in path.
-        Request::Archive { op, paths, path, dest, format } => start_archive(
+        Request::Archive { op, paths, path, dest, format, menu_id } => start_archive(
             out, ops, Arc::clone(&tb.formats), &op,
-            paths, format, PathBuf::from(&path), PathBuf::from(&dest)),
-        Request::Convert { path, dest, strip } =>
-            start_convert(out, ops, PathBuf::from(&path), PathBuf::from(&dest), strip),
+            paths, format, PathBuf::from(&path), PathBuf::from(&dest), menu_id),
+        Request::Convert { path, dest, strip, menu_id } =>
+            start_convert(out, ops, PathBuf::from(&path), PathBuf::from(&dest), strip, menu_id),
         Request::Formats => say(out, &formats_line(&tb.formats, convert::available())),
         Request::FsInfo => say(out, &fsinfo_line(&read_fsinfo(&st.base))),
         // One row, only when a client asked: the same no-sweep rule thumb and dirsize already follow.

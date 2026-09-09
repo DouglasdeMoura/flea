@@ -6,6 +6,7 @@ import "js/Format.js" as Format
 import "js/Icons.js" as Icons
 import "js/Keymap.js" as Keymap
 import "js/TrashDates.js" as Trash
+import "js/Trash.js" as TrashKeys
 
 // Trash keeps the normal integer ListView model, holding metadata only for its current window.
 FocusScope {
@@ -25,6 +26,7 @@ FocusScope {
     property int selectionToken: 0
     property int selectionCount: 0
     property int cursor: 0
+    property double trashArmedAt: 0
     property int requestId: 0
     property string pendingOp: ""
     property bool operationActive: false
@@ -62,6 +64,7 @@ FocusScope {
     signal countChanged(int count)
     anchors.fill: parent
     visible: opened
+    onActiveFocusChanged: if (!activeFocus) root.trashArmedAt = 0
 
     function send(op, fields) {
         var message = fields || {}
@@ -73,6 +76,7 @@ FocusScope {
         requested(message)
     }
     function open(action) {
+        trashArmedAt = 0
         if (operationActive) { opened = true; forceActiveFocus(); return }
         opened = true; selected = ({}); selectionIdentities = ({}); allSelected = false; selectionToken = 0; selectionCount = 0; cursor = 0
         first = 0; rows = []; total = 0; errorText = ""; bytesReady = false
@@ -82,6 +86,7 @@ FocusScope {
         forceActiveFocus()
     }
     function close() {
+        trashArmedAt = 0
         opened = false; confirming = false; confirmation.close(); initialAction = ""
         if (!operationActive) send("cancel", {clearSelection: true})
         backRequested()
@@ -96,6 +101,7 @@ FocusScope {
     }
     function sourceChanged() {
         if (!opened) return
+        trashArmedAt = 0
         if (confirmation.opened) confirmation.close()
         if (busy) { refreshPending = true; return }
         refreshPending = false
@@ -125,6 +131,7 @@ FocusScope {
         send("select")
     }
     function choose(index, extend) {
+        trashArmedAt = 0
         if (total === 0 || confirming || operationActive) return
         if (pendingOp === "select") send("cancel", {clearSelection: true})
         cursor = Math.max(0, Math.min(total - 1, index))
@@ -171,6 +178,14 @@ FocusScope {
         confirmingExcluded = all ? [] : excludedUris()
         confirmingIdentities = confirmingUris.map(function(uri) { return root.selectionIdentities[uri] || "" })
         send("prepare", {all: confirmingSelectionAll, emptyTrash: all, uris: confirmingUris, exclude: confirmingExcluded, identities: confirmingIdentities, selectionToken: confirmingSelectionToken})
+    }
+    function armDelete() {
+        if (selectedCount === 0 || busy || confirming) { trashArmedAt = 0; return }
+        var now = Date.now()
+        var paired = trashArmedAt > 0 && now - trashArmedAt < TrashKeys.ARM_MS
+        trashArmedAt = paired ? 0 : now
+        if (paired) prepare(false)
+        else statusReported("Press d again to review permanent deletion, or Delete on its own.", false)
     }
     function receive(message) {
         if ((!opened && !operationActive) || message.id !== requestId || message.op !== pendingOp) return
@@ -259,8 +274,11 @@ FocusScope {
     }
     Keys.onPressed: function(event) {
         if (root.railKeyHandler && root.railKeyHandler(event)) { event.accepted = true; return }
-        var action = Keymap.lookup(event.key, event.text, event.modifiers)
-        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) root.close()
+        var action = Keymap.lookup(event.key, event.text, event.modifiers, "listing", "gui")
+        if (action === "trashArm" && event.isAutoRepeat) { event.accepted = true; return }
+        if (action !== "trashArm") root.trashArmedAt = 0
+        var unmodified = (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) === 0
+        if (action === "escape" || (event.key === Qt.Key_Backspace && unmodified)) root.close()
         else if (action === "cursorDown") root.choose(root.cursor + 1, false)
         else if (action === "cursorUp") root.choose(root.cursor - 1, false)
         else if (action === "cursorFirst") root.choose(0, false)
@@ -269,11 +287,12 @@ FocusScope {
         else if (action === "toggleSelect") root.choose(root.cursor, true)
         else if (action === "extendDown" || action === "extendUp") root.extendSelection(action === "extendDown" ? 1 : -1)
         else if (action === "selectAll") root.selectAll()
+        else if (action === "trashArm") root.armDelete()
         else if (action === "deletePermanently" || action === "trash") root.prepare(false)
         else if (action === "focusNext") root.focusRailRequested()
         else if (action === "settings" || action === "keymapSheet" || action === "quit") root.actionRequested(action)
-        else if (event.key === Qt.Key_F5) root.refresh()
-        else if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers & Qt.ShiftModifier)) root.contextRequested(root.width / 2, Theme.chromeHeight, root.selectedCount > 0)
+        else if (event.key === Qt.Key_F5 && unmodified) root.refresh()
+        else if (action === "menu") root.contextRequested(root.width / 2, Theme.chromeHeight, root.selectedCount > 0)
         // Trash owns this focus context; ordinary filesystem actions must never reach the covered pane.
         event.accepted = true
     }

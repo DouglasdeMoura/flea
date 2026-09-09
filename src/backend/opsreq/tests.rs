@@ -24,6 +24,44 @@ fn a_successful_item_line_carries_no_err_field_at_all() {
 }
 
 #[test]
+fn menu_workers_refuse_replacement_sources_before_helpers_or_mutations() {
+    use crate::backend::menu_actions::{validate_sources, Selected};
+    let d = TestDir::new("menu-workers-identity");
+    let path = d.file("source.txt", "original");
+    let outside_selection = d.file("other.txt", "other");
+    let captured = vec![Selected::inspect(path.to_str().unwrap()).unwrap()];
+    assert!(validate_sources(Some(&captured), std::slice::from_ref(&outside_selection)).is_err());
+    assert!(d.path().is_absolute() && d.path().join(".flea-test-sandbox").is_file());
+    assert!(path.is_absolute() && path.starts_with(d.path()));
+    std::fs::rename(&path, d.join("original-moved")).unwrap();
+    d.file("source.txt", "replacement");
+    let (tx, rx) = channel();
+    run_duplicate_checked(path.to_string_lossy().into(), tx, Some(captured.clone()));
+    let OpMsg::Duplicated { ok, err, entry, .. } = rx.recv().unwrap() else { panic!("duplicate terminal result"); };
+    assert!(!ok && err.contains("changed") && entry.steps.is_empty());
+    assert!(path.is_absolute() && path.starts_with(d.path()));
+    let (tx, rx) = channel();
+    run_trash(vec![path.to_string_lossy().into()], tx, Some(captured.clone()));
+    let results: Vec<_> = rx.iter().collect();
+    assert!(results.iter().any(|message| matches!(message, OpMsg::Meta { line } if line.contains("changed"))));
+    assert!(results.iter().any(|message| matches!(message, OpMsg::Trashed { ok: 0, failed: 1, entry } if entry.steps.is_empty())));
+    let destination = d.join("output.zip");
+    assert!(destination.is_absolute() && destination.starts_with(d.path()));
+    let (tx, rx) = channel();
+    crate::backend::archivereq::run_archive(1, true, vec![path.to_string_lossy().into()], "zip".into(), PathBuf::new(),
+        destination.clone(), &crate::backend::archive::Formats::from_tools(false, false), tx, Some(captured.clone()));
+    let OpMsg::Meta { line } = rx.recv().unwrap() else { panic!("archive terminal result"); };
+    assert!(line.contains(r#""ok":false"#) && line.contains("changed"));
+    let (tx, rx) = channel();
+    crate::backend::archivereq::run_convert(2, path.clone(), destination.clone(), false, tx, Some(captured));
+    let OpMsg::Meta { line } = rx.recv().unwrap() else { panic!("convert terminal result"); };
+    assert!(line.contains(r#""ok":false"#) && line.contains("changed"));
+    assert!(!destination.exists());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "replacement");
+    assert_eq!(std::fs::read_to_string(outside_selection).unwrap(), "other");
+}
+
+#[test]
 fn a_failed_item_line_carries_its_reason_escaped() {
     let line = transferitem_line(12, 1, "say \"hi\".txt", false, "permission denied");
     assert!(line.contains(r#""ok":false"#));

@@ -100,6 +100,9 @@ case_pdffocus() {
         open_row manual.pdf
         key -M ctrl -k Tab -m ctrl >/dev/null
         [[ "$(ipc previewOpen)" == false ]] || fail "PDF Ctrl+Tab did not return to list"
+        [[ "$(ipc pdfState false)" == null ]] || fail "PDF List unexpectedly has an inline preview"
+        click_chrome columns
+        settle
         pdf_expect false '.pages == 3' "inline document loaded"
         key -M ctrl -k Tab -m ctrl >/dev/null
         pdf_controls false
@@ -144,6 +147,13 @@ case_pdffocus() {
         omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
         pdf_expect true '.page == 1' "$mode pointer Next"
         key -k Escape >/dev/null
+        if [[ "$mode" != columns ]]; then
+            [[ "$(ipc pdfState false)" == null ]] || fail "PDF $mode unexpectedly has an inline preview"
+            shot "pdf-listing-$mode-800x480"
+            printf 'PDF view=%s native_entry=ok pointer=ok no_inline=ok viewport=800x480\n' "$mode"
+            kill_flea
+            continue
+        fi
         pdf_expect false '.pages == 3' "$mode inline document"
         key -M ctrl -k Tab -m ctrl >/dev/null
         pdf_expect false '.focused' "$mode inline focus entry"

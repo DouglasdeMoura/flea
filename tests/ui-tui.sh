@@ -59,7 +59,8 @@ def child(case, binary):
     for name, directory in [("XDG_STATE_HOME", "state"), ("XDG_CONFIG_HOME", "config"),
                             ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")]:
         environment[name] = str(guard(case, case / directory))
-    with open("/dev/tty", "r+b", buffering=0) as terminal:
+    # A concrete PTY remains observable from SSH; reopening /dev/tty would select the observer's controlling terminal.
+    with open(os.ttyname(sys.stdout.fileno()), "r+b", buffering=0) as terminal:
         before = command(["stty", "-g"], stdin=terminal).decode().strip()
         process = subprocess.Popen([str(binary), "--tui", str(case / "listing")],
                                    stdin=terminal, stdout=terminal, stderr=terminal, env=environment)
@@ -140,6 +141,14 @@ class Native:
 
     def terminal_size(self):
         self.identity()
+        process = Path("/proc") / str(self.product_pid)
+        descriptors = {str(number): os.readlink(process / "fd" / str(number)) for number in range(3)}
+        # /proc/PID/stat: 2970648 (flea) R 2970620 2970620 2970620 34817 ...; tty_nr is field seven.
+        tty_number = int((process / "stat").read_text().rsplit(") ", 1)[1].split()[4])
+        diagnostics = {"product_pid": self.product_pid, "descriptors": descriptors, "controlling_tty": tty_number}
+        if diagnostics != getattr(self, "terminal_diagnostics", None):
+            self.log.write(("TUI_PTY " + json.dumps(diagnostics) + "\n").encode())
+            self.terminal_diagnostics = diagnostics
         descriptor = os.open(f"/proc/{self.product_pid}/fd/1", os.O_RDONLY | os.O_NOCTTY)
         try:
             return struct.unpack("HHHH", fcntl.ioctl(descriptor, termios.TIOCGWINSZ, bytes(8)))

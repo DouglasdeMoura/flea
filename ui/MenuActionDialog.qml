@@ -140,18 +140,17 @@ FocusScope {
         else if (action === "openWith") requested({c: "menuaction", op: "openWith", id: requestId, application: applications[cursor].id})
         else requested({c: "menuaction", op: "validate", id: requestId, action: action, dest: field.text})
     }
-    function focusItems(item, result) {
-        if (!item.visible || !item.enabled) return
-        if (item.activeFocusOnTab) result.push(item)
-        for (var i = 0; i < item.children.length; i++) focusItems(item.children[i], result)
-    }
+    // Each focusable child routes Tab here before Qt can move focus outside the card.
     function stepFocus(back) {
-        var items = []
-        focusItems(body, items)
+        var items = [field, appList, closeFocus, submitFocus].filter(function(item) {
+            return item.visible && item.enabled && item.activeFocusOnTab
+        })
         if (!items.length) return
         var current = -1
         for (var i = 0; i < items.length; i++) if (items[i].activeFocus) current = i
-        items[(current + (back ? -1 : 1) + items.length) % items.length].forceActiveFocus()
+        var next = current < 0 ? (back ? items.length - 1 : 0)
+            : (current + (back ? -1 : 1) + items.length) % items.length
+        items[next].forceActiveFocus()
     }
     Keys.onTabPressed: function(event) { root.stepFocus(false); event.accepted = true }
     Keys.onBacktabPressed: function(event) { root.stepFocus(true); event.accepted = true }
@@ -229,6 +228,8 @@ FocusScope {
                         clip: true
                         selectByMouse: true
                         Accessible.name: root.action === "newFile" ? "Filename" : "Destination folder"
+                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.submit()
                         Keys.onEnterPressed: root.submit()
                     }
@@ -239,6 +240,8 @@ FocusScope {
                     width: parent.width
                     height: appsColumn.implicitHeight
                     activeFocusOnTab: root.applications.length > 0 && !root.busy
+                    Keys.onTabPressed: root.stepFocus(false)
+                    Keys.onBacktabPressed: root.stepFocus(true)
                     Keys.onPressed: function(event) {
                         var action = Keymap.lookup(event.key, event.text, event.modifiers, "menu")
                         if (action === "cursorDown") root.cursor = Math.min(root.applications.length - 1, root.cursor + 1)
@@ -300,6 +303,8 @@ FocusScope {
                         width: closeButton.implicitWidth
                         height: closeButton.implicitHeight
                         activeFocusOnTab: !(root.busy && root.committing && root.action === "newFile")
+                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.close()
                         Keys.onSpacePressed: root.close()
                         Flea.DialogButton { id: closeButton; label: root.action === "properties" ? "Close" : "Cancel"; primary: parent.activeFocus; available: parent.activeFocusOnTab; onActivated: root.close() }
@@ -310,6 +315,8 @@ FocusScope {
                         height: submitButton.implicitHeight
                         visible: root.action !== "properties" && root.action !== "deletePermanently"
                         activeFocusOnTab: root.canSubmit
+                        Keys.onTabPressed: root.stepFocus(false)
+                        Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.submit()
                         Keys.onSpacePressed: root.submit()
                         Flea.DialogButton { id: submitButton; label: root.action === "newFile" ? "Create" : root.action === "openWith" ? "Open" : root.action === "moveTo" ? "Move" : "Copy"; primary: parent.activeFocus; available: root.canSubmit; onActivated: root.submit() }

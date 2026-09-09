@@ -884,11 +884,11 @@ wait_thumb_ready() {
     fail "row 0 never drew a ready thumbnail: icon=$icon status=$status"
 }
 
-# Fails closed: the old image goes first, so a capture that fails cannot leave a stale one to score.
+# A fresh run owns its evidence directory; never replace an earlier screenshot and mistake it for new proof.
 shot() {
     local name="$1" png="$evidence_dir/$1.png"
     mkdir -p "$evidence_dir"
-    rm -f "$png"
+    [[ ! -e "$png" && ! -L "$png" ]] || fail "shot: refusing existing evidence $png"
     omarchy-drive shot "$png" flea >/dev/null || fail "shot: omarchy-drive shot failed for $name"
     [[ -s "$png" ]] || fail "shot: $png is missing or empty after a capture that reported success"
     printf 'SHOT %s\n' "$png"
@@ -7265,6 +7265,8 @@ case_previewviews() {
 . "$repo/tests/ui-trash.sh"
 . "$repo/tests/ui-menus.sh"
 . "$repo/tests/ui-settings-layout.sh"
+. "$repo/tests/ui-card-layout.sh"
+. "$repo/tests/ui-preview-visibility.sh"
 
 declare -a wanted=("$@")
 [[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor scroll terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview pdffocus network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings clickthrough wheelunder overlays views formats previewviews hangshare)

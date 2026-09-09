@@ -242,6 +242,17 @@ trash_empty_strip() {
     trash_wait '.confirmation.opened and (.confirmation.destructiveFocus == false)'
 }
 
+trash_empty_confirmed() {
+    local count="$1"
+    trash_empty_strip
+    key l >/dev/null
+    trash_wait ".confirmation.destructiveFocus and .confirmation.all and .confirmation.count == $count"
+    trash_guard_store "$count"
+    key -k Return >/dev/null
+    trash_wait '.opened and .total == 0 and .count == 0 and (.busy == false)'
+    trash_guard_store 0
+}
+
 trash_move() {
     local name="$1" previous_count="$2" remaining="$3" row selected
     trash_guard "$payload/$name"
@@ -262,9 +273,45 @@ trash_move() {
 
 case_trashbasic() { case_trash basic; }
 case_trashcontrols() { case_trash controls; }
+case_trashkeys() { case_trash keys; }
+case_trashrestore() { case_trash restore; }
+case_trashstale() { case_trash stale; }
+case_trashfailure() { case_trash failure; }
+
+trash_key_alternatives() {
+    local preset="$1" binding bindings
+    key m >/dev/null
+    [[ "$(ipc contextMenuVisible)" == true ]] || fail "trash: $preset m did not open the selected menu"
+    menu_seek "Delete permanently"
+    trash_guard_store 1
+    key -k Return >/dev/null
+    trash_wait '.opened and .confirmation.opened and (.confirmation.all == false) and .confirmation.count == 1 and (.confirmation.destructiveFocus == false)' "$preset m then Enter opens selected confirmation"
+    key -k Escape >/dev/null
+    trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)'
+    case "$preset" in
+        default) bindings='dd' ;;
+        vim) bindings=D ;;
+        mac) bindings='dd ctrl-delete shift-delete' ;;
+        windows) bindings='dd ctrl-d shift-delete' ;;
+    esac
+    for binding in $bindings; do
+        trash_wait '.opened and .selectedCount == 1 and (.confirmation.opened == false) and (.busy == false)'
+        trash_guard_store 1
+        case "$binding" in
+            dd|D) key "$binding" >/dev/null ;;
+            ctrl-delete) key -M ctrl -k Delete -m ctrl >/dev/null ;;
+            ctrl-d) key -M ctrl -k d -m ctrl >/dev/null ;;
+            shift-delete) key -M shift -k Delete -m shift >/dev/null ;;
+        esac
+        trash_wait '.opened and .confirmation.opened and (.confirmation.all == false) and .confirmation.count == 1 and (.confirmation.destructiveFocus == false)' "$preset $binding requires selected confirmation"
+        key -k Return >/dev/null
+        trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset $binding reflexive Return cancels"
+        trash_guard_store 1
+    done
+}
 
 trash_confirmation_controls() {
-    local preset move token
+    local mode="${1:-controls}" preset move token
     for preset in default vim mac windows; do
         kill_flea
         trash_guard "$XDG_STATE_HOME"
@@ -297,6 +344,8 @@ trash_confirmation_controls() {
         trash_wait '.selectedCount == 0 and (.rows[0].selected == false)' "$preset Ctrl-click deselects"
         hotkey ctrl+a >/dev/null
         trash_wait '.selectedCount == 1 and .rows[0].selected' "$preset Ctrl+A selects snapshot"
+        if [[ "$mode" != controls ]]; then trash_key_alternatives "$preset"; fi
+        if [[ "$mode" == keys ]]; then continue; fi
         for move in Menu F10; do
             if [[ "$move" == F10 ]]; then key -M shift -k F10 -m shift >/dev/null
             else key -k Menu >/dev/null; fi
@@ -344,6 +393,13 @@ trash_confirmation_controls() {
         trash_shot "trash-confirm-$preset"
         trash_click trashControlCentre cancel
         trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset pointer Cancel"
+        for move in left right; do
+            trash_empty_strip
+            key l >/dev/null
+            trash_click trashControlCentre back "$move"
+            trash_wait '.opened and (.confirmation.opened == false) and .total == 1 and (.busy == false)' "$preset outside $move click cancels without activating Back"
+            [[ "$(ipc contextMenuVisible)" == false ]] || fail "trash: $preset outside $move click reached underlying menu"
+        done
         trash_guard_store 1
     done
     kill_flea
@@ -355,8 +411,192 @@ trash_confirmation_controls() {
     trash_wait '.opened and .total == 1 and (.busy == false)'
 }
 
+trash_failure_status() {
+    local headline="$1" detail="$2" end=$((SECONDS + 20)) primary observed
+    while (( SECONDS < end )); do
+        primary=$(ipc statusPrimary)
+        observed=$(ipc statusDetail)
+        if [[ "$(ipc statusError)" == true && "$primary" == "$headline" && "$observed" == *"$detail"* ]]; then
+            trash_checks=$((trash_checks + 1))
+            printf 'TRASH_PASS persistent failure expected=%q detail=%q observed=%q\n' "$headline" "$detail" "$observed"
+            return
+        fi
+        sleep 0.05
+    done
+    fail "trash: expected persistent failure $headline with $detail, got $primary: $observed"
+}
+
+trash_restore_failures() {
+    local uri backing row original="$trash_box/missing-parent/leaf.txt"
+    trash_guard "$payload/beta.txt"
+    (set -o noclobber; printf 'existing destination\n' > "$payload/beta.txt") \
+        || fail "trash: refusing to overwrite the restore collision fixture"
+    trash_click trashRowCentre 0 right
+    row=$(menu_row_index Restore) || fail "trash: missing selected Restore row"
+    trash_guard_store 1
+    trash_click contextMenuRowCentre "$row"
+    trash_failure_status 'Restored 0 of 1 · 1 failed' 'without overwriting'
+    trash_wait '.opened and .total == 1 and .selectedCount == 1 and (.busy == false)'
+    [[ "$(cat "$payload/beta.txt")" == 'existing destination' ]] || fail "trash: Restore overwrote an existing file"
+    uri=$(/usr/bin/gio trash --list | cut -f1)
+    backing=$(trash_backing "$uri") || fail "trash: failed restore has no backing"
+    trash_guard "$backing"
+    [[ "$(cat "$backing")" == beta ]] || fail "trash: collision changed the Trash survivor"
+    trash_shot trash-restore-collision
+    trash_guard "$trash_box/restore-blocker"
+    mv --no-clobber -- "$payload/beta.txt" "$trash_box/restore-blocker" || fail "trash: could not preserve restore blocker"
+    [[ ! -e "$payload/beta.txt" && "$(cat "$trash_box/restore-blocker")" == 'existing destination' ]] \
+        || fail "trash: restore blocker was not safely moved"
+    trash_rail right
+    row=$(menu_row_index 'Restore all') || fail "trash: missing Restore all row"
+    trash_guard_store 1
+    trash_click contextMenuRowCentre "$row"
+    trash_wait '.opened and .total == 0 and .count == 0 and (.busy == false)' 'explicit Restore all row restores survivor'
+    trash_guard_store 0
+    [[ "$(cat "$payload/beta.txt")" == beta ]] || fail "trash: Restore all lost the original content"
+    [[ "$(ipc statusError)" == true ]] || fail "trash: successful Restore all silently acknowledged the collision"
+    trash_click statusDismissCentre
+    [[ "$(ipc statusError)" == false ]] || fail "trash: restore collision acknowledgement failed"
+
+    trash_guard "$original"
+    mkdir "$trash_box/missing-parent" || fail "trash: missing-parent fixture creation failed"
+    printf 'missing parent survivor\n' > "$original"
+    trash_guard_store 0
+    /usr/bin/gio trash -- "$original" || fail "trash: owned missing-parent setup failed"
+    trash_wait '.opened and .total == 1 and (.busy == false)'
+    trash_guard "$trash_box/saved-parent"
+    mv --no-clobber -- "$trash_box/missing-parent" "$trash_box/saved-parent" \
+        || fail "trash: could not preserve original parent"
+    [[ ! -e "$trash_box/missing-parent" && -d "$trash_box/saved-parent" ]] || fail "trash: original parent was not moved"
+    trash_click trashRowCentre 0 right
+    menu_seek Restore
+    trash_guard_store 1
+    key -k Return >/dev/null
+    trash_failure_status 'Restored 0 of 1 · 1 failed' 'Could not open original location'
+    trash_wait '.opened and .total == 1 and .selectedCount == 1 and (.busy == false)'
+    [[ ! -e "$original" ]] || fail "trash: restore fabricated an unavailable parent"
+    trash_shot trash-restore-missing-parent
+    trash_guard "$trash_box/missing-parent"
+    mv --no-clobber -- "$trash_box/saved-parent" "$trash_box/missing-parent" \
+        || fail "trash: could not return original parent"
+    [[ ! -e "$trash_box/saved-parent" && -d "$trash_box/missing-parent" ]] || fail "trash: original parent was not returned"
+    trash_click trashRowCentre 0 right
+    menu_seek Restore
+    trash_guard_store 1
+    key -k Return >/dev/null
+    trash_wait '.opened and .total == 0 and .count == 0 and (.busy == false)'
+    trash_guard_store 0
+    [[ "$(cat "$original")" == 'missing parent survivor' ]] || fail "trash: retry after parent recovery lost content"
+    [[ "$(ipc statusError)" == true ]] || fail "trash: retry silently acknowledged missing-parent failure"
+    trash_click statusDismissCentre
+    [[ "$(ipc statusError)" == false ]] || fail "trash: missing-parent acknowledgement failed"
+    key -k Backspace >/dev/null
+    trash_wait '(.opened == false)'
+    wait_path "$payload"
+    wait_listing 2
+    trash_move beta.txt 0 1
+    trash_rail
+    trash_wait '.opened and .total == 1 and (.busy == false)'
+}
+
+trash_uri() {
+    local original="$1" listing uri path found=""
+    listing=$(/usr/bin/gio trash --list) || fail "trash: external identity listing failed"
+    # Sample list row: "trash:///a.txt<TAB>/owned/fixture/payload/a.txt".
+    while IFS=$'\t' read -r uri path; do
+        [[ "$path" == "$original" ]] || continue
+        [[ -z "$found" ]] || fail "trash: fixture original has ambiguous Trash identities"
+        found="$uri"
+    done <<< "$listing"
+    [[ "$found" == trash:///* ]] || fail "trash: no provider identity for $original"
+    printf '%s\n' "$found"
+}
+
+trash_stale_confirmations() {
+    local token uri backing identity replacement="$trash_box/replacement-beta" retired="$trash_box/retired-beta"
+    trash_empty_strip
+    trash_shot trash-empty-confirm-cancel
+    trash_guard_store 1
+    key -k Return >/dev/null
+    trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)'
+    trash_empty_strip
+    token=$(ipc trashState | jq -er '.confirmation.token')
+    key l >/dev/null
+    trash_wait '.confirmation.destructiveFocus'
+    trash_guard "$payload/arrival.txt"
+    (set -o noclobber; printf 'later arrival\n' > "$payload/arrival.txt") \
+        || fail "trash: refusing to replace the arrival fixture"
+    trash_guard_store 1
+    /usr/bin/gio trash -- "$payload/arrival.txt" || fail "trash: external owned arrival failed"
+    trash_wait ".confirmation.opened and .confirmation.count == 2 and .confirmation.token != $token and (.confirmation.destructiveFocus == false)" 'addition replaces stale all-items strip and resets Cancel focus'
+    trash_guard_store 2
+    trash_shot trash-confirm-added
+
+    token=$(ipc trashState | jq -er '.confirmation.token')
+    key l >/dev/null
+    trash_wait '.confirmation.destructiveFocus'
+    uri=$(trash_uri "$payload/arrival.txt")
+    trash_guard_store 2
+    trash_guard "$payload/arrival.txt"
+    /usr/bin/gio trash --restore -- "$uri" || fail "trash: external owned restore failed"
+    trash_wait ".confirmation.opened and .confirmation.count == 1 and .confirmation.token != $token and (.confirmation.destructiveFocus == false)" 'removal replaces stale all-items strip and resets Cancel focus'
+    trash_guard_store 1
+    [[ "$(cat "$payload/arrival.txt")" == 'later arrival' ]] || fail "trash: external restore changed contents"
+    trash_shot trash-confirm-removed
+
+    token=$(ipc trashState | jq -er '.confirmation.token')
+    identity=$(ipc trashState | jq -c '.rows[0].identity')
+    key l >/dev/null
+    trash_wait '.confirmation.destructiveFocus'
+    uri=$(trash_uri "$payload/beta.txt")
+    backing=$(trash_backing "$uri") || fail "trash: missing replacement fixture backing"
+    trash_guard "$backing"
+    trash_guard "$replacement"
+    trash_guard "$retired"
+    (set -o noclobber; printf 'replacement contents\n' > "$replacement") \
+        || fail "trash: refusing to reuse a replacement fixture"
+    trash_guard_store 1
+    ln -- "$backing" "$retired" || fail "trash: could not retain the replaced inode"
+    # An atomic same-name replacement retains the old inode through its owned hard link.
+    trash_guard "$backing"
+    mv -T -- "$replacement" "$backing" || fail "trash: owned replacement failed"
+    [[ "$(stat -c '%d:%i' "$backing")" != "$(stat -c '%d:%i' "$retired")" \
+        && "$(cat "$backing")" == 'replacement contents' && "$(cat "$retired")" == beta ]] \
+        || fail "trash: replacement did not preserve two distinct fixture identities"
+    trash_wait ".confirmation.opened and .confirmation.count == 1 and .confirmation.token != $token and (.confirmation.destructiveFocus == false)" 'replacement invalidates old identity and resets Cancel focus'
+    trash_guard_store 1
+    trash_shot trash-confirm-replaced
+    key -k Return >/dev/null
+    trash_wait "(.confirmation.opened == false) and .total == 1 and (.busy == false) and .rows[0].identity != $identity" 'fresh replacement remains after reflexive Cancel'
+    [[ "$(cat "$backing")" == 'replacement contents' ]] || fail "trash: stale strip deleted its replacement"
+
+    trash_click trashRowCentre 0 left
+    trash_wait '.opened and .selectedCount == 1 and (.busy == false)'
+    trash_guard_store 1
+    key -k Delete >/dev/null
+    trash_wait '.confirmation.opened and (.confirmation.all == false) and .confirmation.count == 1'
+    token=$(ipc trashState | jq -er '.confirmation.token')
+    key l >/dev/null
+    trash_wait '.confirmation.destructiveFocus'
+    trash_guard "$payload/arrival.txt"
+    trash_guard_store 1
+    /usr/bin/gio trash -- "$payload/arrival.txt" || fail "trash: selected-set arrival failed"
+    trash_wait ".confirmation.opened and (.confirmation.all == false) and .confirmation.count == 1 and .confirmation.token != $token and (.confirmation.destructiveFocus == false)" 'new arrival does not widen selected confirmation'
+    trash_guard_store 2
+    trash_shot trash-selected-arrival-excluded
+    trash_click trashControlCentre danger
+    trash_wait '.opened and .total == 1 and .count == 1 and (.busy == false) and (.rows[0].original | endswith("/arrival.txt"))' 'pointer confirmation deletes only reviewed selection'
+    trash_guard_store 1
+    uri=$(trash_uri "$payload/arrival.txt")
+    backing=$(trash_backing "$uri") || fail "trash: unrelated arrival lost backing"
+    trash_guard "$backing"
+    [[ "$(cat "$backing")" == 'later arrival' && "$(cat "$retired")" == beta ]] \
+        || fail "trash: selected deletion changed an unrelated fixture"
+    trash_empty_confirmed 1
+}
+
 case_trash() {
-    local trash_box payload token row uri backing root name trash_checks=0
+    local trash_box payload row uri backing root trash_checks=0
     local trash_case_label="${1:-full}"
     local trash_parent_bus_id="" trash_private_bus_id="" trash_bus_address="" trash_bus_pid="" trash_provider_pid=""
     [[ "$(realpath -e "$(command -v gio)")" == /usr/bin/gio ]] || fail "trash: product gio resolves to a stub"
@@ -417,31 +657,17 @@ case_trash() {
     [[ "$(cat "$payload/alpha.txt")" == alpha ]] || fail "trash: native Restore lost file contents"
     trash_guard_store 1
     if [[ "$trash_case_label" == basic ]]; then trash_cleanup 0; fi
-    if [[ "$trash_case_label" == full || "$trash_case_label" == controls ]]; then
-        trash_confirmation_controls
-        if [[ "$trash_case_label" == controls ]]; then trash_cleanup 0; fi
+    if [[ "$trash_case_label" == full || "$trash_case_label" == controls || "$trash_case_label" == keys ]]; then
+        trash_confirmation_controls "$trash_case_label"
+        if [[ "$trash_case_label" != full ]]; then trash_cleanup 0; fi
     fi
-
-    trash_empty_strip
-    trash_shot trash-empty-confirm-cancel
-    trash_guard_store 1
-    key -k Return >/dev/null
-    trash_wait '(.confirmation.opened == false) and .total == 1 and (.busy == false)'
-    trash_guard_store 1
-    trash_empty_strip
-    token=$(ipc trashState | jq -er '.confirmation.token')
-    trash_guard "$payload/arrival.txt"
-    printf 'later arrival\n' > "$payload/arrival.txt"
-    trash_private
-    /usr/bin/gio trash -- "$payload/arrival.txt" || fail "trash: external owned arrival failed"
-    trash_wait ".confirmation.opened and .confirmation.count == 2 and .confirmation.token != $token and (.confirmation.destructiveFocus == false)"
-    trash_guard_store 2
-    trash_shot trash-confirm-refreshed
-    key l >/dev/null
-    trash_guard_store 2
-    key -k Return >/dev/null
-    trash_wait '.total == 0 and (.busy == false)'
-    trash_guard_store 0
+    if [[ "$trash_case_label" == full || "$trash_case_label" == restore ]]; then
+        trash_restore_failures
+        if [[ "$trash_case_label" == restore ]]; then trash_cleanup 0; fi
+    fi
+    if [[ "$trash_case_label" == failure ]]; then trash_empty_confirmed 1
+    else trash_stale_confirmations; fi
+    if [[ "$trash_case_label" == stale ]]; then trash_cleanup 0; fi
 
     key -k Backspace >/dev/null
     trash_guard "$payload/good.txt"

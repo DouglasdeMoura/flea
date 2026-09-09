@@ -197,6 +197,9 @@ FocusScope {
 
     // Rename lives in ui/js/Ops.js with the other write operations; ui/List.qml's editor commits through this.
     function commitRename(newName) { Ops.commitRename(root, newName) }
+    property int renameMenuId: 0
+    property int convertMenuId: 0
+    onRenamingIndexChanged: if (root.renamingIndex < 0) root.renameMenuId = 0
 
     // A set of row indices over the current listing, mutated in place; selectionVersion tells a reactive binding (List.qml's delegate, StatusBar's count) to re-read it. Task 8 declined ScriptModel plus ItemSelectionModel on measured memory, see AGENTS.md "The list model".
     property var selection: Selection.create()
@@ -261,7 +264,7 @@ FocusScope {
     function thumbFor(index) { return list.thumbFor(index) }
 
     // Lifted to Focus.act, see ui/js/Focus.js, which routes "settings" here from the list and the rail alike.
-    function act(action) {
+    function act(action, menuId, paths) {
         if (trashHost.confirming) return
         if (action === "openTrash" || action === "emptyTrash" || action === "restoreAll") { trashHost.action(action); return }
         if (action === "settings") { root.settingsPanel.open(root); return }
@@ -270,7 +273,13 @@ FocusScope {
             menuActions.open(action)
             return
         }
-        Focus.act(action, root)
+        Focus.act(action, root, menuId, paths)
+    }
+    function performMenu(action, menuId, paths) {
+        if (action.indexOf("taildrop:") === 0) { root.sendTaildrop(action.substring("taildrop:".length)); return }
+        if (action === "copypath") { wire.opener.copyText(paths && paths.length ? paths[0] : root.join(root.path, root.cursorRow.n)); return }
+        if (action.indexOf("col:") === 0) { ViewState.toggleColumn(action.substring("col:".length)); return }
+        root.act(action, menuId, paths)
     }
     function permissionSelection() {
         var indices = Ops.targetIndices(root)
@@ -339,8 +348,8 @@ FocusScope {
     Rectangle {
         id: panePath
         anchors { left: railLoader.right; right: parent.right; top: parent.top }
-        height: root.dualMode ? Theme.chromeHeight : 0
-        visible: root.dualMode
+        height: root.dualMode && !trashHost.opened ? Theme.chromeHeight : 0
+        visible: height > 0
         color: root.paneFocused ? Theme.color.surface : Theme.color.background
         Text {
             anchors.fill: parent
@@ -431,7 +440,6 @@ FocusScope {
         visible: !trashHost.opened
         focus: visible && root.viewMode === "grid"
         anchors { top: filterStrip.bottom; left: railLoader.right; right: parent.right; bottom: parent.bottom }
-        anchors.rightMargin: selectionPreview.width
         Component.onCompleted: setSource("GridArea.qml", { pane: root, menu: menu })
         onLoaded: { root.gridBuilt = true; item.visible = Qt.binding(function () { return root.viewMode === "grid" }) }
     }
@@ -449,42 +457,23 @@ FocusScope {
         function onDirSizesCancelled() { root.dirSizeState = DirSizes.cancelled(root.dirSizeState) }
     }
 
-    Loader {
-        id: selectionPreview
-        active: !root.dualMode && !trashHost.opened && ViewState.previewColumn && root.viewMode !== "columns"
-        visible: active
-        anchors.top: filterStrip.bottom
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        width: active ? Math.floor((root.width - root.sidebarWidth) / 3) : 0
-        sourceComponent: Flea.SelectionPreview {
-            pane: root
-            onThumbsApplied: function (work) { root.thumbState = Thumbs.applied(root.thumbState, work) }
-        }
-    }
-    readonly property int previewIndex: root.viewMode === "columns"
-        ? (columnsLoader.item ? columnsLoader.item.previewIndex : -1)
-        : (selectionPreview.item ? selectionPreview.item.loadedIndex : -1)
-    readonly property var previewColumnItem: root.viewMode === "columns"
-        ? (columnsLoader.item ? columnsLoader.item.previewColumn : null) : selectionPreview.item
+    readonly property int previewIndex: root.viewMode === "columns" && columnsLoader.item ? columnsLoader.item.previewIndex : -1
+    readonly property var previewColumnItem: root.viewMode === "columns" && columnsLoader.item ? columnsLoader.item.previewColumn : null
     function loadSelectionPreview() {
         if (!ViewState.previewColumn || root.dualMode) return
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()
-        else if (selectionPreview.item) selectionPreview.item.loadSelection()
     }
     function togglePreviewColumn() { ViewState.changeLeaf("preview", { column: !ViewState.previewColumn }) }
     function chooseView(mode) { ViewState.changeKey("view", mode) }
     function focusPreviewColumn() {
         if (!ViewState.previewColumn || root.dualMode) return
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.focusPreview()
-        else if (selectionPreview.item) selectionPreview.item.forceActiveFocus()
     }
     property bool dualMode: false
     signal switchPane()
 
     Flea.List {
         id: list
-        anchors.rightMargin: selectionPreview.width
         visible: !trashHost.opened && root.viewMode === "list"
         focus: visible
         anchors.top: filterStrip.bottom
@@ -543,10 +532,7 @@ FocusScope {
         // The separator is part of the test, or /home/gm/DropboxBackup would count as inside Dropbox.
         rowInDropbox: root.path === root.home + "/Dropbox" || root.path.indexOf(root.home + "/Dropbox/") === 0
         onChosen: function (action) {
-            if (action.indexOf("taildrop:") === 0) { root.sendTaildrop(action.substring("taildrop:".length)); return }
-            if (action === "copypath") { wire.opener.copyText(root.path + "/" + root.cursorRow.n); return }
-            if (action.indexOf("col:") === 0) { ViewState.toggleColumn(action.substring("col:".length)); return }
-            root.act(action)
+            menuActions.activate(action, menu.hasRow && !menu.forHeader)
         }
     }
 
@@ -577,8 +563,8 @@ FocusScope {
         visible: !trashHost.opened && root.listingState === "loading"
     }
 
-    function openConvert() { Ops.openConvert(root) }
-    function moveToDropbox() { Ops.moveToDropbox(root, root.sidebar && root.sidebar.dropboxReady ? root.home + "/Dropbox" : "") }
+    function openConvert(menuId) { Ops.openConvert(root, menuId) }
+    function moveToDropbox(menuId) { Ops.moveToDropbox(root, root.sidebar && root.sidebar.dropboxReady ? root.home + "/Dropbox" : "", menuId) }
     // The three foreign programs live in ui/PaneWire.qml with the backend's replies; these only name the row.
     function copyShareLink() { wire.shareLink.copy(root.join(root.path, root.cursorRow ? root.cursorRow.n : "")) }
     function sendTaildrop(peerId) { Ops.sendTaildrop(root, wire.taildrop, peerId) }

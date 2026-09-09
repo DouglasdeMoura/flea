@@ -4,7 +4,7 @@ use super::menu_registry::{self, Registry};
 use super::trashmanifest::Cancellation;
 use crate::json::{escape, field_str, field_usize};
 use std::fs::{Metadata, OpenOptions};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Sender, SyncSender, TrySendError};
@@ -151,6 +151,15 @@ impl Selected {
         Ok(meta)
     }
 }
+
+pub(crate) fn validate_sources(items: Option<&[Selected]>, paths: &[PathBuf]) -> Result<(), String> {
+    let Some(items) = items else { return Ok(()); };
+    let captured: HashSet<_> = items.iter().map(|item| item.path.as_path()).collect();
+    let requested: HashSet<_> = paths.iter().map(|path| path.as_path()).collect();
+    if captured != requested { return Err("The operation does not match the captured menu selection.".into()); }
+    for item in items { item.current().map_err(|error| format!("{}: {}", item.path.display(), error))?; }
+    Ok(())
+}
 impl Snapshot {
     // Sample input: {"c":"menuaction","op":"snapshot","id":3}; paths are resolved from the active listing by run.rs.
     fn handle_request(&mut self, line: &str, paths: Vec<String>, registry: &Registry, cancel: &Cancellation) -> String {
@@ -216,10 +225,12 @@ impl Snapshot {
             self.deletion = Some(Arc::new(review));
             return Ok(reply);
         }
-        if op == "validate" {
-            let paths: Vec<String> = self.items.iter().map(|i| format!(r#""{}""#, escape(&i.path.to_string_lossy()))).collect();
+        if op == "validate" || op == "activate" {
+            let action = field_str(line, "action").unwrap_or_default();
+            let needs_paths = op == "validate" || matches!(action.as_str(), "copy" | "cut" | "copypath") || action.starts_with("compress:");
+            let paths: Vec<String> = if needs_paths { self.items.iter().map(|i| format!(r#""{}""#, escape(&i.path.to_string_lossy()))).collect() } else { Vec::new() };
             return Ok(format!(r#""action":"{}","paths":[{}],"dest":"{}""#,
-                escape(&field_str(line, "action").unwrap_or_default()), paths.join(","),
+                escape(&action), paths.join(","),
                 escape(&field_str(line, "dest").unwrap_or_default())));
         }
         if self.items.len() != 1 { return Err("This action requires one selected item.".into()); }

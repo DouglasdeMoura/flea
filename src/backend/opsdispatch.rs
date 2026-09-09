@@ -1,7 +1,7 @@
 // Dispatch for the five write operations: one runs at a time, because the status bar has one sticky slot for it.
 use crate::backend::ops;
 use crate::backend::opsreq::{
-    duplicated_line, made_line, op_err, renamed_line, run_duplicate, run_transfer_checked, run_trash, trashed_line,
+    duplicated_line, made_line, op_err, renamed_line, run_duplicate_checked, run_transfer_checked, run_trash, trashed_line,
     transferdone_line, transferitem_line, transferprogress_line, transferstarted_line, undone_line, usable_dest,
     OpMsg,
 };
@@ -133,25 +133,39 @@ pub(crate) fn cancel_transfer(ops: &Ops, id: usize) {
     }
 }
 
-pub(crate) fn start_trash(out: &mut impl Write, ops: &mut Ops, paths: Vec<String>) {
+pub(crate) fn menu_sources(ops: &Ops, id: usize) -> Result<Option<Vec<super::menu_actions::Selected>>, String> {
+    if id == 0 { return Ok(None); }
+    ops.menuactions.as_ref().ok_or_else(|| "Menu selection expired; reopen the menu.".to_string())
+        .and_then(|menu| menu.selection(id)).map(Some)
+}
+
+pub(crate) fn start_trash(out: &mut impl Write, ops: &mut Ops, paths: Vec<String>, menu_id: usize) {
     if ops.running.is_some() {
         busy(out, "trash");
         return;
     }
+    let selection = match menu_sources(ops, menu_id) {
+        Ok(selection) => selection,
+        Err(message) => { writeln!(out, "{}", error_line(&op_err("trash", "", &message))).ok(); out.flush().ok(); return; }
+    };
     ops.claim();
     let tx = ops.tx.clone();
-    thread::spawn(move || run_trash(paths, tx));
+    thread::spawn(move || run_trash(paths, tx, selection));
 }
 
-pub(crate) fn start_duplicate(out: &mut impl Write, ops: &mut Ops, path: &str) {
+pub(crate) fn start_duplicate(out: &mut impl Write, ops: &mut Ops, path: &str, menu_id: usize) {
     if ops.running.is_some() {
         busy(out, "duplicate");
         return;
     }
+    let selection = match menu_sources(ops, menu_id) {
+        Ok(selection) => selection,
+        Err(message) => { writeln!(out, "{}", error_line(&op_err("duplicate", path, &message))).ok(); out.flush().ok(); return; }
+    };
     ops.claim();
     let tx = ops.tx.clone();
     let owned = path.to_string();
-    thread::spawn(move || run_duplicate(owned, tx));
+    thread::spawn(move || run_duplicate_checked(owned, tx, selection));
 }
 
 // Rename answers on the calling thread; rclone directory compatibility may copy before removing its source.
@@ -466,7 +480,7 @@ mod tests {
         let mut o = ops();
         o.claim();
         let mut buf = out();
-        start_trash(&mut buf, &mut o, vec![d.file("a.txt", "a").to_string_lossy().to_string()]);
+        start_trash(&mut buf, &mut o, vec![d.file("a.txt", "a").to_string_lossy().to_string()], 0);
         assert!(text(&buf).contains("an operation is already running"));
         assert!(d.join("a.txt").exists(), "the refused operation touched nothing");
     }

@@ -13,6 +13,8 @@ use std::io::Write;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread;
+use super::menu_actions::{validate_sources, Selected};
+use super::opsdispatch::menu_sources;
 
 
 pub fn archivestarted_line(id: usize) -> String {
@@ -43,9 +45,12 @@ pub fn formats_line(formats: &Formats, can_convert: bool) -> String {
         names.join(","), can_convert, formats.offers("tar"), formats.offers("7z"))
 }
 
-pub fn run_archive(id: usize, compressing: bool, paths: Vec<String>, format: String,
-                   archive: PathBuf, dest: PathBuf, formats: &Formats, tx: Sender<OpMsg>) {
-    let result = if compressing {
+pub(crate) fn run_archive(id: usize, compressing: bool, paths: Vec<String>, format: String,
+                   archive: PathBuf, dest: PathBuf, formats: &Formats, tx: Sender<OpMsg>, selection: Option<Vec<Selected>>) {
+    let sources: Vec<PathBuf> = if compressing { paths.iter().map(PathBuf::from).collect() } else { vec![archive.clone()] };
+    let result = if let Err(error) = validate_sources(selection.as_deref(), &sources) {
+        Err(op_err("archive", "", &error))
+    } else if compressing {
         // A compress has nothing to verify against: it writes the archive rather than reading one.
         match split_paths(&paths) {
             Some((parent, names)) => compress(formats, &parent, &names, &format, &dest).map(|()| true),
@@ -61,8 +66,11 @@ pub fn run_archive(id: usize, compressing: bool, paths: Vec<String>, format: Str
     let _ = tx.send(OpMsg::Meta { line });
 }
 
-pub fn run_convert(id: usize, input: PathBuf, dest: PathBuf, strip: bool, tx: Sender<OpMsg>) {
-    let line = match convert_one(&input, &dest, strip) {
+pub(crate) fn run_convert(id: usize, input: PathBuf, dest: PathBuf, strip: bool, tx: Sender<OpMsg>, selection: Option<Vec<Selected>>) {
+    let result = validate_sources(selection.as_deref(), std::slice::from_ref(&input))
+        .map_err(|error| op_err("convert", &input.to_string_lossy(), &error))
+        .and_then(|()| convert_one(&input, &dest, strip));
+    let line = match result {
         Ok(()) => convertdone_line(id, true, &dest.to_string_lossy(), ""),
         Err(e) => convertdone_line(id, false, "", &e.msg),
     };
@@ -79,6 +87,7 @@ pub fn start_archive(
     format: String,
     archive: PathBuf,
     dest: PathBuf,
+    menu_id: usize,
 ) {
     // An op that names neither would otherwise fall through to extract, so it is refused by name.
     if op != "compress" && op != "extract" {
@@ -86,28 +95,36 @@ pub fn start_archive(
         out.flush().ok();
         return;
     }
+    let selection = match menu_sources(ops, menu_id) {
+        Ok(selection) => selection,
+        Err(message) => { writeln!(out, "{}", error_line(&op_err("archive", "", &message))).ok(); out.flush().ok(); return; }
+    };
     let compressing = op == "compress";
     let id = ops.claim_id();
     writeln!(out, "{}", archivestarted_line(id)).ok();
     out.flush().ok();
     let tx = ops.tx.clone();
     thread::spawn(move || {
-        run_archive(id, compressing, paths, format, archive, dest, &formats, tx)
+        run_archive(id, compressing, paths, format, archive, dest, &formats, tx, selection)
     });
 }
 
-pub fn start_convert(out: &mut impl Write, ops: &mut Ops, input: PathBuf, dest: PathBuf, strip: bool) {
+pub fn start_convert(out: &mut impl Write, ops: &mut Ops, input: PathBuf, dest: PathBuf, strip: bool, menu_id: usize) {
     if !convert::available() {
         let e = op_err("convert", "", "ImageMagick is not installed on this box");
         writeln!(out, "{}", error_line(&e)).ok();
         out.flush().ok();
         return;
     }
+    let selection = match menu_sources(ops, menu_id) {
+        Ok(selection) => selection,
+        Err(message) => { writeln!(out, "{}", error_line(&op_err("convert", "", &message))).ok(); out.flush().ok(); return; }
+    };
     let id = ops.claim_id();
     writeln!(out, "{}", convertstarted_line(id)).ok();
     out.flush().ok();
     let tx = ops.tx.clone();
-    thread::spawn(move || run_convert(id, input, dest, strip, tx));
+    thread::spawn(move || run_convert(id, input, dest, strip, tx, selection));
 }
 
 #[cfg(test)]

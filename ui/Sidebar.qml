@@ -379,7 +379,7 @@ Item {
                 id: trashRepeater
                 model: root.trashEntries
                 delegate: SidebarRow {
-                    cursor: index + root.userFavouriteEntries.length + root.homeEntries.length === root.cursorIndex
+                    cursor: root.trashActive || (root.focused && index + root.userFavouriteEntries.length + root.homeEntries.length === root.cursorIndex)
                     focused: root.focused || root.trashActive
                     onActivated: function (idx) { root.activate(idx + root.userFavouriteEntries.length + root.homeEntries.length) }
                     onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.userFavouriteEntries.length + root.homeEntries.length, pos) }

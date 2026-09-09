@@ -348,11 +348,13 @@ Item {
             if (!pointer.hovered) return
             if (!pointer.armed) {
                 pointer.armed = true
-                pointer.restingAt = pointer.point.position
+                pointer.restingAt = pointer.point.scenePosition
                 return
             }
-            if (pointer.point.position.x !== pointer.restingAt.x || pointer.point.position.y !== pointer.restingAt.y)
+            // Scrolling moves the row beneath a resting pointer; only scene-space motion selects it.
+            if (pointer.point.scenePosition.x !== pointer.restingAt.x || pointer.point.scenePosition.y !== pointer.restingAt.y)
                 root.pointerMoved()
+            pointer.restingAt = pointer.point.scenePosition
         }
         cursorShape: Qt.PointingHandCursor
     }

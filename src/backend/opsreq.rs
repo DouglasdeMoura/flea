@@ -231,9 +231,16 @@ fn one_item(
     outcome
 }
 
-pub fn run_trash(paths: Vec<String>, tx: Sender<OpMsg>) {
+pub(crate) fn run_trash(paths: Vec<String>, tx: Sender<OpMsg>, selection: Option<Vec<super::menu_actions::Selected>>) {
     let owned: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    let (entries, failed) = trash::trash(&owned);
+    let (entries, failed) = match trash::trash_checked(&owned, selection.as_deref()) {
+        Ok(result) => result,
+        Err(error) => {
+            let line = super::proto::error_line(&op_err("trash", "", &error));
+            let _ = tx.send(OpMsg::Meta { line });
+            (Vec::new(), owned.len())
+        }
+    };
     let ok = entries.len();
     let steps = entries.into_iter().map(Step::Trashed).collect();
     let entry = Entry { op: "trash".to_string(), steps };
@@ -241,7 +248,14 @@ pub fn run_trash(paths: Vec<String>, tx: Sender<OpMsg>) {
 }
 
 pub fn run_duplicate(path: String, tx: Sender<OpMsg>) {
-    let (outcome, steps) = ops::duplicate(Path::new(&path));
+    run_duplicate_checked(path, tx, None)
+}
+
+pub(crate) fn run_duplicate_checked(path: String, tx: Sender<OpMsg>, selection: Option<Vec<super::menu_actions::Selected>>) {
+    let (outcome, steps) = match super::menu_actions::validate_sources(selection.as_deref(), &[PathBuf::from(&path)]) {
+        Ok(()) => ops::duplicate(Path::new(&path)),
+        Err(error) => (Err(op_err("duplicate", &path, &error)), Vec::new()),
+    };
     // Carried on a failure too: the steps then name the partial copy the failure left behind.
     let entry = Entry { op: "duplicate".to_string(), steps };
     let msg = match outcome {

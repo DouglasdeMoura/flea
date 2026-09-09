@@ -18,9 +18,9 @@ pub enum Request {
     // The five write operations and their cancel, per the operations design's own wire.
     Transfer { op: String, paths: Vec<String>, rows: Vec<usize>, dest: String, menu_id: usize },
     TransferCancel { id: usize },
-    Trash { paths: Vec<String>, rows: Vec<usize> },
+    Trash { paths: Vec<String>, rows: Vec<usize>, menu_id: usize },
     Rename { path: String, to: String, menu_id: usize },
-    Duplicate { path: String },
+    Duplicate { path: String, menu_id: usize },
     // One new empty directory inside parent path; an empty name asks for the first free "New Folder".
     MkDir { path: String, name: String },
     NewFile { path: String, name: String, id: usize },
@@ -38,8 +38,8 @@ pub enum Request {
     // A read-only look at a directory that is not the current listing; the columns view's ancestors.
     Peek { path: String, first: usize, hidden: bool, focus: String },
     // op is "compress" or "extract"; a compress names paths and a format, an extract names one path.
-    Archive { op: String, paths: Vec<String>, path: String, dest: String, format: String },
-    Convert { path: String, dest: String, strip: bool },
+    Archive { op: String, paths: Vec<String>, path: String, dest: String, format: String, menu_id: usize },
+    Convert { path: String, dest: String, strip: bool, menu_id: usize },
     // Which archive formats this box actually offers, and whether a converter is installed at all.
     Formats,
     Permissions { line: String },
@@ -93,13 +93,14 @@ pub fn parse_request(line: &str) -> Request {
         Some("trash") => Request::Trash {
             paths: field_str_array(line, "paths"),
             rows: field_usize_array(line, "rows"),
+            menu_id: field_usize(line, "menuId").unwrap_or(0),
         },
         Some("rename") => Request::Rename {
             path: field_str(line, "path").unwrap_or_default(),
             to: field_str(line, "to").unwrap_or_default(),
             menu_id: field_usize(line, "menuId").unwrap_or(0),
         },
-        Some("duplicate") => Request::Duplicate { path: field_str(line, "path").unwrap_or_default() },
+        Some("duplicate") => Request::Duplicate { path: field_str(line, "path").unwrap_or_default(), menu_id: field_usize(line, "menuId").unwrap_or(0) },
         Some("mkdir") => Request::MkDir {
             path: field_str(line, "path").unwrap_or_default(),
             name: field_str(line, "name").unwrap_or_default(),
@@ -119,6 +120,7 @@ pub fn parse_request(line: &str) -> Request {
         },
         Some("fsinfo") => Request::FsInfo,
         Some("archive") => Request::Archive {
+            menu_id: field_usize(line, "menuId").unwrap_or(0),
             // Anything that is not "compress" is an extract, so a malformed op never writes an archive.
             op: field_str(line, "op").unwrap_or_default(),
             paths: field_str_array(line, "paths"),
@@ -127,6 +129,7 @@ pub fn parse_request(line: &str) -> Request {
             format: field_str(line, "format").unwrap_or_default(),
         },
         Some("convert") => Request::Convert {
+            menu_id: field_usize(line, "menuId").unwrap_or(0),
             path: field_str(line, "path").unwrap_or_default(),
             dest: field_str(line, "dest").unwrap_or_default(),
             strip: field_bool(line, "strip"),

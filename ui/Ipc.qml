@@ -80,6 +80,7 @@ QtObject {
         function menuState(): string {
             var menu = root.pane.contextMenu()
             return JSON.stringify({opened: menu.visible, entries: menu.entries, cursor: menu.cursor,
+                snapshotReady: root.pane.menuActions.ready, snapshotId: root.pane.menuActions.requestId,
                 submenu: menu.submenuOpen, submenuCursor: menu.submenuCursor, submenuEntries: menu.submenuEntries,
                 frame: root.fleaWindow.rectOf(menu.frameItem), flyout: root.fleaWindow.rectOf(menu.submenuFrameItem),
                 workArea: menu.workArea, forHeader: menu.forHeader, forRail: menu.forRail, hasRow: menu.hasRow})
@@ -254,6 +255,15 @@ QtObject {
                     visible: control.visible, centre: root.fleaWindow.centreOf(control) } }) })
         }
         function previewExpanded(): string { var p = root.pane.preview.pdfItem; return p ? String(p.expanded) : "" }
+        function previewSelectionState(): string {
+            var column = root.pane.previewColumnItem
+            return JSON.stringify({view: root.pane.viewMode, width: root.pane.listSlot.width,
+                available: root.pane.width - root.pane.sidebarWidth,
+                inlineVisible: column !== null && column.visible,
+                index: root.pane.previewIndex, path: column ? column.path : "",
+                focused: column !== null && column.activeFocus,
+                pending: column ? column.pendingToken : 0})
+        }
         function rowNameColor(i: int): string {
             var item = root.pane.itemFor(i)
             return item ? String(item.nameColor()) : ""
