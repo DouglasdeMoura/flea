@@ -5929,7 +5929,8 @@ EOS
     # F2 starts the field pre-filled and pre-selected; typing replaces the whole label.
     key -k F2 >/dev/null
     settle
-    [[ "$(ipc railRenamingIndex)" == "2" ]] || fail "rename: F2 did not start renaming, railRenamingIndex is $(ipc railRenamingIndex)"
+    [[ "$(ipc railRenamingIndex)" == "$(ipc railCursor)" ]] \
+        || fail "rename: F2 did not start renaming on the cursor row, railRenamingIndex is $(ipc railRenamingIndex)"
     shot rename-editing
 
     # Escape cancels first, proving it before the real rename below: no write, state unwound.
