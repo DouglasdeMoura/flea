@@ -210,6 +210,22 @@ function run(check) {
     Focus.act("escape", typing)
     check("esc while the query line has the caret closes it", typing.filterTyping, false)
 
+    var activeStatus = escaper("needle", 0)
+    var statusEscapes = 0
+    activeStatus.statusBar = {escapePressed: function () { statusEscapes += 1; return true }}
+    activeStatus.searchMode = "results"
+    activeStatus.searchRunning = true
+    Focus.act("escape", activeStatus)
+    check("filter consumes Escape before search or transfer", activeStatus.filterQuery + "|" + activeStatus.cancelled + "|" + statusEscapes, "|0|0")
+    Focus.act("escape", activeStatus)
+    check("focused search consumes Escape before transfer", activeStatus.cancelled + "|" + statusEscapes, "1|0")
+    activeStatus.searchMode = ""
+    Focus.act("escape", activeStatus)
+    check("status consumes Escape before marks", statusEscapes + "|" + activeStatus.retreated, "1|0")
+    activeStatus.statusBar.escapePressed = function () { return false }
+    Focus.act("escape", activeStatus)
+    check("idle status lets Escape clear marks", activeStatus.retreated, 1)
+
     // The search strip covers the header whole, so its mark cannot be seen moving, and a sort ends
     // the walk in the backend. Both keys go silent while a search is up rather than cancelling one
     // from a key the sheet never advertised there.

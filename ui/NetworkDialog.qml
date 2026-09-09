@@ -125,7 +125,7 @@ Item {
         pendingFocus.forceActiveFocus()
         root.saving = true
         if (!Favourites.add(root.pendingUri, root.pendingLabel, root.requestId))
-            root.saveFailed("A favourites change is still being saved. Retry to save this location.")
+            root.saveFailed("A Favorites change is still being saved. Retry to save this location.")
     }
 
     function saveFailed(message) {
@@ -340,7 +340,7 @@ Item {
                     color: Theme.color.foreground
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.body
-                    font.weight: Font.Bold
+                    font.bold: true
                     textFormat: Text.PlainText
                 }
 

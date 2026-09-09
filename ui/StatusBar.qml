@@ -18,11 +18,11 @@ Item {
     property var errors: []
     readonly property string transient_: root.errors.length ? root.errors[0].text : root.notice
     readonly property string errorDetail: root.errors.length ? root.errors[0].detail : ""
-    readonly property var dismissItem: dismissAction
-    readonly property var cancelItem: cancelAction
-    readonly property var undoItem: undoAction
+    readonly property var stripItem: background
+    readonly property var transferCard: cardLoader.item
     readonly property var countsItem: counts
     readonly property var primaryItem: primary
+    readonly property var secondaryItem: secondary
     readonly property bool transientIsError: root.errors.length > 0
     property var activities: []
     readonly property var activity: root.activities.length ? root.activities[0] : null
@@ -40,13 +40,17 @@ Item {
     readonly property real ruleOpacity: 0.12
     readonly property bool hasUndo: !root.transientIsError && !root.stickyHere && !root.searching
                                     && root.notice.indexOf(Ops.UNDO_HINT) >= 0
-    readonly property string secondaryText: [root.transientIsError && root.stickyHere ? root.sticky : "",
+    readonly property string keyHint: root.transientIsError ? "esc dismisses"
+        : root.transfer.running ? (root.activity.cancelling ? "cancelling" : "esc cancels")
+        : root.searchRunning ? "esc cancels" : root.searching ? root.searchKeys
+        : root.hasUndo ? "z undoes" : ""
+    readonly property string secondaryText: [root.keyHint,
+        root.transientIsError && root.stickyHere ? root.sticky : "",
         root.activities.slice(1).map(function (entry) { return entry.text }).join(" · "),
-        (root.transientIsError || root.stickyHere) && root.searching ? "search " + root.searchLine : "",
+        (root.transientIsError || root.stickyHere) && root.searching ? root.searchText() : "",
         root.retryLine]
-        .filter(function (s) { return s.length > 0 }).join(" · ")
+        .filter(function (s) { return s.length > 0 }).map(function (s) { return " · " + s }).join("")
     signal transferCancelRequested(int id)
-    signal undoRequested()
     implicitHeight: Theme.chromeHeight + detailView.height
 
     // Completion messages cannot acknowledge a failure; each error requires its own dismissal.
@@ -63,6 +67,19 @@ Item {
     function dismiss() {
         if (root.errors.length) root.errors = root.errors.slice(1)
         else root.notice = ""
+    }
+
+    function cancelTransfer() {
+        var next = Status.cancelActivity(root.activities)
+        if (next === root.activities) return
+        root.activities = next
+        root.transferCancelRequested(root.transfer.id)
+    }
+
+    function escapePressed() {
+        if (root.transientIsError) { root.dismiss(); return true }
+        if (root.transfer.running) { root.cancelTransfer(); return true }
+        return false
     }
 
     function setActivity(owner, text, transfer) {
@@ -96,9 +113,11 @@ Item {
         return root.fsName.length ? root.fsName + " · " + Format.size(root.fsFree) + " free" : ""
     }
 
+    function searchText() { return "Search: " + root.searchLine.replace(/^Searching, /, "") }
+
     function slot() {
         return { transient: root.transient_, transientIsError: root.transientIsError,
-                 searching: root.searching, searchKeys: "Search: " + root.searchLine + " · " + root.searchKeys,
+                 searching: root.searching, searchKeys: root.searchText(),
                  stickyHere: root.stickyHere, sticky: root.sticky, fsText: root.fsText() }
     }
 
@@ -113,17 +132,16 @@ Item {
     Item { id: strip; width: parent.width; height: Theme.chromeHeight }
 
     Rectangle {
+        id: background
         width: parent.width
         height: Theme.chromeHeight
         color: Theme.color.surface
-        border.width: root.transientIsError ? Theme.spacing.hairline : 0
-        border.color: Theme.color.error
+        border.width: 0
     }
 
     Rectangle {
         width: parent.width
         height: Theme.spacing.hairline
-        visible: !root.transientIsError
         color: Theme.color.foreground
         opacity: root.ruleOpacity
     }
@@ -142,59 +160,26 @@ Item {
         textFormat: Text.PlainText
     }
 
-    Row {
-        id: actions
+    Text {
+        id: secondary
         anchors.right: parent.right
         anchors.rightMargin: Theme.spacing.rowPaddingX
         anchors.verticalCenter: strip.verticalCenter
-        spacing: Theme.spacing.gap
-
-        StatusAction {
-            id: cancelAction
-            visible: root.transfer.running
-            label: root.activity && root.activity.cancelling ? "Cancelling" : root.transfer.moving ? "Cancel move" : "Cancel copy"
-            available: root.activity !== null && !root.activity.cancelling
-            onActivated: {
-                root.activities = Status.cancelActivity(root.activities)
-                root.transferCancelRequested(root.transfer.id)
-            }
-        }
-        StatusAction { id: undoAction; visible: root.hasUndo; label: "Undo · z"; onActivated: root.undoRequested() }
-        StatusAction { id: dismissAction; visible: root.transientIsError; label: "Dismiss error"; onActivated: root.dismiss() }
-    }
-
-    Text {
-        id: secondary
-        anchors.right: actions.left
-        anchors.rightMargin: actions.width ? Theme.spacing.gap : 0
-        anchors.verticalCenter: strip.verticalCenter
-        width: root.secondaryText.length ? Math.min(implicitWidth, root.width / 4) : 0
+        width: Math.min(implicitWidth, Math.max(0, root.width - counts.x - counts.width
+            - 3 * Theme.spacing.gap - root.spiralSize))
         text: root.secondaryText
-        color: Theme.color.foreground
+        color: Theme.color.muted
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
         elide: Text.ElideRight
         textFormat: Text.PlainText
     }
 
-    Rectangle {
-        id: separator
-        visible: secondary.width > 0
-        anchors.right: secondary.left
-        anchors.rightMargin: Theme.spacing.gap
-        anchors.verticalCenter: strip.verticalCenter
-        width: visible ? Theme.spacing.hairline : 0
-        height: secondary.height
-        color: Theme.color.foreground
-        opacity: root.ruleOpacity
-    }
-
     Text {
         id: primary
-        anchors.right: separator.visible ? separator.left : secondary.left
-        anchors.rightMargin: secondary.width ? Theme.spacing.gap : 0
+        anchors.right: secondary.left
         anchors.verticalCenter: strip.verticalCenter
-        width: Math.max(0, Math.min(implicitWidth, (separator.visible ? separator.x : secondary.x)
+        width: Math.max(0, Math.min(implicitWidth, secondary.x
             - (counts.x + counts.width)
             - 3 * Theme.spacing.gap - root.spiralSize))
         text: root.rightText()
@@ -220,8 +205,7 @@ Item {
         width: detailView.width; height: detailView.height
         visible: detailView.visible
         color: Theme.color.surface
-        border.color: Theme.color.error
-        border.width: Theme.spacing.hairline
+        border.width: 0
     }
     Flickable {
         id: detailView
@@ -245,6 +229,22 @@ Item {
             font.pixelSize: Theme.font.caption
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
+        }
+    }
+
+    Loader {
+        id: cardLoader
+        active: root.transfer.running
+        anchors.right: parent.right
+        anchors.rightMargin: Theme.spacing.rowPaddingX
+        anchors.bottom: parent.top
+        anchors.bottomMargin: Theme.spacing.gap
+        sourceComponent: TransferCard {
+            width: Math.min(implicitWidth, Math.max(0, root.width - 2 * Theme.spacing.rowPaddingX))
+            transfer: root.transfer
+            owner: root.transferOwner
+            cancelling: root.activity ? root.activity.cancelling : false
+            onCancelRequested: root.cancelTransfer()
         }
     }
 }

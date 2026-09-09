@@ -71,6 +71,7 @@ FocusScope {
     // So a test can wait for the rail's async FileViews instead of sleeping and guessing.
     readonly property int railCount: root.sidebar ? root.sidebar.entries.length : 0
     property var preview: null
+    property var statusBar: null
     // shell.qml's ui/ShareBrowser.qml overlay, wired the same way as preview above.
     property var shareBrowser: null
     // shell.qml's ui/KeymapSheet.qml, which ? opens from either the list or the rail.
@@ -206,12 +207,19 @@ FocusScope {
     property var selection: Selection.create()
     property int selectionVersion: 0
     property int selectionAnchor: 0
+    property var selectionBand: null
     function isSelected(index) { return root.selectionVersion >= 0 && root.selection.has(index) }
     function selectionCount() { return root.selectionVersion >= 0 ? root.selection.count() : 0 }
     function selectedIndices() { return root.selectionVersion >= 0 ? root.selection.indices() : [] }
     function toggleSelect() { root.selection.toggle(root.cursorIndex); root.selectionAnchor = root.cursorIndex; root.selectionVersion++ }
     function selectAll() { Filter.selectAll(root); root.selectionVersion++ }
     function clearSelection() { root.selection.clear(); root.selectionVersion++ }
+    function selectOnly(index) {
+        root.setCursor(index)
+        root.selection.only(root.cursorIndex)
+        root.selectionAnchor = root.cursorIndex
+        root.selectionVersion++
+    }
     function extendSelection(delta) { Filter.extend(root, delta) }
     // Ctrl+click and shift+click, the mouse's twins of v and shift+j/k; see keys.toml's [[pointer]].
     function toggleSelectAt(index) { root.setCursor(index); root.toggleSelect() }

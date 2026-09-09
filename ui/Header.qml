@@ -118,6 +118,8 @@ Item {
         width: root.cols.kind ? Theme.column.kind : 0
         text: root.title("Kind", "kind")
         elide: Text.ElideRight
+
+        TapHandler { enabled: root.sortable; onTapped: root.sortRequested("kind") }
     }
 
     // The header is chrome, but it is the chrome the columns belong to, so its right click is where

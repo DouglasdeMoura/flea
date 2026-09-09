@@ -18,7 +18,9 @@ function act(action, root, sidebar) {
     // activate(), not a direct opened(path): a Network entry may need mounting first.
     case "open": if (sidebar.entries.length > 0) sidebar.activate(sidebar.cursorIndex); return
     // Focus.LIST's own value, written out because importing Focus.js back would be a cycle.
-    case "escape": root.focusView = "list"; return
+    case "escape":
+        if (root.statusBar && root.statusBar.escapePressed()) return
+        root.focusView = "list"; return
     case "addNetwork": sidebar.addRequested(); return
     // Favorites are not offered: Sidebar.startRename ignores an index outside the Network group.
     case "rename": sidebar.startRename(sidebar.cursorIndex); return

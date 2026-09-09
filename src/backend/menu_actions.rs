@@ -227,7 +227,7 @@ impl Snapshot {
         }
         if op == "validate" || op == "activate" {
             let action = field_str(line, "action").unwrap_or_default();
-            let needs_paths = op == "validate" || matches!(action.as_str(), "copy" | "cut" | "copypath") || action.starts_with("compress:");
+            let needs_paths = op == "validate" || matches!(action.as_str(), "copy" | "cut" | "copypath" | "addFavourite") || action.starts_with("compress:");
             let paths: Vec<String> = if needs_paths { self.items.iter().map(|i| format!(r#""{}""#, escape(&i.path.to_string_lossy()))).collect() } else { Vec::new() };
             return Ok(format!(r#""action":"{}","paths":[{}],"dest":"{}""#,
                 escape(&action), paths.join(","),
@@ -390,12 +390,14 @@ mod tests {
         let path = sandbox.file("item", "original");
         let mut snapshot = Snapshot::default();
         assert!(snapshot.handle(r#"{"op":"snapshot","id":3}"#, vec![path.to_string_lossy().into()]).contains(r#""ok":true"#));
+        assert!(snapshot.handle(r#"{"op":"activate","id":3,"action":"addFavourite"}"#, vec![]).contains(&format!(r#""paths":["{}"]"#, path.display())));
         assert!(snapshot.handle(r#"{"op":"validate","id":2}"#, vec![]).contains("expired"));
         let moved = sandbox.join("old");
         assert!(path.is_absolute() && path.starts_with(sandbox.path()) && moved.starts_with(sandbox.path()));
         std::fs::rename(&path, moved).unwrap();
         sandbox.file("item", "replacement");
         assert!(snapshot.handle(r#"{"op":"validate","id":3}"#, vec![]).contains("Selected item changed"));
+        assert!(snapshot.handle(r#"{"op":"activate","id":3,"action":"addFavourite"}"#, vec![]).contains("Selected item changed"));
         assert_eq!(std::fs::read_to_string(path).unwrap(), "replacement");
     }
     #[test]

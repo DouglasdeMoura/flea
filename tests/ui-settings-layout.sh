@@ -17,7 +17,7 @@ case_settingscompact() {
         hyprctl dispatch "hl.dsp.window.resize({ x = ${viewport%x*}, y = ${viewport#*x}, exact = true, window = \"address:$addr\" })" >/dev/null
         omarchy-drive window center flea >/dev/null
         settle
-        read -r wx wy ww wh < <(window_box)
+        read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
         [[ "$ww $wh" == "${viewport%x*} ${viewport#*x}" ]] || fail "settingscompact: wrong viewport $ww $wh"
         settings_open_key
         settle

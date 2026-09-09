@@ -101,7 +101,7 @@ Item {
                 var path = decodeURIComponent(entry.path.substring(7))
                 if (path.charAt(0) !== "/" || path.indexOf("\0") >= 0) throw new Error("not a local file URI")
                 root.chosen(path)
-            } catch (error) { root.picker.say("This favourite has an invalid local file URI.", true) }
+            } catch (error) { root.picker.say("This favorite has an invalid local file URI.", true) }
         } else if (entry.path.indexOf("://") >= 0) {
             network.active = true
             root.awaitingNetwork = true

@@ -46,6 +46,12 @@ ListView {
         flickable: root
     }
 
+    Flea.SelectionBand {
+        parent: root
+        pane: root.pane
+        flickable: root
+    }
+
     // The item Qt hangs the platform drag off, on the view and never in a delegate: a tab hover switch
     // re-lists mid-drag and releases the pressed row, and a QDrag parented there died inside its own
     // exec while the compositor still asked it for data (quickshell SIGSEGV, 2026-09-07). No drag image.
@@ -78,8 +84,6 @@ ListView {
         hiddenCols: root.pane.dualMode ? ["mode", "kind"].concat(ViewState.hiddenCols) : ViewState.hiddenCols
         hovered: hover.hovered
         thumb: root.thumbFor(listingIndex)
-        // The zebra follows the drawn position, so a narrowed listing still alternates row by row.
-        alternate: !root.pane.dualMode && index % 2 === 1
         selected: root.pane.isSelected(listingIndex)
         kindNames: root.pane.kindNames
         dirSize: root.dirSizeFor(listingIndex)
@@ -97,6 +101,7 @@ ListView {
 
         HoverHandler {
             id: hover
+            enabled: root.pane.selectionBand === null
         }
 
         TapHandler {
@@ -203,7 +208,7 @@ ListView {
         // The wheel moves the view and not the cursor, so the cursor follows the viewport here.
         var first = Math.floor(root.contentY / Theme.fileRowHeight)
         var last = Math.min(root.pane.shownTotal - 1, first + root.pane.visibleRows - 1)
-        if (last >= first) {
+        if (last >= first && root.pane.selectionBand === null) {
             root.cursorClamped(first, last)
         }
         root.menu.close()

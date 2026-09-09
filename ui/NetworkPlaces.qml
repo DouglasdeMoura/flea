@@ -9,7 +9,7 @@ Item {
     signal wrote()
 
     function rename(uri, name) {
-        root.message("This legacy location is read-only. Add it to Flea Favourites to manage it there.", true)
+        root.message("This legacy location is read-only. Add it to Flea Favorites to manage it there.", true)
     }
     function forget(uri) {
         root.message("This legacy location is read-only. GTK bookmarks were left unchanged.", true)

@@ -100,7 +100,6 @@ FocusScope {
                         : "These " + root.scopeName + " are deleted from disk. This cannot be undone."
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
-                    lineHeight: 1.6
                     color: Theme.color.foreground
                     font { family: Theme.font.family; pixelSize: Theme.font.body }
                 }
@@ -114,7 +113,14 @@ FocusScope {
                         implicitWidth: dangerText.implicitWidth + 2 * Theme.spacing.gap
                         height: Math.max(Theme.hitMin, dangerText.implicitHeight + Theme.spacing.gap)
                         Rectangle { anchors.fill: parent; color: "transparent"; border.width: Theme.spacing.hairline; border.color: root.destructiveFocus ? Theme.color.error : Theme.color.muted }
-                        Text { id: dangerText; anchors.centerIn: parent; text: root.snapshot.all ? "Empty Trash" : "Delete"; color: Theme.color.error; font { family: Theme.font.family; pixelSize: Theme.font.body } }
+                        Text {
+                            id: dangerText
+                            anchors.centerIn: parent
+                            text: root.snapshot.all ? "Empty Trash" : "Delete"
+                            textFormat: Text.PlainText
+                            color: Theme.color.error
+                            font { family: Theme.font.family; pixelSize: Theme.font.body }
+                        }
                         Accessible.role: Accessible.Button
                         Accessible.name: dangerText.text
                         Accessible.onPressAction: { root.destructiveFocus = true; root.activate() }

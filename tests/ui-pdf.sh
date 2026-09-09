@@ -139,7 +139,7 @@ case_pdffocus() {
         hyprctl dispatch "hl.dsp.window.resize({ x = 800, y = 480, exact = true, window = \"address:$addr\" })" >/dev/null
         omarchy-drive window center flea >/dev/null
         settle
-        read -r wx wy ww wh < <(window_box)
+        read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
         [[ "$ww $wh" == '800 480' ]] || fail "PDF specimen viewport is $ww $wh"
         shot "pdf-$mode-800x480"
         read -r cx cy <<< "$(ipc pdfState true | jq -r '.controls[1].centre')"

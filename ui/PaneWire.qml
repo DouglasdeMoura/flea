@@ -52,7 +52,7 @@ Item {
     // indices would name other files afterwards, and a list already in flight.
     readonly property bool watchBusy: !pane || pane.listInFlight || pane.renamingIndex >= 0
             || pane.menuVisible || pane.menuActions.opened || pane.filterTyping || pane.searchMode.length > 0
-            || pane.selectionCount() > 0
+            || pane.selectionCount() > 0 || pane.selectionBand !== null
     // ui/Pane.qml reaches the three through these: openCursor takes the opener, the menu reads the
     // Taildrop peers, and the two share actions call the other two.
     readonly property alias opener: opener

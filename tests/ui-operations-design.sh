@@ -12,16 +12,34 @@ operations_copy_to() {
     menus_expect menuDialogState '.opened | not' "Copy to submits through the destination field"
 }
 
-operations_status_control() {
-    local name="$1" centre
-    centre=$(ipc statusActivityState | jq -er --arg name "$name" '.[$name] | select(.visible) | .centre') \
-        || fail "operations: status control $name is not visible"
-    menus_point "$centre"
+operations_footer_click() {
+    local frame x y width height body caption inset row
+    frame=$(ipc statusFooterState | jq -er .frame) || fail "operations: footer frame unavailable"
+    read -r x y width height <<< "$frame"
+    read -r body caption inset row <<< "$(ipc metrics)"
+    [[ "$frame $inset" =~ ^[0-9]+(\ [0-9]+){4}$ ]] || fail "operations: invalid footer geometry: $frame inset=$inset"
+    (( width > 2 * inset && height > 0 )) || fail "operations: footer has no visible former Dismiss position"
+    menus_point "$((x + width - inset - 1)) $((y + height / 2))"
 }
 
 operations_secondary() {
     cardsize_expect statusSecondary "$1"
     menus_equal "$2" "$1" "$(ipc statusSecondary)"
+}
+
+operations_footer_geometry() {
+    local body caption inset row muted
+    read -r body caption inset row <<< "$(ipc metrics)"
+    [[ "$body $caption $inset $row" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || fail "operations: live footer tokens unavailable"
+    muted=$(ipc palette | cut -d' ' -f4)
+    [[ -n "$muted" ]] || fail "operations: muted role unavailable"
+    menus_expect statusFooterState ".borderWidth == 0 and (.frame | split(\" \") | map(tonumber) | .[2] == 880 and .[3] == 27)
+        and .left.x == $inset and .left.fontSize == $caption and .right.fontSize == $caption
+        and .secondary.fontSize == $caption and .secondary.color == \"$muted\"
+        and (.secondary.text == \"\" or (.secondary.text | startswith(\" · \")))
+        and (.secondary.text | contains(\"|\") | not)
+        and .right.x >= .left.x + .left.width" "$1 matches informational footer geometry and semantic roles"
+    printf 'OPERATIONS_FOOTER label=%q state=%s\n' "$1" "$(ipc statusFooterState)"
 }
 
 operations_idle_footer() {
@@ -30,10 +48,12 @@ operations_idle_footer() {
     [[ "$selected" == 0 ]] || items+=" · $selected selected"
     menus_expect statusFooterState ".total == $total and .selected == $selected and .filesystem != \"\" and .left.text == \"$items\" and .right.text == .filesystem and .right.width > 0 and .right.color == .left.color and .right.fontSize == .left.fontSize and .right.x >= .left.x + .left.width" "$label"
     menus_equal "$label foreground" "$(ipc themeForeground)" "$(ipc statusColor)"
+    operations_footer_geometry "$label"
 }
 
 operations_counts_footer() {
     menus_expect statusFooterState '.left.text == .counts and .left.text != .path and .right.text != .filesystem and .right.x >= .left.x + .left.width' "$1 retains counts beside activity"
+    operations_footer_geometry "$1"
 }
 
 operations_missing_footer() {
@@ -41,6 +61,7 @@ operations_missing_footer() {
     menus_guard "$missing"
     [[ ! -e "$missing" && ! -L "$missing" ]] || fail "operations: missing-path fixture already exists"
     launch "$missing"
+    permissions_viewport 880 620
     menus_expect statusFooterState '.listingState == "error" and .filesystem == ""' "missing directory has no filesystem information"
     menus_acknowledge
     menus_expect statusFooterState '.left.text == "unavailable" and .right.text == ""' "missing filesystem reports unavailable on the left without invented capacity"
@@ -49,17 +70,15 @@ operations_missing_footer() {
     kill_flea
 }
 
-operations_loading_footer() (
-    local permissions_listing="$1" total="$2" destination="$3" operations_stopped="" pid end state
+operations_pause_backend() {
+    local pid end state
     local -a pids
     menus_guard "$permissions_listing"
-    menus_guard "$destination"
     mapfile -t pids < <(backend_pids)
     [[ "${#pids[@]}" == 1 ]] || fail "operations: loading proof requires one owned backend"
     pid="${pids[0]}"
     permissions_backend_owned "$pid" || fail "operations: loading backend candidate, fixture or session differs"
     operations_stopped="$pid"
-    trap 'permissions_resume_stopped "$operations_stopped"' EXIT
     kill -STOP "$pid" || fail "operations: could not pause the owned listing backend"
     end=$((SECONDS + 15))
     while (( SECONDS < end )); do
@@ -69,6 +88,13 @@ operations_loading_footer() (
         sleep 0.05
     done
     [[ "$state" == T* ]] || fail "operations: listing backend did not stop"
+}
+
+operations_loading_footer() (
+    local permissions_listing="$1" total="$2" destination="$3" operations_stopped=""
+    menus_guard "$destination"
+    trap 'permissions_resume_stopped "$operations_stopped"' EXIT
+    operations_pause_backend
     key -M ctrl -k l -m ctrl "$destination" -k Return >/dev/null
     menus_expect statusFooterState '.listingState == "loading" and .filesystem != "" and .left.text == "" and .left.text == .counts and .right.text == .filesystem' "native refresh clears stale counts while the backend cannot reply"
     shot operations-loading-footer
@@ -78,6 +104,34 @@ operations_loading_footer() (
     key -M ctrl -k l -m ctrl "$permissions_listing" -k Return >/dev/null
     wait_listing "$total"
     operations_idle_footer "$total" 0 "resumed listing restores idle counts and filesystem"
+)
+
+operations_search_footer() (
+    local permissions_listing="$menu_box/mixed" operations_stopped=""
+    launch "$permissions_listing"
+    wait_listing 5
+    permissions_viewport 880 620
+    trap 'permissions_resume_stopped "$operations_stopped"' EXIT
+    operations_pause_backend
+    key f c.txt -k Return >/dev/null
+    menus_expect keyDeliveryState '.searchMode == "results" and .searchQuery == "c.txt" and .searchRunning' "native Search submits while its owned backend is stopped"
+    menus_expect statusFooterState '.listingState == "loading" and .left.text == .counts and .left.text == "" and .right.text == "Search: 0 scanned"' "submitted search displays its actual initial scanned count"
+    operations_secondary " · esc cancels" "initial Search names its native cancellation key"
+    operations_footer_geometry "initial search progress"
+    shot operations-search-submitted
+    permissions_resume_stopped "$operations_stopped" || fail "operations: search backend could not resume"
+    operations_stopped=""
+    menus_expect keyDeliveryState '.searchMode == "results" and .searchQuery == "c.txt" and (.searchRunning | not)' "resumed backend completes the real native search"
+    wait_listing 1
+    menus_expect statusFooterState '.left.text == "1 item" and (.right.text | test("^Search: 5 scanned in [0-9]+\\.[0-9] s$"))' "completed search reports one result from its five scanned fixture files"
+    [[ "$(ipc rowAt 0)" == c.txt\|file\|* ]] || fail "operations: Search returned another fixture identity"
+    shot operations-search-completed
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '.searchMode == ""' "native Escape closes completed search"
+    wait_listing 5
+    operations_idle_footer 5 0 "leaving Search restores the directory footer"
+    kill_flea
+    printf 'OPERATIONS_SEARCH initial_submitted=ok resumed_result=ok close=ok positive_scanned_live=not_run\n'
 )
 
 operations_absent() {
@@ -101,7 +155,7 @@ operations_mixed() {
     printf 'existing collision\n' > "$destination/c.txt"
     launch "$source"
     wait_listing 5
-    permissions_viewport 920 600
+    permissions_viewport 880 620
     operations_secondary "" "no retry claim exists before an attributed failure"
     operations_idle_footer 5 0 "idle footer shows all five items and actual filesystem"
     operations_loading_footer "$source" 5 "$destination" || fail "operations: paused navigation proof failed"
@@ -120,31 +174,40 @@ operations_mixed() {
     menus_expect selectionCount '. == 1' "failed original is selected for retry"
     selected=$(ipc selectedIndices)
     [[ "$selected" == "$(row_index_of c.txt)" ]] || fail "operations: retry selected a different source"
-    operations_secondary "c.txt selected for retry" "only the identity-verified selected original receives retry secondary text"
+    operations_secondary " · esc dismisses · c.txt selected for retry" "error hint and identity-verified retry use separate muted secondary text"
+    menus_expect statusFooterState '(.right.text | startswith("Copy failed: c.txt · ")) and (.right.text | contains("(os error") | not)' "error is a plain sentence with a named cause"
     for name in a.txt b.txt d.txt e.txt; do menus_same_file "committed copy $name" "$source/$name" "$destination/$name"; done
     [[ "$(cat "$destination/c.txt")" == 'existing collision' ]] || fail "operations: collision was overwritten"
     shot operations-mixed-error
     sleep "$transient_clear_s"
     menus_expect statusActivityState '.errors == 1 and (.notice | contains("Copied 4 of 5"))' "error and hidden outcome survive the notice timeout"
-    operations_status_control dismiss
+    key -k Home >/dev/null
+    menus_expect cursor '. == 0' "negative footer click starts from a known native cursor"
+    operations_footer_click
+    key -k End >/dev/null
+    menus_expect cursor '. == 4' "a later native key is delivered before checking the inert error click"
+    menus_expect statusActivityState '.errors == 1' "pointer at the removed Dismiss control leaves the persistent error unacknowledged"
+    menus_error 'Copy failed: c.txt' 'removed footer control does not dismiss the named failure'
+    shot operations-error-footer-click-inert
+    key -k Escape >/dev/null
     menus_message 'Copied 4 of 5' 'acknowledgement reveals the complete outcome'
-    menus_expect statusActivityState '.undo.visible and .undo.enabled and .errors == 0' "successful items retain their native Undo control"
+    menus_expect statusActivityState '.undoAvailable and .errors == 0' "successful items remain undoable through the native key"
     operations_counts_footer "acknowledged completion"
-    operations_secondary "c.txt selected for retry" "acknowledged completion retains its selected-retry secondary"
+    operations_secondary " · z undoes · c.txt selected for retry" "acknowledged completion retains Undo hint and selected-retry secondary"
     shot operations-mixed-acknowledged
     key -k Escape >/dev/null
     menus_expect selectionCount '. == 0' "native Escape clears the retry selection"
-    operations_secondary "" "changing selection removes the previous retry claim"
+    operations_secondary " · z undoes" "changing selection removes the previous retry claim while retaining Undo"
     seek_row_named c.txt
     key v >/dev/null
     menus_expect selectionCount '. == 1' "native re-selection names one source for the explicit retry"
-    operations_secondary "" "manual re-selection cannot revive an earlier identity proof"
+    operations_secondary " · z undoes" "manual re-selection cannot revive an earlier identity proof"
     operations_copy_to "$destination"
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 1' "a repeated collision records its own completed failure"
-    operations_secondary "c.txt selected for retry" "a new verified locate reply establishes fresh retry text"
+    operations_secondary " · esc dismisses · c.txt selected for retry" "a new verified locate reply establishes fresh retry text"
     menus_guard "$source/c.txt"
     touch "$source/c.txt"
-    operations_secondary "" "external metadata change invalidates displayed retry proof"
+    operations_secondary " · esc dismisses" "external metadata change invalidates displayed retry proof without hiding error acknowledgement"
     menus_expect selectionCount '. == 1' "watch invalidation does not change the user's selected source"
     menus_acknowledge
 
@@ -154,9 +217,19 @@ operations_mixed() {
     operations_copy_to "$destination"
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 0 and (.notice | contains("Copied 1 item"))' "retry copies only the retained original selection"
     menus_same_file 'retry preserves source contents' "$source/c.txt" "$destination/c.txt"
+    operations_counts_footer "undoable transient"
+    operations_secondary " · z undoes" "successful retry names the native Undo key"
+    shot operations-transient-undo
     menus_guard "$destination/c.txt"
-    operations_status_control undo
-    menus_message 'Undid the copy.' 'pointer Undo reverses the retry'
+    key -k Home >/dev/null
+    menus_expect cursor '. == 0' "negative Undo click starts from a known native cursor"
+    operations_footer_click
+    key -k End >/dev/null
+    menus_expect cursor '. == 4' "a later native key is delivered before checking the inert Undo click"
+    menus_expect statusActivityState '.undoAvailable and (.notice | contains("Copied 1 item"))' "clicking the informational footer cannot undo a completed copy"
+    menus_same_file 'footer click preserves the completed retry' "$source/c.txt" "$destination/c.txt"
+    key z >/dev/null
+    menus_message 'Undid the copy.' 'native z reverses the retry'
     [[ ! -e "$destination/c.txt" ]] || fail "operations: retry Undo retained its created file"
     for name in a.txt b.txt d.txt e.txt; do menus_guard "$destination/$name"; done
     key z >/dev/null
@@ -259,11 +332,10 @@ try:
     if not stat.S_ISREG(metadata.st_mode) or not 0 <= metadata.st_size < total or os.path.lexists(later):
         raise RuntimeError(f"operations: copy completed before interruption; partial bytes={metadata.st_size}, total={total}")
     print(json.dumps({"state": "stopped", "pid": pid, "bytes": metadata.st_size, "total": total, "threads": len(states)}), flush=True)
-    ready, _, _ = select.select([commands, pidfd], [], [], timeout_seconds)
+    # EOF releases the stop if native proof aborts; the input checks own their deadlines.
+    ready, _, _ = select.select([commands, pidfd], [], [])
     if pidfd in ready:
         raise RuntimeError("operations: interrupted backend exited before cancellation resumed it")
-    if commands not in ready:
-        raise RuntimeError("operations: native cancellation did not release the copy gate")
     command = commands.readline()
     if command not in ("resume\n", ""):
         raise RuntimeError(f"operations: unknown copy gate command: {command!r}")
@@ -290,14 +362,14 @@ operations_close_gate() {
 }
 
 operations_cancel() (
-    local source="$menu_box/cancel-source" destination="$menu_box/cancel-interrupted"
-    local permissions_listing="$source" pid gate_pid="" gate_input="" gate_output="" receipt
+    local variant="$1" source="$menu_box/cancel-source" destination="$menu_box/cancel-$1"
+    local permissions_listing="$source" pid gate_pid="" gate_input="" gate_output="" receipt cancel_centre selected cursor
     local -a pids
     menus_guard "$destination"
     mkdir "$destination" || fail "operations: cancellation destination could not be created"
     launch "$source"
     wait_listing 2
-    permissions_viewport 920 600
+    permissions_viewport 880 620
     hotkey --global ctrl a flea >/dev/null
     menus_expect selectionCount '. == 2' "interrupted cancellation selects two real files"
     mapfile -t pids < <(backend_pids)
@@ -314,27 +386,56 @@ operations_cancel() (
     read -r -t 15 -u "$gate_output" receipt || fail "operations: real copy was not interrupted"
     jq -e '.state == "stopped" and .bytes < .total and .threads > 0' <<< "$receipt" >/dev/null || fail "operations: invalid interruption receipt: $receipt"
     printf 'OPERATIONS_GATE %s\n' "$receipt"
-    menus_expect statusActivityState '.activities[0].running and .cancel.enabled' "real in-flight transfer remains cancellable while interrupted"
+    menus_expect statusActivityState '.activities[0].running and .transferCard.visible and .transferCard.cancel.visible and .transferCard.cancel.enabled' "real in-flight transfer remains cancellable in its card while interrupted"
     operations_counts_footer "interrupted transfer"
+    operations_secondary " · esc cancels" "transfer footer names its native cancellation key"
+    key m >/dev/null
+    menus_expect menuState '.opened' "a native popup opens above the running transfer"
     key -k Escape >/dev/null
-    menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "Escape leaves the named transfer running"
-    shot operations-transfer-paused
+    menus_expect menuState '.opened | not' "Escape closes the popup before cancelling its transfer"
+    menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "popup Escape leaves the named transfer running"
+    key / >/dev/null
+    menus_expect keyDeliveryState '.filterTyping' "native filter opens above the running transfer"
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '(.filterTyping | not) and .filterQuery == ""' "Escape closes the filter before cancelling its transfer"
+    menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "filter Escape leaves the named transfer running"
+    key f >/dev/null
+    menus_expect keyDeliveryState '.searchMode == "typing"' "native search takes focus above the running transfer"
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '.searchMode == ""' "Escape closes focused search before cancelling its transfer"
+    menus_expect statusActivityState '.activities[0].running and (.activities[0].cancelling | not)' "focused-search Escape leaves the named transfer running"
+    shot "operations-transfer-$variant-paused"
     menus_guard "$destination/a-large.bin"
     menus_guard "$destination/b-after.txt"
-    operations_status_control cancel
-    menus_expect statusActivityState '.activities[0].cancelling and .cancel.visible and (.cancel.enabled | not)' "Cancel disables immediately while the backend is interrupted"
+    selected=$(ipc selectedIndices) || fail "operations: cancellation selection unavailable"
+    cursor=$(ipc cursor) || fail "operations: cancellation cursor unavailable"
+    if [[ "$variant" == pointer ]]; then
+        cancel_centre=$(ipc statusActivityState | jq -er '.transferCard.cancel | select(.visible and .enabled) | .centre') \
+            || fail "operations: live transfer-card Cancel is unavailable"
+        menus_point "$cancel_centre"
+    else
+        [[ "$variant" == escape ]] || fail "operations: unknown cancellation input: $variant"
+        key -k Escape >/dev/null
+    fi
+    menus_expect statusActivityState '.activities[0].cancelling and .transferCard.visible and .transferCard.cancelling and ((.transferCard.cancel.visible and .transferCard.cancel.enabled) | not)' "$variant cancellation becomes visibly pending while the backend is interrupted"
     operations_counts_footer "pending cancellation"
-    operations_status_control cancel
-    menus_expect statusActivityState '.activities[0].cancelling and (.cancel.enabled | not)' "repeated pointer Cancel cannot resubmit"
-    shot operations-cancelling
+    if [[ "$variant" == pointer ]]; then menus_point "$cancel_centre"; else key -k Escape >/dev/null; fi
+    key / >/dev/null
+    menus_expect keyDeliveryState '.filterTyping' "a later native key is delivered before checking repeated $variant cancellation"
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '.filterTyping | not' "Escape closes the pending-transfer filter without changing cancellation"
+    menus_expect statusActivityState '.activities[0].cancelling and .transferCard.cancelling and ((.transferCard.cancel.visible and .transferCard.cancel.enabled) | not)' "repeated $variant cancellation remains pending"
+    menus_equal "$variant cancellation does not reach the listing selection" "$selected" "$(ipc selectedIndices)"
+    menus_equal "$variant cancellation does not move the listing cursor" "$cursor" "$(ipc cursor)"
+    shot "operations-cancelling-$variant"
     printf 'resume\n' >&"$gate_input" || fail "operations: copy gate could not resume the owned backend"
     operations_close_gate || fail "operations: interrupted copy gate failed"
     menus_expect statusActivityState '(.activities | length) == 0 and .errors == 0 and (.notice | contains("Copied 0 of 2") and contains("2 skipped") and contains("cancelled") and (contains("failed") | not))' "interrupted cancellation reports skipped work without a false write error"
     [[ ! -e "$destination/a-large.bin" && ! -e "$destination/b-after.txt" ]] || fail "operations: cancellation retained a partial copy or started a later item"
     [[ "$(stat -c '%s' "$source/a-large.bin")" == "$operations_bytes" && "$(cat "$source/b-after.txt")" == 'after cancellation' ]] \
         || fail "operations: cancellation changed source data"
-    shot operations-cancelled-interrupted
-    printf 'OPERATIONS_CANCEL variant=interrupted native=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok unpaused_live=not_run\n'
+    shot "operations-cancelled-$variant-interrupted"
+    printf 'OPERATIONS_CANCEL variant=%s interrupted_native=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok unpaused_live=not_run\n' "$variant"
     kill_flea
 )
 
@@ -347,14 +448,16 @@ case_operationsdesign() (
     [[ "$menu_box" == "$(realpath -e "$menu_box")" ]] || fail "operations: fixture is not canonical"
     for path in state config cache data cancel-source; do menus_guard "$menu_box/$path"; mkdir "$menu_box/$path"; done
     export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config" XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
-    "$flea_bin" --ui-state '{"view":"list","keys":"default","menu":{"hidden":[]}}' >/dev/null || fail "operations: fixture settings failed"
+    "$flea_bin" --ui-state '{"view":"list","keys":"default","display":{"textSize":{"mode":14}},"menu":{"hidden":[]}}' >/dev/null || fail "operations: fixture settings failed"
     operations_missing_footer || fail "operations: missing-filesystem proof failed"
     operations_mixed || fail "operations: mixed-outcome proof failed"
+    operations_search_footer || fail "operations: search footer proof failed"
     menus_guard "$menu_box/cancel-source/a-large.bin"
     truncate -s "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
     menus_guard "$menu_box/cancel-source/b-after.txt"
     printf 'after cancellation\n' > "$menu_box/cancel-source/b-after.txt"
     printf 'OPERATIONS_WORKLOAD bytes=%s source=%q\n' "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
-    operations_cancel || fail "operations: interrupted cancellation proof failed"
-    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok interrupted_cancel=ok unpaused_live=not_run\n'
+    operations_cancel pointer || fail "operations: interrupted pointer cancellation proof failed"
+    operations_cancel escape || fail "operations: interrupted Escape cancellation proof failed"
+    printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok informational_footer=ok search_initial=ok interrupted_pointer_cancel=ok interrupted_escape_cancel=ok unpaused_live=not_run positive_scanned_live=not_run visual_inspection=pending\n'
 )

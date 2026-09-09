@@ -22,6 +22,7 @@ Loader {
     property int survivorId: 0
     property string survivorFolder: ""
     property string survivorListing: ""
+    property string backgroundFolder: ""
 
     function snapshot() {
         if (deleting || survivorId) return
@@ -49,7 +50,13 @@ Loader {
         if (ready) show(action)
     }
     function activate(action, selected) {
-        if (!selected) { pane.performMenu(action, 0, null); return }
+        if (!selected) {
+            if (action === "addFavourite") {
+                if (backgroundFolder !== pane.path) { pane.message("Folder changed; reopen the menu.", true); return }
+                addFavourite(backgroundFolder)
+            } else pane.performMenu(action, 0, null)
+            return
+        }
         if (activationUsed) return
         if (deleting || survivorId) { pane.message("The deletion is still finishing.", false); return }
         if (!requestId || identity !== pane.menuSelectionIdentity) {
@@ -72,11 +79,22 @@ Loader {
         active = true
         item.open(action, requestId, folder, pane.listArea)
     }
+    function addFavourite(path) {
+        Favourites.add(path, path.split("/").filter(function (part) { return part.length > 0 }).pop() || "/")
+    }
     function locateSurvivors() {
         if (!survivorId || pane.listInFlight) return
         if (pane.path !== survivorFolder) { survivorId = 0; survivors = []; return }
         survivorListing = pane.menuSelectionIdentity
         pane.backend.send({c: "locate", paths: survivors, id: survivorId, menuId: survivorId})
+    }
+    Connections {
+        target: root.pane.contextMenu()
+        function onOpenedChanged() {
+            var menu = root.pane.contextMenu()
+            if (menu.opened && !menu.hasRow && !menu.forRail && !menu.forHeader)
+                root.backgroundFolder = root.pane.path
+        }
     }
     Connections {
         target: root.pane
@@ -127,8 +145,12 @@ Loader {
                 var split = message.action.indexOf(":")
                 var action = split < 0 ? message.action : message.action.substring(0, split)
                 var subId = split < 0 ? "" : message.action.substring(split + 1)
-                if (root.pane.contextMenu().validateChoice(action, subId))
-                    root.pane.performMenu(message.action, message.id, message.paths)
+                if (root.pane.contextMenu().validateChoice(action, subId)) {
+                    if (action === "addFavourite") {
+                        if (!message.paths || message.paths.length !== 1) { root.pane.message("The selected folder could not be read.", true); return }
+                        root.addFavourite(message.paths[0])
+                    } else root.pane.performMenu(message.action, message.id, message.paths)
+                }
                 return
             }
             if (root.item) root.item.receive(message)

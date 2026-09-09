@@ -415,6 +415,22 @@ Item {
 
     Connections {
         target: Favourites
+        function onExternalChanged(previousCount) {
+            var wasFavourite = root.cursor > 0 && root.cursor <= previousCount + 1
+            root.selectedFavourite = -1
+            root.favouriteMoveTarget = -1
+            root.favouriteActionPending = false
+            if (root.opened && root.section === "places") {
+                if (wasFavourite) {
+                    for (var i = 0; i < root.rows.length; i++) {
+                        if (root.rows[i].id === "favouriteActions") root.cursor = i
+                    }
+                } else if (root.cursor > previousCount + 1) {
+                    root.cursor += Favourites.records.length - previousCount
+                }
+                root.showCursor()
+            }
+        }
         function onWrote() {
             if (root.favouriteActionPending) {
                 root.favouriteActionPending = false

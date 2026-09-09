@@ -64,6 +64,15 @@ GridView {
         ctrlWheelAction: function (wheel) { return root.zoomWheel(wheel) }
     }
 
+    Flea.SelectionBand {
+        parent: root
+        pane: root.pane
+        flickable: root
+        columns: root.columns
+        cellWidth: root.cellWidth
+        cellHeight: root.cellHeight
+    }
+
     delegate: Flea.GridTile {
         id: cell
         required property int index
@@ -79,6 +88,7 @@ GridView {
 
         HoverHandler {
             id: hover
+            enabled: root.pane.selectionBand === null
         }
 
         TapHandler {

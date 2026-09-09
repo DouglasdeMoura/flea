@@ -65,8 +65,8 @@ menus_same_file() {
 
 menus_acknowledge() {
     if [[ "$(ipc statusError)" == true ]]; then
-        menus_point "$(ipc statusDismissCentre)"
-        menus_expect statusError '. == false' "pointer acknowledges the current error"
+        key -k Escape >/dev/null
+        menus_expect statusError '. == false' "Escape acknowledges the current error"
     fi
 }
 
@@ -82,7 +82,7 @@ menus_point() {
     local centre="$1" button="${2:-left}" cx cy wx wy ww wh
     read -r cx cy <<< "$centre"
     [[ "$cx" =~ ^-?[0-9]+$ && "$cy" =~ ^-?[0-9]+$ ]] || fail "menus: no live control centre: $centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     (( cx >= 0 && cy >= 0 && cx < ww && cy < wh )) || fail "menus: control is clipped outside the viewport"
     assert_focus
     omarchy-drive click "$((wx + cx))" "$((wy + cy))" "$button" >/dev/null || fail "menus: pointer delivery failed"

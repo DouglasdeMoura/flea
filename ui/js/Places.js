@@ -103,7 +103,7 @@ function sidebarWidth(value) {
 }
 
 function recordError(record) {
-    if (!record || typeof record !== "object" || Array.isArray(record)) return "invalid favourite record"
+    if (!record || typeof record !== "object" || Array.isArray(record)) return "invalid favorite record"
     if (typeof record.label !== "string" || record.label.trim().length === 0) return "label needs visible text"
     if (typeof record.path !== "string" || /[\u0000-\u001f\u007f]/.test(record.path)) return "invalid path"
     if (record.path.charAt(0) === "/" || record.path === "~" || record.path.indexOf("~/") === 0) return ""
@@ -122,7 +122,7 @@ function storedEntries(records, home) {
         var label = record && typeof record.label === "string" ? record.label : JSON.stringify(record)
         var path = record && typeof record.path === "string" ? record.path : ""
         var resolved = path === "~" ? home : path.indexOf("~/") === 0 ? home + path.substring(1) : path
-        out.push({ label: label || "Invalid favourite", path: resolved, storedPath: path,
+        out.push({ label: label || "Invalid favorite", path: resolved, storedPath: path,
             error: error, original: record, favouriteIndex: i, group: "favourite", kind: "favourite",
             glyph: path.indexOf("://") >= 0 ? "network" : "folder" })
     }
@@ -134,4 +134,26 @@ function homeEntries(home, dirsText, glyphFor) {
     return entries.map(function (entry) {
         return { label: entry.label, path: entry.path, group: "home", kind: "home", glyph: glyphFor(entry.label) }
     })
+}
+
+function railIdentity(entry) {
+    if (!entry) return ""
+    if (entry.kind === "favourite") return JSON.stringify([entry.kind, entry.original])
+    return JSON.stringify([entry.group, entry.kind, Mounts.railKey(entry) || entry.device || entry.uri || entry.path])
+}
+
+// Duplicate originals have no stored ID; a changed multiplicity cannot safely identify the selected occurrence.
+function railCursorAfter(before, after, index) {
+    if (before.length === 0 && index === 0) return 0
+    if (index < 0 || index >= before.length) return -1
+    var key = railIdentity(before[index]), oldCount = 0, occurrence = 0, matches = []
+    for (var i = 0; i < before.length; i++) {
+        if (railIdentity(before[i]) !== key) continue
+        oldCount++
+        if (i < index) occurrence++
+    }
+    for (var j = 0; j < after.length; j++) {
+        if (railIdentity(after[j]) === key) matches.push(j)
+    }
+    return matches.length === oldCount ? matches[occurrence] : -1
 }

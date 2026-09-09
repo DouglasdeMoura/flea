@@ -53,10 +53,9 @@ function runInventory(check) {
               var mine = Settings.GLYPHS[id] !== undefined ? Settings.GLYPHS[id] : Settings.MARKS[id]
               return mine === undefined || mine !== builtMark[id]
           }).join(","), "")
-    // New folder is the one row this release's panel gives no switch, and the two locked ones are
-    // drawn locked; anything else without a switch would be a row the section cannot reach.
-    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder"])
-    check("and no row the menu builds is left without one",
+    // SettingsPlaces section 02 adds the listing Favorite action; SettingsMenus keeps its 20 switches and Menus' New folder has none.
+    var reachable = switched.concat(Settings.LOCKED).concat(["newFolder", "addFavourite"])
+    check("no other menu action is omitted from the board's switch inventory",
           Object.keys(built).filter(function (id) { return reachable.indexOf(id) < 0 }).join(","), "")
 }
 
@@ -175,11 +174,13 @@ function runRows(check) {
                .map(function (r) { return r.id }).join(","),
           "cut,copy,paste,duplicate,rename,trash,delete,openwith,openTerminal,moveto,copyto,properties,permissions,copypath,compress,extract,convert,taildrop,dropbox,sharelink,keyHints")
     // The one check that is not a menu action: it says how every row is drawn, not whether it is.
-    check("the hints row is a check of its own, off until it is switched on",
+    check("the hints row defaults on as the menu boards specify",
           find(menus, "keyHints").label + "|" + find(menus, "keyHints").on,
-          "Show keyboard hints|false")
+          "Show keyboard hints|true")
     check("and it reads the value it is given",
           find(Settings.rows("menus", { hidden: [], keyHints: true }), "keyHints").on, true)
+    check("an explicitly disabled hints preference stays off",
+          find(Settings.rows("menus", { hidden: [], keyHints: false }), "keyHints").on, false)
     // Open in terminal was drawn by every menu with no way to switch it off, because the shipped
     // hidden set named it "terminal" and ui/js/Menu.js builds the row as "openTerminal".
     check("Open in terminal is a switch like any other action row",
@@ -270,6 +271,12 @@ function runPresets(check) {
 }
 
 function runCompletionRows(check) {
+    var places = Settings.rows("places", {})
+    check("Places spells the manager group Favorites", places[0].label, "Favorites")
+    check("optional rail details default off", [find(places, "places.driveSize").on, find(places, "places.trashCount").on].join(","), "false,false")
+    check("the Rail controls follow the ruled order", places.slice(-3).map(function (row) { return row.label }).join("|"), "Show drive size|Show Trash count|Sidebar width")
+    var detailedPlaces = Settings.rows("places", { data: { places: { driveSize: true, trashCount: true } } })
+    check("both rail detail controls reflect persisted on values", [find(detailedPlaces, "places.driveSize").on, find(detailedPlaces, "places.trashCount").on].join(","), "true,true")
     var state = { data: { view: "grid", density: "compact", columns: ["name", "kind"],
         preview: { column: false, loadOn: "manual", thumbnails: "off", thumbSize: "xlarge", ctrlZoom: false } } }
     var view = Settings.rows("view", state)

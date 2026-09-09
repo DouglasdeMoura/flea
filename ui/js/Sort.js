@@ -16,7 +16,7 @@ var ORDERS = ["name", "size", "mtime", "kind"]
 // ui/Header.qml's click. The column already sorted reverses; any other column starts ascending,
 // which is the order the canvas's own header draws beside "Name". Only ORDERS may leave this file.
 function column(pane, key) {
-    // Mode and Kind are labels. Asking the backend only to hear a refusal made them look sortable.
+    // Unsupported columns remain labels rather than sending a sort the backend must refuse.
     if (ORDERS.indexOf(key) < 0)
         return
     resort(pane, key, pane.backend.sortBy === key ? !pane.backend.sortDesc : false)

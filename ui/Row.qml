@@ -72,8 +72,6 @@ Item {
 
     // A lifted row is the cursor, the pointer, or a selection member; all three take the same fill treatment, per qui Minimal.
     property bool lifted: root.cursor || root.hovered || root.selected || root.dropTarget
-    // The zebra is the OEM normal fill, which is the lightest rung of the same ladder.
-    property bool alternate: false
     // The OEM derives its secondary ink from the foreground rather than reading a separate palette key.
     readonly property color dim: Qt.darker(Theme.color.foreground, 1.4)
     // A thumbnail path is not a thumbnail: the cache file can be evicted between the pane's answer
@@ -94,7 +92,6 @@ Item {
         color: root.cursor && root.paneFocused ? (root.dualMode ? Style.selectedAccentFill : Style.selectedFill)
              : root.selected && root.paneFocused ? Style.selectionFill
              : root.hovered ? Style.hoverFill
-             : root.alternate ? Style.normalFill
              : "transparent"
     }
 

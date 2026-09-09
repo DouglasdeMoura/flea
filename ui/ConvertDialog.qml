@@ -339,7 +339,6 @@ Item {
                 font.pixelSize: Theme.font.caption
                 textFormat: Text.PlainText
                 wrapMode: Text.WrapAnywhere
-                lineHeight: 1.45
             }
 
             Text {
@@ -353,7 +352,6 @@ Item {
                 font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
-                lineHeight: 1.45
             }
 
             Text {
@@ -367,7 +365,6 @@ Item {
                 font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
-                lineHeight: 1.45
             }
 
             Item {

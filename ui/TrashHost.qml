@@ -45,6 +45,7 @@ Loader {
     }
     onLoaded: {
         item.overlayParent = root.overlayParent
+        item.statusBar = root.pane.statusBar
         item.railKeyHandler = function(event) {
             if (pane.focusView !== Focus.RAIL) return false
             Focus.handleKey(event, pane, pane.sidebar)

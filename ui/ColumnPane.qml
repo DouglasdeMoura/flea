@@ -92,6 +92,14 @@ Item {
             flickable: view
         }
 
+        Flea.SelectionBand {
+            parent: view
+            pane: root.pane
+            flickable: view
+            shown: null
+            offset: root.offset
+        }
+
         // Empty space below the last row, the same rule ui/List.qml carries; pane is what says this
         // column draws the pane's own listing rather than a peek.
         TapHandler {

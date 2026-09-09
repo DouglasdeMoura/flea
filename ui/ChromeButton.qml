@@ -2,14 +2,14 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 
-// Enabled chrome uses foreground; active and focused controls use accent, disabled controls use muted.
+// Chrome uses muted ink; active and focused controls use the accent.
 Item {
     id: root
 
     property string glyph: "file"
     property bool active: false
     property bool keyboardFocused: false
-    property color restingColor: Theme.color.foreground
+    property color restingColor: Theme.color.muted
     property real glyphSize: Theme.chromeMarkSize
 
     signal activated()

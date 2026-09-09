@@ -8,7 +8,7 @@ pub fn command(args: &[String]) -> i32 {
         return 2;
     }
     let result = jsondoc::parse(&args[2])
-        .map_err(|error| format!("favourites operation is not JSON ({})", error))
+        .map_err(|error| format!("favorites operation is not JSON ({})", error))
         .and_then(|operation| {
             let store = uistore::Store::user()?;
             if operation.get("op").and_then(Json::as_str) == Some("inspect") {
@@ -39,14 +39,14 @@ fn inspect(state: &Json, operation: &Json) -> Result<Json, String> {
     let indices = operation
         .get("indices")
         .and_then(Json::as_array)
-        .ok_or("favourite inspection needs indices")?;
+        .ok_or("favorite inspection needs indices")?;
     const MAX_VISIBLE: usize = 128;
     if indices.len() > MAX_VISIBLE {
-        return Err("too many favourites requested for one viewport".into());
+        return Err("too many favorites requested for one viewport".into());
     }
     let mut statuses = Vec::new();
     for item in indices {
-        let number = item.as_f64().ok_or("favourite index must be a number")?;
+        let number = item.as_f64().ok_or("favorite index must be a number")?;
         if number < 0.0 || number.fract() != 0.0 || number >= records.len() as f64 {
             continue;
         }
@@ -91,31 +91,31 @@ pub fn changed(state: &Json, operation: &Json) -> Result<Json, String> {
         Some("add") => {
             let record = operation
                 .get("record")
-                .ok_or("favourites add needs a record")?;
+                .ok_or("favorites add needs a record")?;
             let label = record
                 .get("label")
                 .and_then(Json::as_str)
-                .ok_or("favourite label must be text")?;
+                .ok_or("favorite label must be text")?;
             let path = record
                 .get("path")
                 .and_then(Json::as_str)
-                .ok_or("favourite path must be text")?;
+                .ok_or("favorite path must be text")?;
             if !label
                 .chars()
                 .any(|character| !character.is_whitespace() && !character.is_control())
             {
-                return Err("favourite label needs visible text".into());
+                return Err("favorite label needs visible text".into());
             }
             if !valid_path(path) {
                 return Err(
-                    "favourite path must be absolute, ~/ relative, or a supported URI".into(),
+                    "favorite path must be absolute, ~/ relative, or a supported URI".into(),
                 );
             }
             next.push(record.clone());
         }
         Some(action @ ("remove" | "move" | "rename")) => {
             if operation.get("expected").and_then(Json::as_array) != Some(current) {
-                return Err("Favourites changed in another window; refresh before editing".into());
+                return Err("Favorites changed in another window; refresh before editing".into());
             }
             let index = index(operation, "index", next.len())?;
             match action {
@@ -125,7 +125,7 @@ pub fn changed(state: &Json, operation: &Json) -> Result<Json, String> {
                 "move" => {
                     let to = index_value(operation, "to")?;
                     if to >= next.len() {
-                        return Err("favourite move destination is outside the list".into());
+                        return Err("favorite move destination is outside the list".into());
                     }
                     let record = next.remove(index);
                     next.insert(to, record);
@@ -134,13 +134,13 @@ pub fn changed(state: &Json, operation: &Json) -> Result<Json, String> {
                     let label = operation
                         .get("label")
                         .and_then(Json::as_str)
-                        .ok_or("favourite label must be text")?;
+                        .ok_or("favorite label must be text")?;
                     if label.trim().is_empty() {
-                        return Err("favourite label needs visible text".into());
+                        return Err("favorite label needs visible text".into());
                     }
                     let record = next[index]
                         .as_object()
-                        .ok_or("invalid favourite cannot be renamed; remove it explicitly")?;
+                        .ok_or("invalid favorite cannot be renamed; remove it explicitly")?;
                     let mut record = record.to_vec();
                     if let Some(pair) = record.iter_mut().find(|(key, _)| key == "label") {
                         pair.1 = Json::Str(label.into());
@@ -151,7 +151,7 @@ pub fn changed(state: &Json, operation: &Json) -> Result<Json, String> {
                 }
             }
         }
-        _ => return Err("unknown favourites operation".into()),
+        _ => return Err("unknown favorites operation".into()),
     }
     uistate::patched(
         state,
@@ -166,9 +166,9 @@ fn index_value(operation: &Json, key: &str) -> Result<usize, String> {
     let value = operation
         .get(key)
         .and_then(Json::as_f64)
-        .ok_or_else(|| format!("favourite {} must be an index", key))?;
+        .ok_or_else(|| format!("favorite {} must be an index", key))?;
     if value < 0.0 || value.fract() != 0.0 || value > usize::MAX as f64 {
-        return Err(format!("favourite {} must be a non-negative integer", key));
+        return Err(format!("favorite {} must be a non-negative integer", key));
     }
     Ok(value as usize)
 }
@@ -176,7 +176,7 @@ fn index_value(operation: &Json, key: &str) -> Result<usize, String> {
 fn index(operation: &Json, key: &str, len: usize) -> Result<usize, String> {
     let index = index_value(operation, key)?;
     if index >= len {
-        return Err("favourite index is outside the list".into());
+        return Err("favorite index is outside the list".into());
     }
     Ok(index)
 }

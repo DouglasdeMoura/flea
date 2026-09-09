@@ -7,7 +7,7 @@ import "js/Mounts.js" as Mounts
 import "js/Menu.js" as Menu
 import "js/Places.js" as Places
 
-// Places (Favourites, Home, Trash), Network and Devices share one flat cursor in visual order.
+// Places, Favorites, Network and Devices share one flat cursor in visual order.
 Item {
     id: root
 
@@ -18,13 +18,14 @@ Item {
     // this tree took the keyboard away from the list, see ui/SidebarRow.qml's own note.
     property var menu: null
     property int cursorIndex: 0
+    property var cursorEntries: []
     readonly property var placesState: ViewState.state.places || ({})
     readonly property var userFavouriteEntries: Places.storedEntries(Favourites.records, Quickshell.env("HOME")).map(function (entry) {
         entry.error = entry.error || Favourites.statuses[entry.favouriteIndex] || ""
         return entry
     })
     property var homeEntries: []
-    readonly property var placesEntries: root.userFavouriteEntries.concat(root.homeEntries, root.trashEntries)
+    readonly property var placesEntries: root.homeEntries.concat(root.trashEntries, root.userFavouriteEntries)
     readonly property int trashCount: trashMonitor.count
     signal trashChanged()
     function refreshTrash() { trashMonitor.refresh() }
@@ -45,13 +46,15 @@ Item {
     readonly property var deviceEntries: root.placesState.showDevices === false ? [] : devices.entries
     readonly property var entries: root.placesEntries.concat(root.networkEntries, root.deviceEntries)
 
-    // Clamped on the aggregate, never on a group: reading root.entries from onDeviceEntriesChanged
-    // forces the entries binding's own first evaluation, which fires networkEntriesChanged, which
-    // re-enters clampCursor before entries has a value. That threw a TypeError once per launch.
-    onEntriesChanged: { root.clampCursor(); availability.restart() }
-
-    function clampCursor() {
-        root.cursorIndex = Math.max(0, Math.min(root.entries.length - 1, root.cursorIndex))
+    // Reconcile only the aggregate; evaluating entries from a group's change handler re-enters its binding.
+    onEntriesChanged: {
+        var next = Places.railCursorAfter(root.cursorEntries, root.entries, root.cursorIndex)
+        if (root.renamingIndex >= 0
+            && Places.railCursorAfter(root.cursorEntries, root.entries, root.renamingIndex) !== root.renamingIndex)
+            root.cancelRename()
+        root.cursorEntries = root.entries
+        root.cursorIndex = next
+        availability.restart()
     }
 
     signal opened(string path)
@@ -206,7 +209,7 @@ Item {
             var end = key.indexOf(":", 10)
             var index = Number(key.substring(10, end))
             if (JSON.stringify(Favourites.records[index]) === key.substring(end + 1)) Favourites.remove(index)
-            else root.message("Favourites changed; reopen the menu before removing this row.", true)
+            else root.message("Favorites changed; reopen the menu before removing this row.", true)
             return
         }
         Mounts.release(action, key, devices, mounts, root)
@@ -271,6 +274,7 @@ Item {
 
     // An empty submitted name reverts rather than writing an empty label.
     function commitRename(index, name) {
+        if (root.renamingIndex !== index) return
         root.renamingIndex = -1
         root.renameFinished()
         var trimmed = String(name || "").trim()
@@ -341,54 +345,57 @@ Item {
             Text {
                 id: placesHeading
                 x: Style.spacing.rowPaddingX
+                topPadding: Math.ceil(font.pixelSize * 0.15)
                 bottomPadding: Style.spacing.rowGap
-                visible: root.userFavouriteEntries.length > 0
-                text: "FAVOURITES"
+                visible: root.homeEntries.length + root.trashEntries.length > 0
+                text: "PLACES"
                 color: Theme.color.muted
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.caption
                 font.letterSpacing: 1
-            }
-
-            Repeater {
-                id: favRepeater
-                model: root.userFavouriteEntries
-                delegate: SidebarRow {
-                    cursor: index === root.cursorIndex
-                    focused: root.focused
-                    onActivated: function (idx) { root.activate(idx) }
-                    onMenuRequested: function (idx, pos) { root.openRailMenu(idx, pos) }
-                }
-            }
-
-            Text {
-                visible: root.homeEntries.length > 0
-                x: Style.spacing.rowPaddingX
-                topPadding: root.userFavouriteEntries.length > 0 ? Style.spacing.panelGap : 0
-                bottomPadding: Style.spacing.rowGap
-                text: "HOME"
-                color: Theme.color.muted
-                font.family: Theme.font.family
-                font.pixelSize: Theme.font.caption
-                font.letterSpacing: 1
+                textFormat: Text.PlainText
             }
             Repeater {
                 id: homeRepeater
                 model: root.homeEntries
                 delegate: SidebarRow {
-                    cursor: index + root.userFavouriteEntries.length === root.cursorIndex
+                    cursor: index === root.cursorIndex
                     focused: root.focused
-                    onActivated: function (idx) { root.activate(idx + root.userFavouriteEntries.length) }
+                    onActivated: function (idx) { root.activate(idx) }
                 }
             }
             Repeater {
                 id: trashRepeater
                 model: root.trashEntries
                 delegate: SidebarRow {
-                    cursor: root.trashActive || (root.focused && index + root.userFavouriteEntries.length + root.homeEntries.length === root.cursorIndex)
+                    cursor: root.trashActive || (root.focused && index + root.homeEntries.length === root.cursorIndex)
                     focused: root.focused || root.trashActive
-                    onActivated: function (idx) { root.activate(idx + root.userFavouriteEntries.length + root.homeEntries.length) }
-                    onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.userFavouriteEntries.length + root.homeEntries.length, pos) }
+                    onActivated: function (idx) { root.activate(idx + root.homeEntries.length) }
+                    onMenuRequested: function(idx, pos) { root.openRailMenu(idx + root.homeEntries.length, pos) }
+                }
+            }
+
+            Text {
+                id: favouritesHeading
+                visible: root.userFavouriteEntries.length > 0
+                x: Style.spacing.rowPaddingX
+                topPadding: (placesHeading.visible ? Style.spacing.panelGap : 0) + Math.ceil(font.pixelSize * 0.15)
+                bottomPadding: Style.spacing.rowGap
+                text: "FAVORITES"
+                color: Theme.color.muted
+                font.family: Theme.font.family
+                font.pixelSize: Theme.font.caption
+                font.letterSpacing: 1
+                textFormat: Text.PlainText
+            }
+            Repeater {
+                id: favRepeater
+                model: root.userFavouriteEntries
+                delegate: SidebarRow {
+                    cursor: index + root.homeEntries.length + root.trashEntries.length === root.cursorIndex
+                    focused: root.focused
+                    onActivated: function (idx) { root.activate(idx + root.homeEntries.length + root.trashEntries.length) }
+                    onMenuRequested: function (idx, pos) { root.openRailMenu(idx + root.homeEntries.length + root.trashEntries.length, pos) }
                 }
             }
 
@@ -408,11 +415,13 @@ Item {
                 Text {
                     id: netHeading
                     x: Style.spacing.rowPaddingX
+                    topPadding: Math.ceil(font.pixelSize * 0.15)
                     text: "NETWORK"
                     color: Theme.color.muted
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.caption
                     font.letterSpacing: 1
+                    textFormat: Text.PlainText
                 }
 
                 // A hand-drawn plus, not a Text "+": at caption size the font glyph read as a Christian cross, not a plus. Sized off the heading's own font token.
@@ -468,12 +477,14 @@ Item {
                 id: devHeading
                 visible: root.deviceEntries.length > 0
                 x: Style.spacing.rowPaddingX
+                topPadding: Math.ceil(font.pixelSize * 0.15)
                 bottomPadding: Style.spacing.rowGap
                 text: "DEVICES"
                 color: Theme.color.muted
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.caption
                 font.letterSpacing: 1
+                textFormat: Text.PlainText
             }
 
             Repeater {
@@ -491,14 +502,15 @@ Item {
 
     // The "+" ink, its hit target and the rail's own indicator dot: the three boxes that share one centre.
     function networkMarkItems() { var netRow = netRepeater.itemAt(0); return [addGlyph, addMark, netRow ? netRow.indicatorSlot : null] }
+    function headingItems() { return [placesHeading, favouritesHeading, netHeading, devHeading] }
     // The rail has no ListView virtualization, so every row already exists; the same itemFor idiom ui/Pane.qml uses for the list, so a test can find a rail row's on-screen box.
     function railItemFor(index) {
-        if (index < root.userFavouriteEntries.length) return favRepeater.itemAt(index)
-        var rest = index - root.userFavouriteEntries.length
-        if (rest < root.homeEntries.length) return homeRepeater.itemAt(rest)
-        rest -= root.homeEntries.length
+        if (index < root.homeEntries.length) return homeRepeater.itemAt(index)
+        var rest = index - root.homeEntries.length
         if (rest < root.trashEntries.length) return trashRepeater.itemAt(rest)
         rest -= root.trashEntries.length
+        if (rest < root.userFavouriteEntries.length) return favRepeater.itemAt(rest)
+        rest -= root.userFavouriteEntries.length
         if (rest < root.networkEntries.length)
             return netRepeater.itemAt(rest)
         rest -= root.networkEntries.length

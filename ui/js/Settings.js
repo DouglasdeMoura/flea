@@ -232,7 +232,7 @@ function menuRows(hidden, keyHints) {
     }
     out.push({ kind: "group", label: "Shortcuts" })
     out.push({ kind: "check", id: "keyHints", label: "Show keyboard hints", glyph: "keyboard",
-               on: keyHints === true })
+               on: keyHints !== false })
     out.push({ kind: "hint", label: "Draws each row's key beside it, and the next move under an "
                                     + "empty folder. Every key stays bound either way." })
     out.push({ kind: "group", label: "Always shown" })
@@ -386,7 +386,7 @@ function columnRows(state) {
 function placesRows(state) {
     var data = (state.data || {}).places || {}
     var entries = Places.storedEntries(data.favourites || [], state.home || "")
-    var rows = [{ kind: "group", label: "Favourites" }]
+    var rows = [{ kind: "group", label: "Favorites" }]
     for (var i = 0; i < entries.length; i++) {
         rows.push({ kind: "favourite", id: "favourite:" + i, label: entries[i].label,
             value: entries[i].storedPath, glyph: entries[i].glyph, error: entries[i].error || (state.favouriteStatuses || {})[i] || "", favouriteIndex: i })
@@ -400,7 +400,8 @@ function placesRows(state) {
         rows.push({ kind: "check", id: "places." + builtins[b][0], label: builtins[b][1], glyph: builtins[b][2], on: data[builtins[b][0]] !== false })
     }
     rows.push({ kind: "group", label: "Rail" })
-    rows.push({ kind: "check", id: "places.driveSize", label: "Show drive size", glyph: "drive", on: data.driveSize !== false })
+    rows.push({ kind: "check", id: "places.driveSize", label: "Show drive size", glyph: "drive", on: data.driveSize === true })
+    rows.push({ kind: "check", id: "places.trashCount", label: "Show Trash count", glyph: "trash", on: data.trashCount === true })
     rows.push(choice("places.sidebarWidth", "Sidebar width", "maximize", Places.WIDTH_STOPS,
         ["160 px", "192 px", "224 px", "256 px"], Places.sidebarWidth(data.sidebarWidth)))
     return rows

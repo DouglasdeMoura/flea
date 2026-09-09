@@ -14,6 +14,7 @@ FocusScope {
     property bool opened: false
     property Item overlayParent: null
     property var railKeyHandler: null
+    property var statusBar: null
     property int total: 0
     property real totalBytes: 0
     property bool bytesReady: false
@@ -278,6 +279,7 @@ FocusScope {
         if (action === "trashArm" && event.isAutoRepeat) { event.accepted = true; return }
         if (action !== "trashArm") root.trashArmedAt = 0
         var unmodified = (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) === 0
+        if (action === "escape" && root.statusBar && root.statusBar.escapePressed()) { event.accepted = true; return }
         if (action === "escape" || (event.key === Qt.Key_Backspace && unmodified)) root.close()
         else if (action === "cursorDown") root.choose(root.cursor + 1, false)
         else if (action === "cursorUp") root.choose(root.cursor - 1, false)
@@ -327,8 +329,25 @@ FocusScope {
                     Accessible.ignored: false
                     enabled: false
                 }
-                Text { width: Math.max(0, parent.width - 2 * Theme.hitMin - countLabel.width - 3 * parent.spacing); anchors.verticalCenter: parent.verticalCenter; text: "Trash"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-                Text { id: countLabel; width: Math.min(implicitWidth, parent.width / 2); anchors.verticalCenter: parent.verticalCenter; text: root.total + (root.total === 1 ? " item" : " items") + (root.bytesReady ? " · " + (root.bytesPartial ? "≥ " : "") + Format.size(root.totalBytes) : ""); elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+                Text {
+                    width: Math.max(0, parent.width - 2 * Theme.hitMin - countLabel.width - 3 * parent.spacing)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Trash"
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: Theme.color.foreground
+                    font { family: Theme.font.family; pixelSize: Theme.font.caption }
+                }
+                Text {
+                    id: countLabel
+                    width: Math.min(implicitWidth, parent.width / 2)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.total + (root.total === 1 ? " item" : " items") + (root.bytesReady ? " · " + (root.bytesPartial ? "≥ " : "") + Format.size(root.totalBytes) : "")
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: Theme.color.foreground
+                    font { family: Theme.font.family; pixelSize: Theme.font.caption }
+                }
             }
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: Theme.spacing.hairline; color: Theme.color.foreground; opacity: 0.12 }
         }
@@ -339,10 +358,39 @@ FocusScope {
             rightPadding: Theme.spacing.rowPaddingX
             spacing: Theme.spacing.gap
             Item { width: Theme.markSize; height: 1 }
-            Text { id: nameTitle; width: Math.max(0, parent.width - Theme.markSize - locationTitle.width - deletedTitle.width - 3 * parent.spacing - parent.leftPadding - parent.rightPadding); anchors.verticalCenter: parent.verticalCenter; text: "Name"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+            Text {
+                id: nameTitle
+                width: Math.max(0, parent.width - Theme.markSize - locationTitle.width - deletedTitle.width - 3 * parent.spacing - parent.leftPadding - parent.rightPadding)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Name"
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Theme.color.foreground
+                font { family: Theme.font.family; pixelSize: Theme.font.caption }
+            }
             // TrashSidebar's fixed columns are 210/110 at bodySmall 13, then clamp to preserve the name.
-            Text { id: locationTitle; width: Math.min(Math.round(210 * Theme.font.bodySmall / 13), root.width * 0.35); anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: "Original location"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
-            Text { id: deletedTitle; width: Math.min(Math.round(110 * Theme.font.bodySmall / 13), root.width * 0.2); anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: "Deleted"; elide: Text.ElideRight; color: Theme.color.foreground; font { family: Theme.font.family; pixelSize: Theme.font.caption } }
+            Text {
+                id: locationTitle
+                width: Math.min(Math.round(210 * Theme.font.bodySmall / 13), root.width * 0.35)
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                text: "Original location"
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Theme.color.foreground
+                font { family: Theme.font.family; pixelSize: Theme.font.caption }
+            }
+            Text {
+                id: deletedTitle
+                width: Math.min(Math.round(110 * Theme.font.bodySmall / 13), root.width * 0.2)
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                text: "Deleted"
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Theme.color.foreground
+                font { family: Theme.font.family; pixelSize: Theme.font.caption }
+            }
         }
         ListView {
             id: listing

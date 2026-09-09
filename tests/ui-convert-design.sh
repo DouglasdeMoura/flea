@@ -117,7 +117,7 @@ case_convertdesign() (
     request=$(ipc convertState | jq -er .requestId)
     read -r cx cy < <(ipc convertState | jq -er '.formats[] | select(.name == "webp") | .centre')
     row_width=$(ipc convertState | jq -er '.formats[] | select(.name == "webp") | .rect | split(" ")[2] | tonumber')
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     (( cx > 1 && cy > 0 && cx < ww && cy < wh )) || fail "convert: hover target is outside the owned viewport"
     assert_focus
     printf 'CONVERT_POINTER_TARGET window=%s,%s,%s,%s centre=%s,%s\n' "$wx" "$wy" "$ww" "$wh" "$cx" "$cy"

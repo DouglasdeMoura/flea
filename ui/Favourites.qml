@@ -2,7 +2,6 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import "js/Places.js" as Places
 import "js/UiState.js" as UiState
 
 // All callers share one operation writer; the Rust updater locks and re-reads before editing.
@@ -10,19 +9,30 @@ QtObject {
     id: root
     readonly property var records: ((ViewState.state.places || {}).favourites || [])
     readonly property bool busy: writer.running
+    property bool operationActive: false
+    property int recordCount: 0
     property var statuses: ({})
-    onRecordsChanged: root.statuses = ({})
+    onRecordsChanged: {
+        var previousCount = root.recordCount
+        root.recordCount = root.records.length
+        root.statuses = ({})
+        if (!root.operationActive) root.externalChanged(previousCount)
+    }
     property string lastError: ""
     signal wrote()
     signal failed(string message)
     signal completed(string requestId, bool success, string message)
+    signal externalChanged(int previousCount)
 
     function apply(operation, requestId) {
-        if (root.busy) { root.failed("A favourites change is still being saved."); return false }
+        if (root.busy) { root.failed("A Favorites change is still being saved."); return false }
         root.lastError = ""
         writer.answer = ""
         writer.errorText = ""
         writer.requestId = requestId || ""
+        writer.beforeRecords = root.records
+        writer.expectedRecords = UiState.favouritesAfter(root.records, operation)
+        root.operationActive = true
         writer.command = [Quickshell.env("FLEA_BIN") || "flea", "--favourites", JSON.stringify(operation)]
         writer.pending = true
         writer.running = true
@@ -47,6 +57,15 @@ QtObject {
         inspector.command = [Quickshell.env("FLEA_BIN") || "flea", "--favourites", JSON.stringify({ op: "inspect", indices: pending.slice(0, 128) })]
         inspector.running = true
     }
+    function finish(expected) {
+        var changed = JSON.stringify(root.records) !== JSON.stringify(expected)
+        root.operationActive = false
+        if (changed) root.externalChanged(writer.beforeRecords.length)
+    }
+    property var stateChanges: Connections {
+        target: ViewState
+        function onFavouritesReadFailed(message) { root.failed(message) }
+    }
     property var inspection: Process {
         id: inspector
         property string answer: ""
@@ -61,7 +80,7 @@ QtObject {
                         next[rows[i].index] = rows[i].error
                 }
                 root.statuses = next
-            } catch (error) { root.failed("Favourite availability could not be read.") }
+            } catch (error) { root.failed("Favorite availability could not be read.") }
         }
     }
 
@@ -71,11 +90,14 @@ QtObject {
         property string errorText: ""
         property bool pending: false
         property string requestId: ""
+        property var beforeRecords: []
+        property var expectedRecords: []
         onStarted: writer.pending = false
         onRunningChanged: {
             if (!running && pending) {
                 pending = false
-                root.lastError = "Favourites updater could not start."
+                root.finish(writer.beforeRecords)
+                root.lastError = "Favorites updater could not start."
                 root.failed(root.lastError)
                 root.completed(writer.requestId, false, root.lastError)
             }
@@ -85,19 +107,23 @@ QtObject {
         onExited: function (code) {
             writer.pending = false
             if (code !== 0) {
-                root.lastError = writer.errorText.replace(/^flea: /, "").split("\n")[0] || "Favourites could not be saved."
+                ViewState.refreshFavourites()
+                root.finish(writer.beforeRecords)
+                root.lastError = writer.errorText.replace(/^flea: /, "").split("\n")[0] || "Favorites could not be saved."
                 root.failed(root.lastError)
                 root.completed(writer.requestId, false, root.lastError)
                 return
             }
             try {
                 var state = JSON.parse(writer.answer)
-                if (!state.places || !Array.isArray(state.places.favourites)) throw new Error("missing favourites")
-                ViewState.state = UiState.withGroup(ViewState.state, "places", { favourites: state.places.favourites })
+                if (!state.places || !Array.isArray(state.places.favourites)) throw new Error("missing favorites")
+                if (!ViewState.refreshFavourites()) throw new Error("saved favorites could not be read")
+                root.finish(writer.expectedRecords)
                 root.wrote()
                 root.completed(writer.requestId, true, "")
             } catch (error) {
-                root.lastError = "Favourites were saved, but their new state could not be read."
+                root.finish(writer.beforeRecords)
+                root.lastError = "Favorites were saved, but their new state could not be read."
                 root.failed(root.lastError)
                 // CLI exit zero means the write committed; a response error must never replay the add.
                 root.completed(writer.requestId, true, root.lastError)

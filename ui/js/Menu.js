@@ -14,7 +14,7 @@ function clamp(point, size, bounds) {
     return Math.max(0, Math.min(Math.max(0, bounds - size), start))
 }
 
-// SettingsMenus.html's 29 actions share one order; F=file/folder, B=background, T=Trash rail.
+// SettingsMenus and SettingsPlaces share one order; F=file/folder, B=background, T=Trash rail.
 var INVENTORY = [
     ["open", "Open", "folder-open", "FT", "open"],
     ["newFolder", "New Folder", "folder-plus", "B", "open"],
@@ -40,6 +40,7 @@ var INVENTORY = [
     ["properties", "Properties", "info", "F", "inspect"],
     ["permissions", "Permissions", "lock", "F", "inspect"],
     ["copypath", "Copy path", "file-text", "F", "inspect"],
+    ["addFavourite", "Add to Favorites", "star", "FB", "inspect"],
     ["sort", "Sort by", "sort", "B", "view"],
     ["toggleHidden", "Show hidden files", "eye", "FB", "view"],
     ["settings", "Settings", "sliders", "B", "settings"],
@@ -57,7 +58,7 @@ function buildEntries(kind, p) {
         var spec = INVENTORY[i]
         if (spec[3].indexOf(kind) < 0 || isHidden(p.hiddenActions, spec[0])) continue
         var entry = { id: spec[0], action: spec[5] || spec[0], label: spec[1], glyph: spec[2] }
-        if (!availableEntry(entry, p)) continue
+        if (!availableEntry(entry, p, kind)) continue
         if (out.length && group !== spec[4]) out.push({ separator: true })
         group = spec[4]
         out.push(entry)
@@ -65,8 +66,10 @@ function buildEntries(kind, p) {
     return out
 }
 
-function availableEntry(e, p) {
+function availableEntry(e, p, kind) {
     var count = p.selectionCount === undefined ? 1 : p.selectionCount
+    if (e.action === "addFavourite" && kind === "F")
+        e.disabled = count !== 1 || ((Number(p.rowMode) || 0) & 0o170000) !== 0o040000
     if (e.action === "paste") e.disabled = p.clipboardAvailable !== true
     if (["duplicate", "rename", "openWith", "properties"].indexOf(e.action) >= 0)
         e.disabled = count !== 1

@@ -33,6 +33,7 @@ Item {
     readonly property bool isHint: root.kind === "hint"
     readonly property bool isFooter: root.isHint && root.row.footer === true
     readonly property bool isFavourite: root.kind === "favourite" || root.kind === "favouriteActions"
+    readonly property Item favouriteItem: favourite
     readonly property bool isHero: root.kind === "hero"
     readonly property bool isKeyPreview: root.kind === "keyPreview"
     readonly property bool isLock: root.kind === "lock"
@@ -50,7 +51,7 @@ Item {
         ? (root.row.state === "all" ? "check" : (root.row.state === "some" ? "minus" : ""))
         : (root.row.on === true ? "check" : "")
 
-    height: root.isGroup ? groupLabel.y + root.groupLineHeight + root.groupPaddingBottom
+    height: root.isGroup ? groupLabel.y + groupLabel.height + root.groupPaddingBottom
             : root.isFavourite ? favourite.implicitHeight : root.isHero ? hero.implicitHeight + 4 * Theme.spacing.rowPaddingY
             : root.isKeyPreview ? keyPreview.implicitHeight + 2 * Theme.spacing.rowPaddingY
             : root.isHint ? hint.y + hint.implicitHeight + (root.isFooter
@@ -183,13 +184,14 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: Theme.spacing.rowPaddingX
         y: root.groupGap + (root.firstGroup ? 0 : Theme.spacing.hairline) + root.groupPaddingTop
-        height: root.groupLineHeight
+        height: root.groupLineHeight + topPadding
+        topPadding: Math.ceil(font.pixelSize * 0.15)
         verticalAlignment: Text.AlignVCenter
         text: root.row.label || ""
         color: Theme.color.muted
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
-        font.weight: Font.Medium
+        font.bold: true
         // The canvas sets every group eyebrow in small caps, the same treatment the rail's own headings take.
         font.capitalization: Font.AllUppercase
         font.letterSpacing: Theme.font.caption * 0.14

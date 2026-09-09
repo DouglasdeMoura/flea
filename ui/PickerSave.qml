@@ -38,6 +38,7 @@ Item {
                 rowSpacing: Theme.spacing.hairline * 4
                 Text {
                     text: "Filename"
+                    textFormat: Text.PlainText
                     color: Theme.color.foreground
                     font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 }
@@ -71,6 +72,7 @@ Item {
                 Text {
                     visible: !root.refused
                     text: "Output URI"
+                    textFormat: Text.PlainText
                     color: Theme.color.foreground
                     font { family: Theme.font.family; pixelSize: Theme.font.caption }
                 }
@@ -131,6 +133,7 @@ Item {
                 width: parent.width
                 visible: root.picker.saveCollision
                 text: "This confirms the shown name and folder. Cancel leaves the existing file untouched."
+                textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
                 color: Theme.color.foreground
                 font { family: Theme.font.family; pixelSize: Theme.font.caption }
@@ -164,6 +167,7 @@ Item {
             id: caption
             anchors.centerIn: parent
             text: control.label
+            textFormat: Text.PlainText
             color: control.danger ? Theme.color.error : Theme.color.foreground
             font { family: Theme.font.family; pixelSize: Theme.font.caption }
         }

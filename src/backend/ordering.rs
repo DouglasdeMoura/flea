@@ -14,7 +14,8 @@ pub fn request(
     line: &str,
 ) -> Result<(f64, f64), &'static str> {
     let value = crate::jsondoc::parse(line).map_err(|_| "invalid ordering request")?;
-    let by = value.get("by").and_then(|v| v.as_str()).unwrap_or("name");
+    let default_by = if value.get("c").and_then(|v| v.as_str()) == Some("sort") { "" } else { "name" };
+    let by = value.get("by").and_then(|v| v.as_str()).unwrap_or(default_by);
     let desc = value.get("desc").and_then(|v| v.as_bool()).unwrap_or(false);
     let folders = value
         .get("foldersFirst")
@@ -38,11 +39,11 @@ pub fn ordered(
     groups: bool,
 ) -> Result<(f64, f64), &'static str> {
     let by = if by == "date" { "mtime" } else { by };
-    if by != "kind" && folders && !groups {
-        return Ok(sort_listing(l, base, parse_sort_by(by)?, desc));
-    }
     if !["name", "size", "mtime", "kind"].contains(&by) {
         return Err("no such sort key; send name, size, mtime or kind");
+    }
+    if by != "kind" && folders && !groups {
+        return Ok(sort_listing(l, base, parse_sort_by(by)?, desc));
     }
     let (stats, pass_ms) = if by == "size" || by == "mtime" {
         let (stats, ms) = stat_all(base, l);
@@ -115,6 +116,31 @@ fn group_rank(directory: bool, mime: &str) -> u8 {
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+
+    #[test]
+    fn sort_requires_a_key_while_list_keeps_its_default() {
+        let d = TestDir::new("sort-key");
+        let mut listing = Listing::new();
+        listing.push("z.txt", false);
+        listing.push("a.txt", false);
+        let db = Db::from_str("50:text/plain:*.txt\n");
+        for line in [
+            r#"{"c":"sort"}"#,
+            r#"{"c":"sort","by":null}"#,
+            r#"{"c":"sort","by":true}"#,
+            r#"{"c":"sort","by":""}"#,
+            r#"{"c":"sort","by":"mode"}"#,
+            r#"{"c":"sort","by":"mode","foldersFirst":false}"#,
+            r#"{"c":"sort","by":"mode","groupByKind":true}"#,
+        ] {
+            assert_eq!(request(&mut listing, d.path(), &db, line).unwrap_err(),
+                "no such sort key; send name, size, mtime or kind");
+            assert_eq!((listing.name(0), listing.name(1)), ("z.txt", "a.txt"),
+                "a refused sort leaves the existing order intact: {}", line);
+        }
+        request(&mut listing, d.path(), &db, r#"{"c":"list"}"#).unwrap();
+        assert_eq!((listing.name(0), listing.name(1)), ("a.txt", "z.txt"));
+    }
 
     #[test]
     fn folder_toggle_and_grouping_change_real_order() {

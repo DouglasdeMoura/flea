@@ -4,12 +4,13 @@
 
 case_railorder() {
     local dir="$fixture_root/railorder" state="$fixture_root/railorder-state" config="$fixture_root/railorder-config"
-    local entries trash_index home_index cx trash_y home_y end
+    local entries trash_index home_index favourite_index cx trash_y home_y favourite_y end seed
     sandbox_scratch "$dir"
     sandbox_scratch "$state"
     sandbox_scratch "$config"
     export XDG_CONFIG_HOME="$config"
-    seed_ui_state "$state" '{"view":"list","places":{"showTrash":true,"showNetwork":true,"showDevices":true}}'
+    seed=$(jq -cn --arg path "$dir" '{view:"list",places:{favourites:[{label:"Rail favorite",path:$path}],showTrash:true,showNetwork:true,showDevices:true}}')
+    seed_ui_state "$state" "$seed"
     launch "$dir"
     wait_listing 0
     end=$((SECONDS + 20))
@@ -23,15 +24,22 @@ case_railorder() {
         $trash != null and $trash > 0 and .[0].label == "Home" and
         ([.[] | select(.group == "trash")] | length) == 1 and
         .[$trash].path == "trash:///" and .[$trash - 1].group == "home" and
-        all(.[:$trash][]; .group == "favourite" or .group == "home") and
-        all(.[$trash + 1:][]; .group != "home" and .group != "favourite" and .group != "trash")
-    ' <<< "$entries" >/dev/null || fail "railorder: Trash is not last in Places before Network/Devices: $entries"
+        all(.[:$trash][]; .group == "home") and .[$trash + 1].group == "favourite" and
+        all(.[$trash + 2:][]; .group == "network" or .group == "device")
+    ' <<< "$entries" >/dev/null || fail "railorder: expected Places, Favorites, Network, Devices: $entries"
     trash_index=$(jq -r 'map(.group) | index("trash")' <<< "$entries")
     home_index=$((trash_index - 1))
+    favourite_index=$((trash_index + 1))
     read -r cx trash_y <<< "$(ipc railRowCentre "$trash_index")"
     read -r cx home_y <<< "$(ipc railRowCentre "$home_index")"
+    read -r cx favourite_y <<< "$(ipc railRowCentre "$favourite_index")"
     [[ "$trash_y" =~ ^[0-9]+$ && "$home_y" =~ ^[0-9]+$ && "$trash_y" -gt "$home_y" ]] \
         || fail "railorder: live Trash row does not follow the Home/XDG rows"
+    [[ "$favourite_y" =~ ^[0-9]+$ && "$favourite_y" -gt "$trash_y" ]] || fail "railorder: Favorites does not follow Trash"
+    ipc railDetails | jq -e '[.headers[] | select(.visible) | .text] ==
+        (["PLACES", "FAVORITES"] + (if any(.rows[]; .group == "network") then ["NETWORK"] else [] end)
+        + (if any(.rows[]; .group == "device") then ["DEVICES"] else [] end))' >/dev/null \
+        || fail "railorder: native section labels/order differ from the ruled rail"
     trash_shot trash-rail-order
     printf 'TRASH_RAIL_ORDER entries=%s home_y=%s trash_y=%s\n' "$entries" "$home_y" "$trash_y"
     kill_flea
@@ -218,7 +226,7 @@ trash_click() {
     if [[ -n "$argument" ]]; then read -r cx cy <<< "$(ipc "$reader" "$argument")"
     else read -r cx cy <<< "$(ipc "$reader")"; fi
     [[ "$cx" =~ ^[0-9]+$ && "$cy" =~ ^[0-9]+$ ]] || fail "trash: missing native control centre"
-    read -r wx wy _width _height < <(window_box)
+    read -r wx wy _width _height < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((wx + cx))" "$((wy + cy))" "$button" "${modifiers[@]}" >/dev/null \
         || fail "trash: native pointer activation failed"
 }
@@ -272,6 +280,7 @@ trash_move() {
 }
 
 case_trashbasic() { case_trash basic; }
+case_raildetails() { case_trash raildetails; }
 case_trashcontrols() { case_trash controls; }
 case_trashkeys() { case_trash keys; }
 case_trashrestore() { case_trash restore; }
@@ -321,9 +330,9 @@ trash_confirmation_controls() {
         wait_listing 1
         [[ "$(ipc keymapPreset)" == "$preset" ]] || fail "trash: native preset differs from $preset"
         trash_guard_store 1
-        trash_wait '(.opened == false) and .count == 1 and .rail.countText == "1" and (.rail.current == false)' "$preset persisted count outside Trash"
+        trash_wait '(.opened == false) and .count == 1 and .rail.countText == "" and (.rail.current == false)' "$preset count defaults hidden outside Trash"
         trash_rail
-        trash_wait '.opened and .total == 1 and (.busy == false) and .rail.current and .rail.countText == "1" and .headerLabels == ["Name", "Original location", "Deleted"] and (.upEnabled == false)' "$preset dedicated view controls"
+        trash_wait '.opened and .total == 1 and (.busy == false) and .rail.current and .rail.countText == "" and .headerLabels == ["Name", "Original location", "Deleted"] and (.upEnabled == false)' "$preset dedicated view controls"
         trash_click trashControlCentre up
         trash_wait '.opened and .total == 1 and (.busy == false)' "$preset Up is inert"
         trash_click trashControlCentre back
@@ -455,7 +464,7 @@ trash_restore_failures() {
     trash_guard_store 0
     [[ "$(cat "$payload/beta.txt")" == beta ]] || fail "trash: Restore all lost the original content"
     [[ "$(ipc statusError)" == true ]] || fail "trash: successful Restore all silently acknowledged the collision"
-    trash_click statusDismissCentre
+    key -k Escape >/dev/null
     [[ "$(ipc statusError)" == false ]] || fail "trash: restore collision acknowledgement failed"
 
     trash_guard "$original"
@@ -488,7 +497,7 @@ trash_restore_failures() {
     trash_guard_store 0
     [[ "$(cat "$original")" == 'missing parent survivor' ]] || fail "trash: retry after parent recovery lost content"
     [[ "$(ipc statusError)" == true ]] || fail "trash: retry silently acknowledged missing-parent failure"
-    trash_click statusDismissCentre
+    key -k Escape >/dev/null
     [[ "$(ipc statusError)" == false ]] || fail "trash: missing-parent acknowledgement failed"
     key -k Backspace >/dev/null
     trash_wait '(.opened == false)'
@@ -636,6 +645,11 @@ case_trash() {
     trash_wait '(.opened == false)'
     wait_path "$payload"
 
+    if [[ "$trash_case_label" == raildetails ]]; then
+        rail_details_native || fail "rail: native detail proof failed"
+        trash_cleanup 0
+    fi
+
     printf 'alpha\n' > "$payload/alpha.txt"
     printf 'beta\n' > "$payload/beta.txt"
     wait_listing 2
@@ -713,7 +727,7 @@ case_trash() {
     trash_wait '.total == 0 and (.busy == false)'
     trash_guard_store 0
     [[ "$(ipc statusError)" == true ]] || fail "trash: success silently acknowledged prior failure"
-    trash_click statusDismissCentre
+    key -k Escape >/dev/null
     [[ "$(ipc statusError)" == false ]] || fail "trash: explicit acknowledgement did not dismiss failure"
     trash_shot trash-recovered-empty
     trash_cleanup 0

@@ -42,7 +42,7 @@ permissions_point() {
     local centre="$1" button="${2:-left}" cx cy wx wy ww wh
     read -r cx cy <<< "$centre"
     [[ "$cx" =~ ^[0-9]+$ && "$cy" =~ ^[0-9]+$ ]] || fail "permissions: native control has no centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     (( cx < ww && cy < wh )) || fail "permissions: control is outside the actual viewport"
     assert_focus
     omarchy-drive click "$((wx + cx))" "$((wy + cy))" "$button" >/dev/null \
@@ -71,7 +71,7 @@ permissions_viewport() {
     [[ "$result" == ok* ]] || fail "permissions: compositor refused resize: $result"
     omarchy-drive window center "$address" || fail "permissions: owned window could not center"
     while (( SECONDS < end )); do
-        read -r wx wy width height < <(window_box)
+        read -r wx wy width height < <(window_box) || fail "native window coordinates unavailable"
         [[ "$width" == "$target_width" && "$height" == "$target_height" ]] && return
         sleep 0.05
     done
@@ -489,7 +489,7 @@ permissions_overlay() {
         printf 'overlay fixture\n' > "$permissions_listing/z$i.txt"
     done
     wait_listing 86
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     read -r cx cy <<< "$(ipc rowCentre 5)"
     omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null || fail "permissions: wheel control pointer failed"
     omarchy-drive scroll down 3 >/dev/null || fail "permissions: wheel control failed"

@@ -18,18 +18,26 @@ function separated(rows) {
 }
 function run(check) {
     var file = Menu.listingEntries(state({}))
-    check("authoritative inventory has 29 unique actions", Menu.INVENTORY.length, 29)
+    check("Menus and Places inventory has 30 actions", Menu.INVENTORY.length, 30)
     check("Open With uses the authoritative cut geometry", Icons.pathFor("external-link"), "M14 3h7v7 M21 3 11 13 M18 13v8H3V6h8")
     check("Restore all uses the authoritative undo geometry", Icons.pathFor("undo"), "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8 M3 3v5h5")
-    check("inventory storage ids are unique", Object.keys(Menu.INVENTORY.reduce(function (out, row) { out[row[0]] = true; return out }, {})).length, 29)
+    check("inventory storage ids are unique", Object.keys(Menu.INVENTORY.reduce(function (out, row) { out[row[0]] = true; return out }, {})).length, 30)
     check("default image menu matches Menus specimen", actions(file),
-          "open,cut,copy,paste,duplicate,rename,compress,convert,taildrop,dropbox,trash,toggleHidden")
+          "open,cut,copy,paste,duplicate,rename,compress,convert,taildrop,dropbox,trash,addFavourite,toggleHidden")
     check("empty clipboard leaves Paste visible and disabled", entry(file, "paste").disabled, true)
     check("populated clipboard enables Paste", entry(Menu.listingEntries(state({ clipboardAvailable: true })), "paste").disabled, false)
     check("folder omits conversion and extraction", actions(Menu.listingEntries(state({ rowMode: 0o040755, rowIsImage: false }))),
-          "open,cut,copy,paste,duplicate,rename,compress,taildrop,dropbox,trash,toggleHidden")
+          "open,cut,copy,paste,duplicate,rename,compress,taildrop,dropbox,trash,addFavourite,toggleHidden")
     check("background menu includes real creation actions in order", actions(Menu.listingEntries(state({ hasRow: false }))),
-          "newFolder,newFile,paste,selectAll,sort,toggleHidden,settings")
+          "newFolder,newFile,paste,selectAll,addFavourite,sort,toggleHidden,settings")
+    check("selected file cannot be pinned as a folder", entry(file, "addFavourite").disabled, true)
+    check("Favorites menu uses GM's displayed spelling", entry(file, "addFavourite").label, "Add to Favorites")
+    check("selected directory can be pinned", entry(Menu.listingEntries(state({ rowMode: 0o040755 })), "addFavourite").disabled, false)
+    check("multi-selection cannot pin a cursor sibling", entry(Menu.listingEntries(state({ rowMode: 0o040755, selectionCount: 2 })), "addFavourite").disabled, true)
+    check("symlink metadata cannot pretend to be a directory", entry(Menu.listingEntries(state({ rowMode: 0o120777 })), "addFavourite").disabled, true)
+    check("missing metadata cannot be pinned", entry(Menu.listingEntries(state({ rowMode: undefined })), "addFavourite").disabled, true)
+    check("background pins the current folder without selected rows", entry(Menu.listingEntries(state({ hasRow: false, selectionCount: 0 })), "addFavourite").disabled, undefined)
+    check("direct background builder ignores row eligibility", entry(Menu.backgroundEntries(state({})), "addFavourite").disabled, undefined)
     check("empty Trash retains both disabled actions", actions(Menu.trashEntries(0, false)), "open,restoreAll,emptyTrash")
     check("empty Trash disables restore", entry(Menu.trashEntries(0, false), "restoreAll").disabled, true)
     check("empty Trash disables empty", entry(Menu.trashEntries(0, false), "emptyTrash").disabled, true)

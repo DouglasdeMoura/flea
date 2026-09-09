@@ -96,11 +96,11 @@ function act(action, root, menuId, paths) {
     case "focusPreview": root.focusPreviewColumn(); return
     case "windowNew": root.newWindow(); return
     case "toggleHidden": root.toggleHidden(); return
-    // Esc unwinds one thing at a time, and the least destructive first: a running walk, then the
-    // search, then the filter (which loses nothing), then the selection, then the transient line.
+    // Popups handle Escape first; the focused listing then unwinds filter, search, status and marks.
     case "escape":
-        if (root.searchMode.length > 0) Search.cancel(root)
-        else if (root.filterTyping || root.filterQuery.length > 0) Filter.close(root)
+        if (root.filterTyping || root.filterQuery.length > 0) Filter.close(root)
+        else if (root.searchMode.length > 0 && root.focusView === LIST) Search.cancel(root)
+        else if (root.statusBar && root.statusBar.escapePressed()) return
         else root.escapePressed()
         return
     case "preview": PreviewKeys.open(root); return
@@ -240,6 +240,11 @@ function sequenceAction(action, root) {
 
 // Lifted whole from Pane.qml's Keys.onPressed, which had grown past its file's 400-line cap; returns whether the key was consumed.
 function handleKey(event, root, sidebar) {
+    if (root.selectionBand) {
+        if (event.key === Qt.Key_Escape)
+            root.selectionBand.cancel()
+        return true
+    }
     // Guards a key that reaches the list before a rename field's own focus transfer lands, the OEM's
     // "blocked:" lesson; the row editor and the rail's own field both need it. The index alone is not
     // asked, because an editor released by a scroll or hidden by a view change left it set with

@@ -78,6 +78,7 @@ drain_wait_s=30
 # environment. Neither override had a caller.
 run_root=$(mktemp -d /tmp/flea-ui-run.XXXXXXXX) || fail "cannot create native evidence sandbox"
 printf 'flea native evidence\n' > "$run_root/.flea-test-sandbox"
+export FLEA_TEST_RUN_ROOT="$run_root"
 evidence_dir="$run_root/evidence"
 # Quickshell truncates nothing, so each case gets a fresh log and every log lands in the run log.
 flea_log="$run_root/flea.log"
@@ -128,19 +129,38 @@ settle() {
 }
 
 flea_pids() {
-    local pid
-    for pid in $(pgrep -x qs || true); do
-        [[ -r "/proc/$pid/cmdline" ]] || continue
+    local pid pids process result=0
+    pids=$(pgrep -x qs) || result=$?
+    (( result <= 1 )) || return "$result"
+    for pid in $pids; do
+        process=$(flea_process_dir "$pid") || return 3
+        [[ -r "$process/cmdline" ]] || continue
         # Redirections apply left to right, so the silencer has to precede the read it is silencing.
-        if tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" | grep -Fq "$flea_ui"; then
+        if tr '\0' ' ' 2>/dev/null < "$process/cmdline" | grep -Fq "$flea_ui"; then
             printf '%s\n' "$pid"
         fi
     done
 }
 
+flea_process_dir() { printf '/proc/%s\n' "$1"; }
+
+# Return 0 for this run, 1 for foreign, 2 for vanished, and 3 when a live process cannot be inspected.
+flea_process_owned() {
+    local process environment
+    [[ "$1" =~ ^[0-9]+$ ]] || return 1
+    process=$(flea_process_dir "$1") || return 3
+    [[ -d "$process" ]] || return 2
+    [[ -O "$process" ]] || return 1
+    environment=$(tr '\0' '\n' 2>/dev/null < "$process/environ") || {
+        [[ -d "$process" ]] || return 2
+        return 3
+    }
+    grep -Fx "FLEA_TEST_RUN_ROOT=$run_root" <<< "$environment" >/dev/null
+}
+
 # Any Flea from this checkout that we did not start, captured once before anything is killed. The
 # operator works at this box, and flea_pids cannot tell their window from ours: both match "$flea_ui".
-foreign_pids=$(flea_pids | tr '\n' ' ')
+foreign_pids=$(flea_pids | tr '\n' ' ') || fail "cannot enumerate native windows before launch"
 if [[ -n "${foreign_pids// /}" ]]; then
     printf 'REFUSED a Flea from %s is already running (pid%s %s)\n' \
         "$flea_ui" "$( [[ $(wc -w <<< "$foreign_pids") -gt 1 ]] && printf s )" "${foreign_pids% }"
@@ -168,57 +188,84 @@ unset foreign_window_count windows_json windows_status
 
 # The backend outlives the qs that spawned it, and only its own drain may publish or remove its temps.
 backend_pids() {
-    local pid
-    for pid in $(pgrep -x flea || true); do
-        [[ -r "/proc/$pid/cmdline" ]] || continue
-        if tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" | grep -Fq -- "$flea_bin --backend"; then
-            printf '%s\n' "$pid"
+    local pid pids process result=0
+    pids=$(pgrep -x flea) || result=$?
+    (( result <= 1 )) || return "$result"
+    for pid in $pids; do
+        process=$(flea_process_dir "$pid") || return 3
+        [[ -r "$process/cmdline" ]] || continue
+        if tr '\0' ' ' 2>/dev/null < "$process/cmdline" | grep -Fq -- "$flea_bin --backend"; then
+            if flea_process_owned "$pid"; then printf '%s\n' "$pid"
+            else result=$?; (( result != 3 )) || return 3; fi
         fi
     done
 }
 
 flea_pid() {
+    local found
     local -a pids
-    mapfile -t pids < <(flea_pids)
+    found=$(flea_pids) || fail "cannot enumerate native window processes"
+    pids=()
+    [[ -z "$found" ]] || mapfile -t pids <<< "$found"
     [[ ${#pids[@]} -eq 1 ]] || fail "expected one exact Flea qs pid, got ${#pids[@]}"
     printf '%s\n' "${pids[0]}"
 }
 
 owned_trash_monitors() {
-    local pid
-    for pid in $(pgrep -x gio || true); do
-        [[ -r "/proc/$pid/environ" ]] || continue
-        if tr '\0' '\n' < "/proc/$pid/environ" | grep -Fx "FLEA_BIN=$flea_bin" >/dev/null \
-            && tr '\0' '\n' < "/proc/$pid/environ" | grep -F "FLEA_PATH=$fixture_root/" >/dev/null; then
-            printf '%s\n' "$pid"
+    local pid pids process result=0
+    pids=$(pgrep -x gio) || result=$?
+    (( result <= 1 )) || return "$result"
+    for pid in $pids; do
+        process=$(flea_process_dir "$pid") || return 3
+        if flea_process_owned "$pid"; then
+            if tr '\0' '\n' < "$process/environ" | grep -Fx "FLEA_BIN=$flea_bin" >/dev/null \
+                && tr '\0' '\n' < "$process/environ" | grep -F "FLEA_PATH=$fixture_root/" >/dev/null; then
+                printf '%s\n' "$pid"
+            fi
+        else
+            result=$?
+            (( result != 3 )) || return 3
         fi
     done
 }
 
 kill_flea() {
-    local pid found waited
-    for pid in $(flea_pids); do
+    local pid pids found waited ownership deadline=$((SECONDS + drain_wait_s))
+    [[ "$run_root" == /* && -f "$run_root/.flea-test-sandbox" ]] || fail "native process ownership root is missing"
+    pids=$(flea_pids) || fail "cannot enumerate native windows for teardown"
+    for pid in $pids; do
         [[ " $foreign_pids " == *" $pid "* ]] && continue
-        kill "$pid"
+        if flea_process_owned "$pid"; then
+            kill "$pid" || {
+                [[ ! -d "$(flea_process_dir "$pid")" ]] || fail "could not stop owned native window $pid"
+            }
+        else
+            ownership=$?
+            (( ownership == 2 )) || fail "refusing to signal unowned or unreadable native window $pid"
+        fi
     done
     while :; do
         found=0
-        for pid in $(flea_pids); do
+        pids=$(flea_pids) || fail "cannot enumerate native windows while draining"
+        for pid in $pids; do
             [[ " $foreign_pids " == *" $pid "* ]] && continue
-            found=1
+            if flea_process_owned "$pid"; then found=1
+            else
+                ownership=$?
+                (( ownership == 2 )) || fail "refusing to drain unowned or unreadable native window $pid"
+            fi
         done
         [[ "$found" -eq 0 ]] && break
+        (( SECONDS < deadline )) || fail "owned native window survived for $drain_wait_s s; fixtures kept"
         sleep 0.05
     done
     # Killing qs closes the backend's stdin, and it keeps publishing into the shared cache until its drain ends.
     for waited in $(seq 1 $((drain_wait_s * 20))); do
         found=0
-        for pid in $(backend_pids); do
-            found=1
-        done
-        for pid in $(owned_trash_monitors); do
-            found=1
-        done
+        pids=$(backend_pids) || fail "cannot inspect backend ownership while draining"
+        [[ -z "$pids" ]] || found=1
+        pids=$(owned_trash_monitors) || fail "cannot inspect Trash monitor ownership while draining"
+        [[ -z "$pids" ]] || found=1
         [[ "$found" -eq 0 ]] && return
         sleep 0.05
     done
@@ -233,18 +280,16 @@ sandbox_make "$hash_fixture"
 sandbox_make "$stale_fixture"
 
 cleanup() {
-    local wedged=0
     # fail is an exit that || true cannot catch, so the reap runs in a subshell and its status is re-raised below.
-    ( kill_flea ) || wedged=1
+    if ! ( kill_flea ); then
+        printf 'FAIL drain at exit; active fixture roots kept: %s\n' "$fixture_root" >&2
+        exit 1
+    fi
     local root
     for root in "$fixture_root" "$thumb_fixture" "$hash_fixture" "$stale_fixture"; do
         sandbox_remove "$root"
     done
     cache_restore
-    if [[ "$wedged" -eq 1 ]]; then
-        printf 'FAIL drain at exit\n'
-        exit 1
-    fi
 }
 
 # src/backend/thumbcache.rs honours XDG_CACHE_HOME, so the whole run's thumbnails land inside the
@@ -470,8 +515,21 @@ wait_rail() {
 
 # The Flea window is tiled here, so a pane coordinate needs its origin added before a click.
 window_box() {
-    omarchy-drive windows --json \
-        | jq -r '.windows[] | select(.title == "Flea") | "\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1])"'
+    local clients geometry pid expected wx wy width height
+    # The driver's windows summary omits PID; native client IPC ties coordinates to this run.
+    clients=$(hyprctl clients -j) || fail "cannot inspect native window ownership"
+    # hyprctl clients -j: [{"class":"com.thisisgm.flea","pid":123,"at":[12,42],"size":[880,620]}]
+    geometry=$(jq -er --arg class "$flea_window_class" '
+        [.[] | select(.class == $class)] | select(length == 1) | .[0]
+        | [.pid, .at[0], .at[1], .size[0], .size[1]]
+        | select(all(.[]; type == "number" and . == floor))
+        | select(.[0] > 0 and .[3] > 0 and .[4] > 0) | @tsv' <<< "$clients") \
+        || fail "expected exactly one native Flea window with valid geometry"
+    read -r pid wx wy width height <<< "$geometry"
+    expected=$(flea_pid) || fail "cannot identify the owned native window"
+    [[ "$pid" == "$expected" ]] && flea_process_owned "$pid" \
+        || fail "refusing coordinates from unowned native window $pid"
+    printf '%s %s %s %s\n' "$wx" "$wy" "$width" "$height"
 }
 
 click_row() {
@@ -480,7 +538,7 @@ click_row() {
     centre=$(ipc rowCentre "$index")
     [[ -n "$centre" ]] || fail "row $index has no on-screen centre"
     read -r cx cy <<< "$centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     # Everything after the index goes straight to omarchy-drive: the button, --double, --mods.
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" "$@" >/dev/null
 }
@@ -555,7 +613,7 @@ click_background() {
     [[ -n "$cy" ]] || fail "click_background: the listing area has no centre of its own"
     landed=$(list_row_at_y "$cy")
     [[ -z "$landed" ]] || fail "click_background: the listing area's centre lands on row $landed"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" right >/dev/null
 }
 
@@ -584,7 +642,7 @@ click_chip() {
     centre=$(ipc networkChipCentre "$name")
     [[ -n "$centre" ]] || fail "the network form has no chip called $name"
     read -r cx cy <<< "$centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
 }
 
@@ -645,7 +703,7 @@ click_chrome() {
     centre=$(ipc chromeButtonCentre "$glyph")
     [[ -n "$centre" ]] || fail "the chrome has no button called $glyph"
     read -r cx cy <<< "$centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
 }
 
@@ -657,7 +715,7 @@ click_rail_row() {
     centre=$(ipc railRowCentre "$index")
     [[ -n "$centre" ]] || fail "rail row $index has no on-screen centre"
     read -r cx cy <<< "$centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" "$button" >/dev/null
 }
 
@@ -700,7 +758,7 @@ probe_network_mark_target() {
     centre=$(ipc networkMarkCentre)
     [[ -n "$centre" ]] || fail "network: the + hit target has no centre point"
     read -r _cx cy <<< "$centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     for probe in "$((tx + 1)) true" "$((tx + tw - 1)) true" "$((tx - 2)) false" "$((tx + tw + 1)) false"; do
         read -r x want <<< "$probe"
         omarchy-drive click "$((x + wx))" "$((cy + wy))" >/dev/null
@@ -904,7 +962,7 @@ case_scroll() {
     settle
     local wx wy ww wh cx cy before after
     [[ "$(ipc wheelLines)" == "3" ]] || fail "scroll: the platform reports $(ipc wheelLines) lines a notch, this case assumes 3"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     read -r cx cy <<< "$(ipc rowCentre 5)"
     # omarchy-drive scroll takes no point: warp there, then one uinput pixel so Qt sees a pointer frame.
     hyprctl dispatch "hl.dsp.cursor.move({x = $((wx + cx - 1)), y = $((wy + cy))})" >/dev/null
@@ -935,7 +993,7 @@ case_cursor() {
     settle
     shot cursor-before-scroll
     local wx wy ww wh burst cursor centre first_row
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
     for burst in $(seq 1 "$scroll_bursts"); do
         omarchy-drive scroll down "$wheel_clicks" >/dev/null
@@ -1506,7 +1564,7 @@ case_click() {
     marker=$(ipc elisionCentre)
     [[ -n "$marker" ]] || fail "click: the path fits the bar here, so the elision marker is not under test at all"
     read -r ex ey <<< "$marker"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     # The status is read, because a click that never reached the compositor leaves the path
     # unchanged too and would satisfy both assertions below without pressing anything.
     omarchy-drive click "$((ex + wx))" "$((ey + wy))" >/dev/null \
@@ -1650,7 +1708,7 @@ case_menu() {
     [[ -n "$rest_y" ]] || fail "menu: the menu has no row $rest_row to rest the pointer on"
     key -k Escape >/dev/null
     settle
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     # A warp alone reaches Qt as no motion at all, so the one uinput pixel is what makes the pointer rest there.
     omarchy-drive move "$((wx + rest_x))" "$((wy + rest_y))" >/dev/null
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1
@@ -1673,7 +1731,7 @@ case_menu() {
     settle
     centre=$(ipc rowCentre 0)
     read -r cx cy <<< "$centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
 
     # Clicking outside still closes through the backdrop after menu pointer ownership changes.
     click_row 0 right
@@ -1899,7 +1957,7 @@ menu_click() {
     index=$(menu_row_index "$want") || fail "menu_click: the background menu has no $want row"
     read -r cx cy <<< "$(ipc contextMenuRowCentre "$index")"
     [[ -n "$cy" ]] || fail "menu_click: the $want row has no on-screen centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
     settle
     [[ -z "$sub" ]] && return 0
@@ -2365,7 +2423,7 @@ case_columns() {
     centre=$(ipc columnChevronCentre right)
     [[ -n "$centre" ]] || fail "columns: the pdf pager's right chevron has no on-screen centre"
     read -r cx cy <<< "$centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
     settle
     (( $(ipc columnPdfPage) == 1 )) \
@@ -2508,7 +2566,7 @@ case_operations() {
         || fail "operations: remove-metadata started ticked, which is not least surprise"
     # Same fall-through as the settings panel: a click on the card's title must not close the popup.
     local cwx cwy ctx cty
-    read -r cwx cwy _ _ < <(window_box)
+    read -r cwx cwy _ _ < <(window_box) || fail "native window coordinates unavailable"
     read -r ctx cty <<< "$(ipc convertTitleCentre)"
     [[ -n "$cty" ]] || fail "operations: the convert popup has no title to click"
     omarchy-drive click "$((cwx + ctx))" "$((cwy + cty))" left >/dev/null
@@ -2579,6 +2637,90 @@ case_grid() {
     kill_flea
 }
 
+grid_chrome_inventory() {
+    local view="$1" available="${2:-true}" glyph state visible
+    for glyph in search filter sort list columns grid dual sliders; do
+        visible=true
+        case "$glyph:$view" in search:grid|filter:list|filter:columns|sort:list|sort:columns) visible=false ;; esac
+        state=$(ipc chromeButtonState "$glyph") || fail "grid chrome: $glyph observer failed"
+        jq -e --argjson visible "$visible" '.visible == $visible' <<< "$state" >/dev/null \
+            || fail "grid chrome: $view has the wrong $glyph visibility: $state"
+        if [[ "$view" == grid && ( "$glyph" == filter || "$glyph" == sort ) ]]; then
+            jq -e --argjson enabled "$available" '.enabled == $enabled' <<< "$state" >/dev/null \
+                || fail "grid chrome: $glyph eligibility differs from the search context: $state"
+        fi
+        printf 'GRID_CHROME_CONTROL view=%s state=%s\n' "$view" "$state"
+    done
+}
+
+grid_chrome_controls() {
+    local preset="$1" dir="$2" menus_checks=0 view order first glyph before query
+    for view in list columns grid; do
+        click_chrome "$view"
+        cardsize_expect viewMode "$view"
+        grid_chrome_inventory "$view"
+    done
+    click_chrome filter
+    menus_expect keyDeliveryState '.filterTyping and .filterQuery == "" and (.paneFocus or .listFocus)' \
+        "Grid Filter pointer activation gives the query keyboard focus"
+    key file-0 >/dev/null
+    menus_expect keyDeliveryState '.filterTyping and .filterQuery == "file-0"' "Grid Filter receives actual typed text"
+    cardsize_expect drawnCount 9
+    key -k Return -k Home >/dev/null
+    menus_expect keyDeliveryState '(.filterTyping | not) and .filterQuery == "file-0" and (.paneFocus or .listFocus)' \
+        "Grid Filter commits with keyboard focus in the results"
+    cardsize_expect visibleRowName file-01.txt 0
+    shot "grid-chrome-$preset-filter"
+    key -k Escape >/dev/null
+    cardsize_expect drawnCount 61
+    cardsize_expect sortMark name:asc
+    click_row 3 left
+    key v >/dev/null
+    cardsize_expect selectedIndices 3
+    for order in size mtime kind name; do
+        case "$order" in size|kind) first=file-59.json ;; mtime) first=file-60.txt ;; name) first=file-01.txt ;; esac
+        click_chrome sort
+        cardsize_expect sortMark "$order:asc"
+        cardsize_expect visibleRowName "$first" 0
+        cardsize_expect cursor 0
+        cardsize_expect selectionCount 0
+        printf 'GRID_CHROME_SORT preset=%s order=%s first=%s\n' "$preset" "$order" "$(ipc visibleRowName 0)"
+    done
+    key -M ctrl -k f -m ctrl >/dev/null
+    menus_expect keyDeliveryState '.searchMode == "typing" and .searchQuery == "" and (.filterTyping | not)' "Grid Search opens through its retained key"
+    for view in typing results; do
+        grid_chrome_inventory grid false
+        before=$(ipc sortMark)
+        query=""
+        [[ "$view" != results ]] || query=file-0
+        for glyph in filter sort; do
+            click_chrome "$glyph"
+            click_chrome "$glyph"
+            menus_expect keyDeliveryState ".searchMode == \"$view\" and .searchQuery == \"$query\" and (.filterTyping | not) and .filterQuery == \"\"" \
+                "disabled Grid $glyph refuses repeated pointer activation during search $view"
+            cardsize_expect sortMark "$before"
+        done
+        shot "grid-chrome-$preset-search-$view-disabled"
+        if [[ "$view" == typing ]]; then
+            key file-0 -k Return >/dev/null
+            menus_expect keyDeliveryState '.searchMode == "results" and .searchQuery == "file-0" and (.searchRunning | not)' \
+                "Grid Search finishes its actual fixture walk"
+            cardsize_expect path "$dir"
+            wait_listing 9
+            cardsize_expect drawnCount 9
+        fi
+    done
+    key -k Escape >/dev/null
+    menus_expect keyDeliveryState '.searchMode == "" and (.filterTyping | not)' "closing Grid Search restores browsing"
+    wait_listing 61
+    cardsize_expect drawnCount 61
+    grid_chrome_inventory grid true
+    click_chrome filter
+    menus_expect keyDeliveryState '.filterTyping and .filterQuery == ""' "Grid Filter re-enables after search closes"
+    key -k Escape >/dev/null
+    printf 'GRID_CHROME preset=%s filter_focus=ok sort_cycle=ok search_refusal=ok view_inventory=ok\n' "$preset"
+}
+
 case_gridnavigation() {
     local dir="$fixture_root/grid-navigation" preset i columns next_columns edge selected_name
     local start_x start_y target_x target_y caption
@@ -2587,8 +2729,14 @@ case_gridnavigation() {
     sandbox_scratch "$opener"
     printf '#!/bin/sh\n[ "$1" = open ] || exec /usr/bin/gio "$@"\nexit 1\n' > "$opener/$open_handoff"
     chmod +x "$opener/$open_handoff"
-    for i in $(seq -w 1 60); do printf 'grid navigation %s\n' "$i" > "$dir/file-$i.txt"; done
+    # Distinct MIME and mtime make each Sort press visibly reorder real fixture files.
+    for i in $(seq -w 1 60); do
+        if [[ "$i" == 59 ]]; then printf '{"grid":59}\n' > "$dir/file-$i.json"
+        else printf 'grid navigation %s\n' "$i" > "$dir/file-$i.txt"; fi
+    done
     printf 'grid caption\n' > "$dir/long-grid-caption-with-enough-words-to-wrap-and-truncate-after-two-complete-lines.txt"
+    sandbox_require "$dir/file-60.txt"
+    touch -d '2000-01-01 UTC' "$dir/file-60.txt" || fail "grid: distinct mtime fixture could not be set"
     for preset in default vim mac windows; do
         seed_ui_state "$fixture_root/grid-state" "{\"keys\":\"$preset\",\"view\":\"list\",\"wrapAtEnds\":true,\"preview\":{\"thumbnails\":\"off\"}}"
         PATH="$opener:$PATH" launch "$dir"
@@ -2596,6 +2744,7 @@ case_gridnavigation() {
         click_chrome grid
         cardsize_expect viewMode grid
         permissions_viewport 1100 800
+        grid_chrome_controls "$preset" "$dir"
         columns=$(ipc gridColumns)
         [[ "$columns" =~ ^[0-9]+$ ]] && (( columns > 1 && columns < 30 )) || fail "grid: invalid measured column count $columns"
         click_row "$((columns - 1))" left
@@ -2823,7 +2972,7 @@ case_thumbs() {
 
     # The fling has to move the viewport, or the request bounds below would pass on a list that never scrolled.
     local wx wy ww wh before_requests moved cursor_a cursor_b
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
     before_requests=$(ipc thumbRequests)
     # Read before the fling starts: the list saturates within its first notches, 21 of 1500 here, so a sample taken during it already reads the end.
@@ -3010,7 +3159,7 @@ case_nosweep() {
     before_large=$(ls -A "$cache_large" | wc -l)
     launch "$bench_dir"
     wait_listing 100000
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
     for burst in $(seq 1 "$scroll_bursts"); do
         omarchy-drive scroll down "$wheel_clicks" >/dev/null
@@ -3037,7 +3186,7 @@ case_nosweep() {
     kill_flea
     launch "$dirsweep_dir"
     wait_listing 100000
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
     before_requests=$(ipc dirSizeRequests)
     omarchy-drive scroll down "$fling_clicks" >/dev/null
@@ -3131,7 +3280,7 @@ case_tabs() {
     centre=$(ipc tabCentre 0)
     [[ -n "$centre" ]] || fail "tabs: tab 0 has no centre"
     read -r cx cy <<< "$centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
     settle
     [[ "$(ipc tabIndex)" == "0" ]] || fail "tabs: clicking tab 0 did not select it, index=$(ipc tabIndex)"
@@ -3247,7 +3396,7 @@ PYEOF
     [[ "$(ipc previewOpen)" == "false" ]] || fail "preview: the double click opened the preview rather than the file"
     # Hover is a plain pointer move, no button, over a different row than the click landed on.
     read -r hx hy <<< "$(ipc rowCentre "$(row_index_of big.txt)")"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((hx + wx))" "$((hy + wy))" >/dev/null
     settle
     [[ "$(ipc previewOpen)" == "false" ]] || fail "preview: hovering a row opened the preview"
@@ -3342,7 +3491,7 @@ PYEOF
     # bash's own elapsed-seconds counter, reset here and read nowhere else in this file.
     read -r slx sly <<< "$(ipc previewSliderCentre)"
     [[ -n "$slx" ]] || fail "preview: the seek slider reported no on-screen centre"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((slx + wx))" "$((sly + wy))" >/dev/null
 
     SECONDS=0
@@ -3493,7 +3642,7 @@ case_network() {
         local side="$1" x y width height wx wy
         read -r x y width height <<< "$(ipc shareBrowserState | jq -r --argjson side "$side" '.paneRects[$side]')"
         [[ "$width" -gt 0 && "$height" -gt 0 ]] || fail "network: pane $side has no clickable listing"
-        read -r wx wy _ww _wh < <(window_box)
+        read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
         omarchy-drive click "$((wx + x + width / 2))" "$((wy + y + height / 2))" >/dev/null
         network_wait_panes ".focused == $side"
     }
@@ -4066,7 +4215,7 @@ EOS
     local sx sy sw sh wx wy row_height
     read -r sx sy sw sh <<< "$(ipc shareBrowserRect)"
     read -r _body _caption _padding row_height <<< "$(ipc metrics)"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((wx + sx + sw / 2))" "$((wy + sy + row_height / 2))" >/dev/null
     wait_marker "$fake_root/child-started" "network: share row pointer activation did not mount its child"
     network_wait_panes '.focused == 0'
@@ -4403,7 +4552,7 @@ EOS
     eye_centre=$(ipc networkPasswordEyeCentre 2>/dev/null) \
         || fail "networkauth: password eye has no IPC centre"
     read -r eye_x eye_y <<< "$eye_centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + eye_x))" "$((wy + eye_y))" >/dev/null
     ydotool click 0x40 >/dev/null 2>&1
     held_password_state=$(ipc networkPasswordState)
@@ -5947,7 +6096,7 @@ case_renamelife() {
     # Leg two: the renaming row is scrolled past the cache buffer and its delegate released.
     open_editor
     local wx wy ww wh
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + ww / 2))" "$((wy + wh / 2))" >/dev/null
     omarchy-drive scroll down "$fling_clicks" >/dev/null
     settle
@@ -6213,7 +6362,7 @@ settings_wait_value() {
 settings_click_control() {
     local id="$1" wx wy ww wh cx cy
     settings_focus_row "$id"
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     read -r cx cy <<< "$(ipc settingsRowCentre "$id")"
     [[ "$cx" =~ ^[0-9]+$ && "$cy" =~ ^[0-9]+$ ]] || fail "settings: no real centre for $id"
     omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
@@ -6320,7 +6469,7 @@ settings_places() {
     settings_focus_row favouriteActions
     key -k Return >/dev/null; settle
     settings_wait_value '.places.favourites == []'
-    for flag in showHome showNetwork showDevices showTrash driveSize; do
+    for flag in showHome showNetwork showDevices showTrash; do
         settings_click_control "places.$flag"
         settings_wait_value ".places.$flag == false"
         case "$flag" in
@@ -6336,6 +6485,13 @@ settings_places() {
         fi
         key -k Space >/dev/null; settle
         settings_wait_value ".places.$flag == true"
+    done
+    for flag in driveSize trashCount; do
+        settings_wait_value ".places.$flag == false"
+        settings_click_control "places.$flag"
+        settings_wait_value ".places.$flag == true"
+        key -k Space >/dev/null; settle
+        settings_wait_value ".places.$flag == false"
     done
     settings_focus_row places.sidebarWidth
     key l >/dev/null; settle
@@ -6499,7 +6655,7 @@ settings_doors() {
     [[ "$(ipc settingsOpen)" == "false" ]] || fail "settings: Escape did not close the panel"
 
     local wx wy ww wh bx by
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     read -r bx by <<< "$(ipc chromeButtonCentre sliders)"
     [[ -n "$by" ]] || fail "settings: the chrome strip has no sliders button"
     omarchy-drive click "$((wx + bx))" "$((wy + by))" left >/dev/null
@@ -6895,7 +7051,7 @@ case_clickthrough() {
         centre=$(ipc settingsRailRowCentre "$section")
         [[ -n "$centre" ]] || fail "clickthrough: the settings rail has no $section row"
         read -r cx cy <<< "$centre"
-        read -r wx wy _ww _wh < <(window_box)
+        read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
         omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
         settle
         [[ "$(ipc settingsSection)" == "$section" ]] || fail "clickthrough: the $section rail row did not take its click, section is $(ipc settingsSection)"
@@ -6920,7 +7076,7 @@ case_wheelunder() {
     launch "$dir"
     wait_listing 80
     local wx wy ww wh cx cy
-    read -r wx wy ww wh < <(window_box)
+    read -r wx wy ww wh < <(window_box) || fail "native window coordinates unavailable"
     read -r cx cy <<< "$(ipc rowCentre 5)"
     omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null
     # The control: with nothing open the same wheel moves the list, so a still list below is not a lost wheel.
@@ -6977,7 +7133,7 @@ hover_row() {
     local cx cy wx wy
     read -r cx cy <<< "$(ipc rowCentre "$1")"
     [[ -n "$cy" ]] || fail "hover_row: row $1 has no centre"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive move "$((wx + cx))" "$((wy + cy))" >/dev/null
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 1 -y 0 >/dev/null 2>&1
 }
@@ -7008,7 +7164,7 @@ click_row_edge() {
     [[ -n "$rh" ]] || fail "click_row_edge: row $1 has no box"
     read -r cx cy cw ch <<< "$(ipc settingsCardRect)"
     [[ -n "$ch" ]] || fail "click_row_edge: no settings card to click beside"
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     omarchy-drive click "$((wx + cx + cw + 20))" "$((wy + ry + rh / 2))" "$2" >/dev/null
 }
 
@@ -7083,7 +7239,7 @@ case_overlays() {
         settle
         [[ "$(ipc viewContentY)" == "0" && "$(ipc settingsOpen)" == "true" ]] || fail "$mode: the wheel under settings moved the view to $(ipc viewContentY)"
         read -r cx cy _cw _ch <<< "$(ipc settingsCardRect)"
-        read -r wx wy _ww _wh < <(window_box)
+        read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
         omarchy-drive click "$((wx + cx + 40))" "$((wy + cy + 40))" right >/dev/null
         settle
         [[ "$(ipc settingsOpen)" == "true" && "$(ipc contextMenuVisible)" == "false" && "$(ipc cursor)" == "0" ]] \
@@ -7151,7 +7307,7 @@ case_views() {
             settle
             read -r fx fy <<< "$(ipc columnChildRowCentre 1)"
             [[ -n "$fy" ]] || fail "columns: the child column shows no row 1 for sub"
-            read -r wx wy _ww _wh < <(window_box)
+            read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
             omarchy-drive click "$((wx + fx))" "$((wy + fy))" right >/dev/null
             sleep 1
             [[ "$(ipc path)" == "$dir/sub" && "$(ipc rowAt "$(ipc cursor)")" == s2.txt\|* && "$(ipc contextMenuVisible)" == "true" ]] \
@@ -7315,7 +7471,7 @@ case_formats() {
     launch "$dir"
     wait_listing 26
     switch_view columns
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     for name in p.jpg p.png p.webp p.heic; do
         column_expect "$name" image
         for _attempt in $(seq 1 40); do [[ "$(ipc columnFrameReady)" == "true" ]] && break; sleep 0.1; done
@@ -7421,7 +7577,7 @@ case_previewviews() {
     formats_fixture "$dir"
     launch "$dir"
     wait_listing 26
-    read -r wx wy _ww _wh < <(window_box)
+    read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
     for mode in list grid columns; do
         switch_view list
         goto_row "$(row_index_of p.jpg)"
@@ -7570,9 +7726,12 @@ case_previewviews() {
 . "$repo/tests/ui-trash.sh"
 . "$repo/tests/ui-menus.sh"
 . "$repo/tests/ui-settings-layout.sh"
+. "$repo/tests/ui-settings-places.sh"
 . "$repo/tests/ui-card-layout.sh"
 . "$repo/tests/ui-preview-visibility.sh"
 . "$repo/tests/ui-permissions.sh"
+. "$repo/tests/ui-marquee.sh"
+. "$repo/tests/ui-oversight.sh"
 . "$repo/tests/ui-preview-policy.sh"
 . "$repo/tests/ui-operations-design.sh"
 . "$repo/tests/ui-convert-design.sh"

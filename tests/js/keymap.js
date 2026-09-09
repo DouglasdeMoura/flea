@@ -35,12 +35,15 @@ function run(check) {
         key(preset, "2", "", preset === "windows" ? ctrl | shift : ctrl, "viewColumns")
         key(preset, "3", "", preset === "windows" ? ctrl | shift : ctrl, "viewGrid")
         key(preset, "Comma", "", ctrl, "settings")
-        key(preset, "Menu", "", none, "menu")
-        key(preset, "F10", "", shift, "menu")
-        key(preset, "Menu", "", none, "menu", "rail")
-        key(preset, "F10", "", shift, "menu", "rail")
-        key(preset, "Menu", "", none, "", "editor")
-        key(preset, "F10", "", shift, "", "listing", "tui")
+        for (var f = 0; f < 2; f++) {
+            var frontend = ["gui", "tui"][f]
+            var menuContexts = ["listing", "rail", "menu", "panel", "preview", "pdf", "media", "editor"]
+            for (var m = 0; m < menuContexts.length; m++) {
+                var menuContext = menuContexts[m], menuAction = m < 2 ? "menu" : ""
+                key(preset, "Menu", "", none, menuAction, menuContext, frontend)
+                key(preset, "F10", "", shift, menuAction, menuContext, frontend)
+            }
+        }
         key(preset, "N", "", ctrl | shift, "newFolder")
         key(preset, "Q", "q", alt, "")
         key(preset, "J", "j", meta, "")

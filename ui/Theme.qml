@@ -38,7 +38,6 @@ Singleton {
     readonly property var fallbackColor: ({
         background: "#101315",
         surface: "#181825",
-        muted: "#707880",
         symlink: "#94e2d5",
         executable: "#a6e3a1"
     })
@@ -46,7 +45,7 @@ Singleton {
     readonly property QtObject color: QtObject {
         readonly property color background: Color.background
         readonly property color foreground: Color.foreground
-        property color muted: root.fallbackColor.muted
+        property color muted: Qt.darker(Color.foreground, 1.4)
         readonly property color accent: Color.accent
         readonly property color error: Color.urgent
         property color surface: root.fallbackColor.surface
@@ -109,8 +108,8 @@ Singleton {
     // A chrome strip's mark is the OEM's own icon token, the one Ui/Button.qml and the Tailscale and
     // Dropbox bar icons size from: 16 at base-size 14, which is the canvas's chrome mark on every board.
     readonly property int chromeMarkSize: Math.round(Style.font.icon * root.sizeRatio)
-    // Lucide ships stroke 2 on its 24 unit grid; 1.5 is the operator's tune (Tabler ships 2 as well, see the A/B report).
-    readonly property real strokeWidth: 1.5
+    // The boards use one two-unit stroke on the shared 24-unit glyph grid.
+    readonly property real strokeWidth: 2
     // WCAG 2.5.8 floor. Marks stay at their type-scale size; the hit box grows to this.
     readonly property int hitMin: 24
     // The wheel, see ui/FastScrollHandler.qml: a notch is the platform's lines times notchPx times the
@@ -120,7 +119,7 @@ Singleton {
         readonly property real multiplier: 4
     }
     // Wide enough for "Send with Taildrop" at bodySmall, 257 at base-size 14; ui/ContextMenu.qml draws it.
-    readonly property int menuWidth: Math.round(Style.space(257) * root.sizeRatio)
+    readonly property int menuWidth: Math.round(Style.space(220) * root.sizeRatio)
 
     // Leading a row gives its text, above and below, before the padding is added.
     readonly property real lineBoxRatio: 1.8
@@ -280,14 +279,12 @@ Singleton {
         var bg = Palette.pick(found, ["background"], root.fallbackColor.background);
         var surface = Palette.pick(found, Palette.SURFACE_KEYS, root.fallbackColor.surface);
         root.color.surface = surface;
-        // Omarchy palettes are not authored to AA. Flea keeps the hex system and walks L until 4.5:1.
-        root.color.muted = Contrast.ensureRatio(
-            Contrast.ensureRatio(Palette.pick(found, ["muted"], root.fallbackColor.muted), bg, 4.5), surface, 4.5);
+        Color.loadColors(body);
+        root.color.muted = Palette.pick(found, ["muted"], Qt.darker(Color.foreground, 1.4));
         root.color.symlink = Contrast.ensureRatio(
             Palette.pick(found, ["cyan", "color6"], root.fallbackColor.symlink), bg, 4.5);
         root.color.executable = Contrast.ensureRatio(
             Palette.pick(found, ["green", "color2"], root.fallbackColor.executable), bg, 4.5);
-        Color.loadColors(body);
         // A body that parsed to nothing left every role on its fallback, so the flag says so rather
         // than reporting that the read happened: text() returns "" for a file that is not there.
         root.ready = Palette.isPalette(found);

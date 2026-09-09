@@ -140,9 +140,13 @@ ShellRoot {
                 viewMode: view.dualMode ? "dual" : view.currentPane.viewMode
                 showPath: !view.dualMode
                 showHidden: view.currentPane.showHidden
+                canFilter: view.currentPane.searchMode.length === 0
+                canSort: view.currentPane.searchMode.length === 0
                 onBackRequested: view.currentPane.goBack()
                 onUpRequested: view.currentPane.openParent()
                 onSearchRequested: view.currentPane.act("search")
+                onFilterRequested: view.currentPane.act("filter")
+                onSortRequested: view.currentPane.act("sortNext")
                 onViewChosen: function (mode) { ViewState.changeKey("view", mode) }
                 // The path bar's four. The primaryPane navigates and answers for the keyboard exactly as it
                 // does for every other route in, so a path typed and a row opened end the same way.
@@ -190,6 +194,7 @@ ShellRoot {
                 shareBrowser: shareBrowser
                 keymapSheet: keymapSheet
                 settingsPanel: settingsPanel
+                statusBar: bar
                 onMessage: function (text, isError) { bar.say(text, isError) }
                 onOperationResult: function (headline, detail, isError) { bar.say(headline, isError, detail) }
                 // A running operation's line, which stands until the operation replaces it; see ui/StatusBar.qml.
@@ -231,6 +236,7 @@ ShellRoot {
                         shareBrowser: primaryPane.shareBrowser
                         keymapSheet: primaryPane.keymapSheet
                         settingsPanel: primaryPane.settingsPanel
+                        statusBar: bar
                         onFocusRequested: view.focusPane(1)
                         onSwitchPane: view.focusPane(0)
                         onPathChanged: view.rememberPaths()
@@ -284,7 +290,6 @@ ShellRoot {
                 onTransferCancelRequested: function (id) {
                     bar.transferOwner.backend.transfercancel(id)
                 }
-                onUndoRequested: view.currentPane.backend.undo()
             }
 
             Flea.Preview { id: preview; pane: view.currentPane }

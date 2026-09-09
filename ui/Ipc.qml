@@ -74,6 +74,7 @@ QtObject {
             return JSON.stringify({keySequence: pane.keySequence, keySequenceIdentity: pane.keySequenceIdentity,
                 trashArmedAt: pane.trashArmedAt, clipboard: {paths: pane.clipboard.paths, cut: pane.clipboard.moving},
                 searchMode: pane.searchMode, filterTyping: pane.filterTyping, filterQuery: pane.filterQuery,
+                searchRunning: pane.searchRunning, searchQuery: pane.searchQuery,
                 paneFocus: pane.activeFocus, listFocus: pane.listArea.activeFocus,
                 activeFocusItem: window ? String(window.activeFocusItem) : "",
                 preview: {index: pane.previewIndex, focused: !!pane.previewColumnItem && pane.previewColumnItem.activeFocus},
@@ -101,14 +102,15 @@ QtObject {
         function statusSecondary(): string { return root.bar.secondaryText }
         function statusError(): bool { return root.bar.transientIsError }
         function statusDetail(): string { return root.bar.errorDetail }
-        function statusDismissCentre(): string { return root.fleaWindow.centreOf(root.bar.dismissItem) }
         function statusActivityState(): string {
+            var card = root.bar.transferCard
             return JSON.stringify({activities: root.bar.activities.map(function(activity) {
                 return {id: activity.transfer.id, text: activity.text, running: activity.transfer.running,
                     cancelling: activity.cancelling, ownerPath: activity.owner.path, ownerFocused: activity.owner.paneFocused}
             }), errors: root.bar.errors.length, notice: root.bar.notice,
-                cancel: root.controlState("Cancel", root.bar.cancelItem), undo: root.controlState("Undo", root.bar.undoItem),
-                dismiss: root.controlState("Dismiss error", root.bar.dismissItem)})
+                undoAvailable: root.bar.hasUndo,
+                transferCard: {visible: !!card && card.visible, cancelling: !!card && card.cancelling,
+                    rect: root.fleaWindow.rectOf(card), cancel: root.controlState("Cancel", card ? card.cancelItem : null)}})
         }
         function statusFooterState(): string {
             function textState(item) {
@@ -117,7 +119,16 @@ QtObject {
             }
             return JSON.stringify({path: root.bar.path, total: root.bar.total, selected: root.bar.selectionCount,
                 listingState: root.bar.listingState, filesystem: root.bar.fsText(), counts: root.bar.countText(),
-                left: textState(root.bar.countsItem), right: textState(root.bar.primaryItem)})
+                frame: root.fleaWindow.rectOf(root.bar.stripItem), borderWidth: root.bar.stripItem.border.width,
+                left: textState(root.bar.countsItem), right: textState(root.bar.primaryItem),
+                secondary: textState(root.bar.secondaryItem)})
+        }
+        function selectionBandState(): string {
+            var band = root.pane.selectionBand
+            return JSON.stringify(band ? {tracking: band.tracking, active: band.bandActive,
+                columns: band.columns, contentY: band.flickable.contentY, scrollRate: band.scrollRate,
+                anchor: {x: band.anchor.x, y: band.anchor.y}, end: {x: band.end.x, y: band.end.y}}
+                : {tracking: false, active: false})
         }
         function menuState(): string {
             var menu = root.pane.contextMenu()
@@ -238,9 +249,37 @@ QtObject {
         function settingsModel(): string { return root.settingsPanel ? JSON.stringify(root.settingsPanel.rows) : "[]" }
         function settingsSections(): string { return root.settingsPanel ? root.settingsPanel.sectionsText() : "[]" }
         function settingsRowCentre(id: string): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.rowItemForId(id)) : "" }
+        function settingsFavouriteControlCentre(id: string, part: string): string {
+            var row = root.settingsPanel ? root.settingsPanel.rowItemForId(id) : null
+            if (!row || !row.isFavourite) return ""
+            var item = part === "drag" ? row.favouriteItem.dragItem
+                     : part === "add" ? row.favouriteItem.actionItem(0)
+                     : part === "remove" ? row.favouriteItem.actionItem(1) : null
+            return item && item.visible ? root.fleaWindow.centreOf(item) : ""
+        }
         function uiSettings(): string { return JSON.stringify(ViewState.state) }
         function keymapPreset(): string { return ViewState.keysPreset }
         function railEntries(): string { return JSON.stringify(root.pane.sidebar.entries) }
+        function railDetails(): string {
+            var sidebar = root.pane.sidebar
+            function box(item) {
+                var point = item.mapToItem(null, 0, 0)
+                return {x: point.x, y: point.y, width: item.width, height: item.height}
+            }
+            return JSON.stringify({headers: sidebar.headingItems().map(function(item) {
+                return {text: item.text, visible: item.visible, rect: box(item),
+                    topPadding: item.topPadding, fontSize: item.font.pixelSize}
+            }), rows: sidebar.entries.map(function(entry, index) {
+                var row = sidebar.railItemFor(index)
+                if (!row) return {index: index, missing: true}
+                var detail = row.detailItem
+                return {index: index, label: entry.label, kind: entry.kind, group: entry.group,
+                    size: entry.size, detail: detail.text, detailColor: String(detail.color),
+                    fontSize: detail.font.pixelSize, tabular: detail.font.features.tnum === 1,
+                    rect: box(row), detailRect: box(detail),
+                    indicatorRect: box(row.indicatorSlot), indicatorVisible: row.indicatorVisible}
+            })})
+        }
 
         // The panel's own title, a spot on the card with no control under it: a click there must leave the panel open.
         function settingsTitleCentre(): string { return root.settingsPanel ? root.fleaWindow.centreOf(root.settingsPanel.titleItem) : "" }
@@ -511,6 +550,9 @@ QtObject {
         // The chrome's buttons carry a glyph and no text, so a test reaches one by name and clicks
         // its centre, exactly the way rowCentre already works for a row.
         function chromeButtonCentre(glyph: string): string { return root.fleaWindow.centreOf(root.chrome.buttonFor(glyph)) }
+        function chromeButtonState(glyph: string): string {
+            return JSON.stringify(root.controlState(glyph, root.chrome.buttonFor(glyph)))
+        }
         // The path bar: whether it has the keyboard, what it is holding, and the box a double click
         // opens it on, which is the pointer's half of ":" and Ctrl+L.
         function pathBarOpen(): bool { return root.chrome.editing }

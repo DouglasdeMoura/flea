@@ -9,6 +9,8 @@ Item {
     signal actionPicked(int action)
     signal moved(int to)
     readonly property bool actions: root.row.kind === "favouriteActions"
+    readonly property Item dragItem: grip
+    function actionItem(index) { return actionButtons.itemAt(index) }
     implicitHeight: actions ? Theme.hitMin + 2 * Theme.spacing.hairline + Theme.settings.railPaddingY : Theme.railRowHeight
 
     Row {
@@ -17,6 +19,7 @@ Item {
         y: 2 * Theme.spacing.hairline
         spacing: Theme.spacing.rowPaddingY + Theme.spacing.hairline
         Repeater {
+            id: actionButtons
             model: ["Add current folder", "Remove"]
             delegate: Rectangle {
                 id: actionButton

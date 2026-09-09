@@ -18,10 +18,14 @@ Item {
     property bool showPath: true
     // Read by the path bar alone, so a Tab on a dotted leaf peeks the way the listing is set to look.
     property bool showHidden: false
+    property bool canFilter: false
+    property bool canSort: false
 
     signal backRequested()
     signal upRequested()
     signal searchRequested()
+    signal filterRequested()
+    signal sortRequested()
     signal viewChosen(string mode)
     // The path bar's four. ui/shell.qml navigates, hands the keyboard back, runs the peek behind Tab
     // and carries what the bar says to the status line, because this file draws the chrome and knows
@@ -381,8 +385,25 @@ Item {
         spacing: Theme.spacing.gap
 
         Flea.ChromeButton {
+            visible: root.viewMode !== "grid"
             glyph: "search"
             onActivated: root.searchRequested()
+        }
+
+        Flea.ChromeButton {
+            visible: root.viewMode === "grid"
+            enabled: root.canFilter
+            glyph: "filter"
+            accessName: "Filter"
+            onActivated: root.filterRequested()
+        }
+
+        Flea.ChromeButton {
+            visible: root.viewMode === "grid"
+            enabled: root.canSort
+            glyph: "sort"
+            accessName: "Sort"
+            onActivated: root.sortRequested()
         }
 
         Repeater {

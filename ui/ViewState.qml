@@ -66,7 +66,7 @@ QtObject {
     // The Menus section's "Show keyboard hints" row, `keyHints` in src/uischema.rs. It draws the key
     // beside every menu row and the tip under an empty directory, and it binds no key of its own:
     // every chord answers whether this is on or off.
-    readonly property bool keyHints: root.state.keyHints === true
+    readonly property bool keyHints: root.state.keyHints !== false
 
     // The Keys section's four-value chooser over the one generated key table, falling back to its
     // first value, Default, which is what SettingsKeys.html says a missing or unknown name means.
@@ -182,12 +182,15 @@ QtObject {
     // A patch flea refused, or a state file it could not write. The pane turns it into the status
     // bar's one sentence: the change is on screen and the file does not have it.
     signal saveFailed()
+    signal favouritesReadFailed(string message)
+    property string favouritesReadError: ""
 
     // The settings on screen are not the ones on disk: main() left a ui.json it cannot read as a
     // JSON object exactly as the operator wrote it, or the read below failed outright. Either way
     // what is drawn is the shipped defaults, and ui/PaneWire.qml is where that is said once. Only
     // ever set true, because the read that would clear it is the one that could not be taken.
     property bool unreadable: false
+    property bool initialReadComplete: false
 
     // What this window has changed and no write has landed for yet, in the shape of a ui.json patch.
     // A write that lands takes its own settings out of it leaf by leaf, so a refused one keeps its
@@ -222,13 +225,26 @@ QtObject {
     // The read is taken here and not in the FileView's onLoaded, which was measured on the box
     // arriving after the first property read; blockLoading is what makes text() answer inside this
     // call, so the stored columns are in the first frame instead of replacing it.
-    Component.onCompleted: root.load(stateFile.text())
+    Component.onCompleted: { root.load(stateFile.text()); root.initialReadComplete = true }
 
     function load(text) {
         var read = UiState.fromFile(text)
         root.state = read.state
         if (read.unreadable)
             root.unreadable = true
+    }
+    function syncFavourites(text) {
+        var read = UiState.refreshedFavourites(root.state, text)
+        if (read.error && read.error !== root.favouritesReadError) root.favouritesReadFailed(read.error)
+        root.favouritesReadError = read.error
+        if (read.state !== root.state) root.state = read.state
+        return read.error.length === 0
+    }
+    function refreshFavourites() {
+        stateFile.reload()
+        var text = stateFile.text()
+        if (!stateFile.loaded) return false
+        return root.syncFavourites(text)
     }
 
     // blockLoading, because the first list draws from this: an async read would paint one column
@@ -238,12 +254,22 @@ QtObject {
         path: (Quickshell.env("XDG_STATE_HOME") && Quickshell.env("XDG_STATE_HOME").length > 0
                ? Quickshell.env("XDG_STATE_HOME") : Quickshell.env("HOME") + "/.local/state") + "/flea/ui.json"
         blockLoading: true
-        watchChanges: false
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: {
+            root.favouritesReadError = ""
+            if (root.initialReadComplete) root.syncFavourites(text())
+        }
         printErrors: false
         // A file that is not there is a first launch and says nothing; anything else is a file this
         // window could not read and is about to draw the defaults over, which is the unchecked-read
         // defect ui/NetworkDialog.qml already carried once and must not be repeated here.
-        onLoadFailed: function (error) { if (error !== FileViewError.FileNotFound) root.unreadable = true }
+        onLoadFailed: function (error) {
+            if (error === FileViewError.FileNotFound && !root.initialReadComplete) return
+            if (!root.initialReadComplete) root.unreadable = true
+            root.favouritesReadError = "Favorites could not be refreshed: ui.json could not be read; previous entries kept."
+            root.favouritesReadFailed(root.favouritesReadError)
+        }
     }
 
     // The writer answered, with its own status or with 2 for one that never started: the same refusal

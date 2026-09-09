@@ -1381,7 +1381,7 @@ key = "Menu"
 keys = "menu"
 action = "menu"
 label = "context menu"
-frontend = "gui"
+frontend = "all"
 context = "listing,rail"
 
 [[preset]]
@@ -1391,7 +1391,7 @@ key = "F10"
 keys = "shift-f10"
 action = "menu"
 label = "context menu"
-frontend = "gui"
+frontend = "all"
 context = "listing,rail"
 
 [[preset]]
