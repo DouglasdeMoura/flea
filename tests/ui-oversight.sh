@@ -368,3 +368,30 @@ case_oversight() {
     trap - EXIT
     printf 'OVERSIGHT_CAPTURE_GROUP source=%s matched=880x620 base=14 arms=2 shared_specimens_per_arm=9 candidate_extra_specimens=1 visual_inspection=pending\n' "$FLEA_SOURCE_SHA"
 }
+case_emptystate() (
+    local directory="$fixture_root/empty-state" permissions_listing="$fixture_root/empty-state" menus_checks=0 mode chord
+    sandbox_scratch "$directory"
+    launch "$directory"
+    wait_listing 0
+    permissions_viewport 880 620
+    for mode in list columns grid; do
+        case "$mode" in list) chord=1 ;; columns) chord=2 ;; grid) chord=3 ;; esac
+        hotkey --global ctrl "$chord" flea >/dev/null
+        cardsize_expect viewMode "$mode"
+        menus_expect stateLayers '.empty and (.message | not)' "$mode empty hero excludes the ordinary state sentence"
+        shot "empty-state-$mode"
+    done
+    sandbox_require "$directory"
+    printf 'visible row\n' > "$directory/visible.txt"
+    wait_listing 1
+    menus_expect stateLayers '(.empty | not) and (.message | not)' "populated listing hides both empty surfaces"
+    key -M ctrl -k l -m ctrl "$directory/missing" -k Return >/dev/null
+    cardsize_expect state error
+    menus_expect stateLayers '(.empty | not) and .message' "a genuine missing-path error keeps its state sentence"
+    shot empty-state-missing-path
+    key -M ctrl -k l -m ctrl "$directory" -k Return >/dev/null
+    wait_listing 1
+    menus_expect stateLayers '(.empty | not) and (.message | not)' "recovered listing hides the error sentence"
+    kill_flea
+    printf 'EMPTY_STATE views=3 populated=ok missing=ok recovery=ok\n'
+)

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Characterises the internal drag exactly as it behaves today, before any rewrite touches it. Each
-# check is one of the four races ui/List.qml's own comments record, turned into a test rather than a
-# note, so a rewrite that re-opens one fails here instead of being found by hand.
+# Native drag regression checks through the identified product launcher and owned fixtures.
 #
 # Motion goes through uinput and never through hl.dsp.cursor.move. That warp emits wl_pointer.motion
 # with no wl_pointer.frame, and Qt dispatches buffered pointer events only on frame, so a drag driven
@@ -13,12 +11,16 @@ set -o pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 # Without this the UI resolves "flea" from PATH, which is the installed package and not this tree.
 export FLEA_BIN="${FLEA_BIN:-$repo/target/release/flea}"
+export FLEA_UI="$repo/ui"
 . "$repo/tools/flea-sandbox-guard"
 
 SB=$FIXTURE_ROOT/flea-drag-char-$$
 HOMEDIR=$SB/home
 pass=0
 fail=0
+button_down=false
+control_down=false
+pointer_tolerance=4
 
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
@@ -29,48 +31,70 @@ ok()   { printf 'ok   %s\n' "$*"; pass=$((pass+1)); }
 bad()  { printf 'FAIL %s\n' "$*"; fail=$((fail+1)); }
 note() { printf '     %s\n' "$*"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1"; note "expected [$3]"; note "got      [$2]"; fi; }
+die() { bad "$*"; exit 1; }
 
 cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ "$button_down" = true ]; then
+    ydotool key 1:1 1:0 >/dev/null 2>&1 || { bad "cleanup could not cancel the held drag"; status=1; }
+  fi
   # R7 stops the backend it owns; a stopped process ignores TERM until it is continued.
   [ -n "${BACKEND_PID:-}" ] && kill -CONT "$BACKEND_PID" 2>/dev/null
   [ -n "${FLEA_PID:-}" ] && kill -- -"$FLEA_PID" 2>/dev/null
   [ -n "${FLEA_PID:-}" ] && kill "$FLEA_PID" 2>/dev/null
-  sleep 0.5
+  [ -n "${FLEA_PID:-}" ] && wait "$FLEA_PID" 2>/dev/null
+  # Release only after the owned window exits, so a failed cancellation cannot commit the drop.
+  if [ "$button_down" = true ]; then
+    ydotool click 0x80 >/dev/null 2>&1 || { bad "cleanup could not release the pointer"; status=1; }
+  fi
+  if [ "$control_down" = true ]; then
+    ydotool key 29:0 >/dev/null 2>&1 || { bad "cleanup could not release Ctrl"; status=1; }
+  fi
+  if [ -f "$SB/flea.log" ]; then
+    note "native stderr from $SB/flea.log"
+    cat -- "$SB/flea.log"
+  fi
   sandbox_remove "$SB" 2>/dev/null
   # R7's tmpfs root: its own mktemp, its own marker, and the pattern checked again before the delete.
-  case "${XDEV:-}" in /dev/shm/flea-drag-xdev-*) [ -f "$XDEV/$SANDBOX_MARKER" ] && rm -rf -- "$XDEV" ;; esac
+  case "${XDEV:-}" in /dev/shm/flea-drag-xdev-*) FIXTURE_ROOT=/dev/shm sandbox_remove "$XDEV" ;; esac
+  exit "$status"
 }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------- fixture
 sandbox_make "$SB"
-mkdir -p "$HOMEDIR/.local/state/omarchy" "$HOMEDIR/aaa" "$HOMEDIR/bbb"
+export XDG_CONFIG_HOME="$HOMEDIR/.config" XDG_STATE_HOME="$HOMEDIR/.local/state"
+export XDG_DATA_HOME="$HOMEDIR/.local/share" XDG_CACHE_HOME="$HOMEDIR/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME/omarchy" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$HOMEDIR/aaa" "$HOMEDIR/bbb"
 ln -sfn "$HOME/.local/state/omarchy/current" "$HOMEDIR/.local/state/omarchy/current"
 for f in r1a r1b r2 r3 r4; do printf '%s payload\n' "$f" > "$HOMEDIR/$f.txt"; done
 # R6 shows hidden files in a second tab on the same directory, so every index below this one shifts.
 printf 'hidden\n' > "$HOMEDIR/.r0hidden"
 
 # ---------------------------------------------------------------- pointer
-warp() { hyprctl dispatch "hl.dsp.cursor.move({x = $1, y = $2})" >/dev/null; }
-move_rel() { ydotool mousemove -x "$1" -y "$2" >/dev/null 2>&1; }
-press()   { ydotool click 0x40 >/dev/null 2>&1; }
-release() { ydotool click 0x80 >/dev/null 2>&1; }
+warp() { glide_to "$1" "$2"; }
+move_rel() { ydotool mousemove -x "$1" -y "$2" >/dev/null 2>&1 || die "relative pointer motion failed"; }
+press()   { pressed_path=$(ipc path); owned_path "$pressed_path"; button_down=true; ydotool click 0x40 >/dev/null 2>&1 || die "pointer press failed"; }
+release() { owned_path "$pressed_path"; ydotool click 0x80 >/dev/null 2>&1 || die "pointer release failed"; button_down=false; }
 # evdev KEY_LEFTCTRL. Held through ydotool because a compositor keybind must not swallow it.
-ctrl_down() { ydotool key 29:1 >/dev/null 2>&1; }
-ctrl_up()   { ydotool key 29:0 >/dev/null 2>&1; }
+ctrl_down() { control_down=true; ydotool key 29:1 >/dev/null 2>&1 || die "Ctrl press failed"; }
+ctrl_up()   { ydotool key 29:0 >/dev/null 2>&1 || die "Ctrl release failed"; control_down=false; }
 
 # glide_to x y : converge on an absolute target with real frame-carrying motion. libinput accelerates
 # relative motion about 2x here, so each step is half the remaining distance and re-read, never trusted.
 glide_to() {
   local tx=$1 ty=$2 i cx cy dx dy
+  [[ "$tx $ty" =~ ^-?[0-9]+\ -?[0-9]+$ ]] || die "invalid native pointer target"
   for i in $(seq 1 16); do
     set -- $(hyprctl cursorpos | tr -d ",")
     cx=$1; cy=$2
     dx=$(( tx - cx )); dy=$(( ty - cy ))
-    if [ "${dx#-}" -le 4 ] && [ "${dy#-}" -le 4 ]; then return 0; fi
+    if [ "${dx#-}" -le "$pointer_tolerance" ] && [ "${dy#-}" -le "$pointer_tolerance" ]; then return 0; fi
     move_rel $(( dx / 2 )) $(( dy / 2 ))
     sleep 0.05
   done
+  die "pointer did not reach $tx,$ty; observed $cx,$cy"
 }
 
 # ---------------------------------------------------------------- the app
@@ -80,16 +104,16 @@ glide_to() {
 myid() {
   qs list --all --json 2>/dev/null | python3 -c '
 import json, sys
-hits = [i for i in json.load(sys.stdin) if i["config_path"] == sys.argv[1]]
+hits = [i for i in json.load(sys.stdin) if i["config_path"] == sys.argv[1] and i["pid"] == int(sys.argv[2])]
 if len(hits) != 1:
     sys.exit(1)
 print("%s %s" % (hits[0]["id"], hits[0]["pid"]))
-' "$repo/ui/shell.qml"
+' "$repo/ui/shell.qml" "$FLEA_PID"
 }
 ipc() { qs ipc -i "$MYID" call flea "$@" 2>&1; }
 
-# The renderer is stated because src/gui.rs owns that choice and a direct qs launch never runs it.
-QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" HOME="$HOMEDIR" setsid qs -p "$repo/ui" >"$SB/flea.log" 2>&1 &
+# The product entry resolves the UI, renderer and backend identity before execing Quickshell.
+QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" HOME="$HOMEDIR" setsid "$FLEA_BIN" --gui "$HOMEDIR" >"$SB/flea.log" 2>&1 &
 FLEA_PID=$!
 MYID=""
 MYPID=""
@@ -117,9 +141,9 @@ import json, sys
 hits = [w for w in json.load(sys.stdin) if str(w["pid"]) == sys.argv[1]]
 if len(hits) != 1:
     sys.exit(1)
-print(hits[0]["at"][0], hits[0]["at"][1])
+print(hits[0]["at"][0], hits[0]["at"][1], hits[0]["size"][0], hits[0]["size"][1])
 ' "$MYPID") || { echo "no window belonging to this suite (pid $MYPID)"; exit 1; }
-set -- $WIN; WX=$1; WY=$2
+set -- $WIN; WX=$1; WY=$2; WW=$3; WH=$4
 
 # rowidx <name> : the listing index whose row is called name, refusing rather than guessing.
 rowidx() {
@@ -136,8 +160,39 @@ screen_centre() {
   local idx c
   idx=$(rowidx "$1") || return 1
   c=$(ipc rowCentre "$idx")
+  [[ "$c" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
   set -- $c
+  (( $1 > 0 && $2 > 0 && $1 < WW && $2 < WH )) || return 1
   echo $(( WX + $1 )) $(( WY + $2 ))
+}
+
+# The active listing's empty tail, including Columns' narrower floor, measured before any release.
+floor_centre() {
+  local x y width height rx ry rw rh total bottom
+  read -r x y width height <<< "$(ipc listAreaRect)"
+  [[ "$x $y $width $height" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || return 1
+  (( width > 0 && height > 0 && x + width <= WW && y + height <= WH )) || return 1
+  bottom=$y
+  total=$(ipc total)
+  [[ "$total" =~ ^[0-9]+$ ]] || return 1
+  if (( total > 0 )); then
+    read -r rx ry rw rh <<< "$(ipc rowRect "$((total - 1))")"
+    [[ "$rx $ry $rw $rh" =~ ^[0-9]+(\ [0-9]+){3}$ ]] || return 1
+    (( rw > 0 && rh > 0 && rx >= x && ry >= y && rx + rw <= x + width )) || return 1
+    bottom=$((ry + rh))
+    x=$rx; width=$rw
+  fi
+  (( y + height - bottom > 2 * pointer_tolerance )) || return 1
+  printf '%s %s\n' "$((WX + x + width / 2))" "$((WY + (bottom + y + height) / 2))"
+}
+
+owned_path() {
+  local target
+  [[ -n "$1" && "$1" == /* ]] || die "file operation path is not absolute"
+  target=$(realpath -m -- "$1") || die "file operation path could not be resolved"
+  [[ "$target" == "$SB/"* && -f "$SB/$SANDBOX_MARKER" ]] && return
+  [[ -n "${XDEV:-}" && "$target" == "$XDEV/"* && -f "$XDEV/$SANDBOX_MARKER" ]] && return
+  die "file operation path escaped this run: $target"
 }
 
 echo "== fixture $SB, instance $MYID, window at $WX,$WY, $(ipc total) rows =="
@@ -234,7 +289,9 @@ check "and the gesture leaves no status line behind" "$(ipc stickyMessage)" ""
 set -- $(screen_centre r1b.txt); sx=$1; sy=$2
 warp "$sx" "$sy"; sleep 0.4
 press; sleep 0.3
-glide_to $(( sx + 40 )) $(( WY + 700 )); sleep 0.5
+point=$(floor_centre) || die "R1 has no measured empty listing floor"
+read -r fx fy <<< "$point"
+glide_to "$fx" "$fy"; sleep 0.5
 release; sleep 0.8
 check "a release over empty space transfers nothing" \
       "$([ -e "$HOMEDIR/r1b.txt" ] && echo kept || echo GONE)" "kept"
@@ -262,7 +319,9 @@ press; sleep 0.3
 # while the drag still runs, and the QDrag used to die with it (quickshell SIGSEGV, 2026-09-07).
 glide_to "$tx" "$ty"; sleep 1.6
 check "resting on the second tab selected it" "$(ipc tabIndex)" "1"
-glide_to "$tx" $(( WY + 700 )); sleep 0.6
+point=$(floor_centre) || die "R5 has no measured destination listing floor"
+read -r fx fy <<< "$point"
+glide_to "$fx" "$fy"; sleep 0.6
 release; sleep 0.6
 wait_for "$HOMEDIR/bbb/r1a.txt" present
 check "the file landed on the second tab's floor" \
@@ -387,5 +446,233 @@ check "as a copy, so the source survives" \
       "$([ -e "$HOMEDIR/r8.txt" ] && echo kept || echo GONE)" "kept"
 check "and the window survived" "$(ipc total >/dev/null 2>&1 && echo alive || echo gone)" "alive"
 echo
+[ "$fail" = 0 ] || exit 1
+
+# ---------------------------------------------------------------- shared source/target ownership
+native_key() { omarchy-drive key --window flea "$@" >/dev/null 2>&1 || die "native key delivery failed: $*"; }
+expect_ipc() {
+  local reader="$1" expected="$2" observed attempt
+  for ((attempt=1; attempt<=40; attempt++)); do
+    observed=$(ipc "$reader") || die "native observer failed: $reader"
+    if [[ "$observed" == "$expected" ]]; then ok "$reader = $expected"; return; fi
+    sleep 0.25
+  done
+  die "$reader expected [$expected], observed [$observed]"
+}
+
+expect_feedback() {
+  local owner="$1" line="$2" state attempt
+  for ((attempt=1; attempt<=40; attempt++)); do
+    state=$(ipc statusActivityState) || die "drag activity observer failed"
+    if jq -e --arg owner "$owner" --arg line "$line" '
+        [.activities[] | select(.running | not) | {ownerPath,text}] ==
+        (if $line == "" then [] else [{ownerPath:$owner,text:$line}] end)' <<< "$state" >/dev/null; then
+      ok "drag ownership owner=[$owner] line=[$line] state=$state"
+      return
+    fi
+    sleep 0.25
+  done
+  die "drag ownership owner=[$owner] line=[$line], observed $state"
+}
+
+navigate() {
+  owned_path "$1"
+  native_key -M ctrl -k l -m ctrl "$1" -k Return
+  expect_ipc path "$1"
+  expect_ipc listInFlight false
+}
+
+choose_view() {
+  local mode="$1" chord
+  case "$mode" in list) chord=1 ;; columns) chord=2 ;; grid) chord=3 ;; *) die "unknown drag view: $mode" ;; esac
+  native_key -M ctrl -k "$chord" -m ctrl
+  expect_ipc viewMode "$mode"
+  expect_ipc listInFlight false
+}
+
+make_pair() {
+  local directory="$1" name="$2" part
+  owned_path "$directory"
+  mkdir -p "$directory" || die "could not create pair fixture: $directory"
+  for part in a b; do
+    owned_path "$directory/$name-$part.txt"
+    printf '%s-%s payload\n' "$name" "$part" > "$directory/$name-$part.txt" || die "could not write pair fixture"
+  done
+}
+
+mark_pair() {
+  local name="$1" first second point px py expected
+  first=$(rowidx "$name-a.txt") || die "first pair identity is not listed"
+  second=$(rowidx "$name-b.txt") || die "second pair identity is not listed"
+  point=$(screen_centre "$name-a.txt") || die "first pair identity is not visible"
+  read -r px py <<< "$point"
+  omarchy-drive click "$px" "$py" left >/dev/null || die "native plain selection failed"
+  expect_ipc selectedIndices "$first"
+  point=$(screen_centre "$name-b.txt") || die "second pair identity is not visible"
+  read -r px py <<< "$point"
+  omarchy-drive click "$px" "$py" left --mods ctrl >/dev/null || die "native additive selection failed"
+  expected=$(jq -nr --argjson first "$first" --argjson second "$second" '[$first,$second] | sort | map(tostring) | join(",")')
+  expect_ipc selectedIndices "$expected"
+  expect_ipc selectionCount 2
+}
+
+begin_pair() {
+  local name="$1" verb="$2" point px py
+  mark_pair "$name"
+  point=$(screen_centre "$name-a.txt") || die "marked drag source is not visible"
+  read -r px py <<< "$point"
+  glide_to "$px" "$py"
+  [[ "$verb" != Copy ]] || ctrl_down
+  press
+}
+
+target_points() {
+  local point x y
+  point=$(screen_centre folder) || die "target folder is not visible"
+  read -r folder_x folder_y <<< "$point"
+  point=$(floor_centre) || die "target has no measured empty listing floor"
+  read -r floor_x floor_y <<< "$point"
+  point=$(ipc chromeButtonCentre sliders) || die "neutral chrome target is unavailable"
+  [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "neutral chrome target has no valid geometry"
+  read -r x y <<< "$point"
+  (( x > 0 && x < WW && y > 0 && y < WH )) || die "neutral chrome target is outside the owned window"
+  neutral_x=$((WX + x)); neutral_y=$((WY + y))
+}
+
+visit_targets() {
+  local destination="$1" verb="$2" suffix=""
+  [[ "$verb" != Move ]] || suffix=' · ctrl at lift copies'
+  glide_to "$folder_x" "$folder_y"
+  expect_feedback "$destination" "$verb 2 items to folder$suffix"
+  glide_to "$floor_x" "$floor_y"
+  expect_feedback "$destination" "$verb 2 items to $destination$suffix"
+  glide_to "$neutral_x" "$neutral_y"
+  expect_feedback "$destination" "$verb 2 items to a folder$suffix"
+  glide_to "$folder_x" "$folder_y"
+  expect_feedback "$destination" "$verb 2 items to folder$suffix"
+}
+
+pair_result() {
+  local source="$1" destination="$2" name="$3" action="$4" part file target
+  if [[ "$action" != cancel ]]; then
+    for part in a b; do
+      owned_path "$destination/$name-$part.txt"
+      wait_for "$destination/$name-$part.txt" present || die "committed pair did not reach $destination"
+    done
+    if [[ "$action" == Copy ]]; then
+      expect_ipc lastMessage 'Copied 2 items · z undoes'
+    else
+      expect_ipc lastMessage 'Moved 2 items · z undoes'
+    fi
+    expect_ipc stickyMessage ""
+    expect_ipc statusError false
+  fi
+  for part in a b; do
+    file="$source/$name-$part.txt"; target="$destination/$name-$part.txt"
+    owned_path "$file"; owned_path "$target"
+    if [[ "$action" == cancel ]]; then
+      check "$name-$part cancellation preserves original bytes" \
+        "$(printf '%s-%s payload\n' "$name" "$part" | cmp -s - "$file" && echo same || echo CHANGED)" same
+      check "$name-$part cancellation creates no destination" "$([[ ! -e "$target" ]] && echo absent || echo PRESENT)" absent
+    else
+      check "$name-$part committed bytes" \
+        "$(printf '%s-%s payload\n' "$name" "$part" | cmp -s - "$target" && echo same || echo CHANGED)" same
+      if [[ "$action" == Copy ]]; then
+        check "$name-$part copy retains exact source bytes" "$(cmp -s "$file" "$target" && echo same || echo CHANGED)" same
+      else
+        check "$name-$part move removes only its source" "$([[ ! -e "$file" ]] && echo moved || echo STILL_PRESENT)" moved
+      fi
+    fi
+  done
+}
+
+cross_view_pair() {
+  local name="$1" source_mode="$2" target_mode="$3" landing="$4" source destination phase point tx ty drop
+  local folder_x folder_y floor_x floor_y neutral_x neutral_y
+  source="$HOMEDIR/aaa/$name"; destination="$HOMEDIR/bbb/$name"
+  make_pair "$source" "$name"
+  owned_path "$destination/folder"
+  mkdir -p "$destination/folder" || die "could not create cross-view target"
+  native_key 1; navigate "$source"; choose_view "$source_mode"
+  native_key 2; navigate "$destination"; choose_view "$target_mode"
+  for phase in cancel commit; do
+    native_key 1
+    expect_ipc path "$source"; expect_ipc viewMode "$source_mode"; expect_ipc listInFlight false
+    point=$(ipc tabCentre 1) || die "destination tab is unavailable"
+    [[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "destination tab has no valid geometry"
+    read -r tx ty <<< "$point"; tx=$((WX + tx)); ty=$((WY + ty))
+    begin_pair "$name" Copy
+    glide_to "$tx" "$ty"
+    expect_ipc tabIndex 1
+    expect_ipc path "$destination"; expect_ipc viewMode "$target_mode"; expect_ipc listInFlight false
+    target_points
+    visit_targets "$destination" Copy
+    if [[ "$phase" == cancel ]]; then
+      native_key -k Escape
+      expect_feedback "" ""
+      release; ctrl_up
+      expect_feedback "" ""
+      pair_result "$source" "$destination/folder" "$name" cancel
+      pair_result "$source" "$destination" "$name" cancel
+    else
+      drop="$destination/folder"
+      if [[ "$landing" == floor ]]; then
+        glide_to "$floor_x" "$floor_y"
+        expect_feedback "$destination" "Copy 2 items to $destination"
+        drop="$destination"
+      fi
+      owned_path "$source/$name-a.txt"; owned_path "$source/$name-b.txt"; owned_path "$drop"
+      release; ctrl_up
+      pair_result "$source" "$drop" "$name" Copy
+      expect_feedback "" ""
+    fi
+  done
+}
+
+echo "== R9: List to Grid and Grid to active Columns keep one target-owned two-file line =="
+cross_view_pair feedback-list-grid list grid floor
+cross_view_pair feedback-grid-columns grid columns folder
+
+echo "== R10: dual-pane copies and reverse moves keep destination feedback ownership =="
+left="$HOMEDIR/aaa/feedback-dual-left"; right="$HOMEDIR/bbb/feedback-dual-right"
+make_pair "$left" feedback-left
+make_pair "$right" feedback-right
+mkdir "$left/folder" "$right/folder" || die "could not create dual target folders"
+native_key 1
+choose_view list
+point=$(ipc chromeButtonCentre dual) || die "dual control is unavailable"
+[[ "$point" =~ ^[0-9]+\ [0-9]+$ ]] || die "dual control has no valid geometry"
+read -r px py <<< "$point"
+omarchy-drive click "$((WX + px))" "$((WY + py))" left >/dev/null || die "dual control activation failed"
+for direction in left right; do
+  side=$(ipc dualState | jq -er '.focused') || die "dual focus is unavailable"
+  [[ "$side" == 0 ]] || native_key -k Tab
+  navigate "$left"
+  native_key -k Tab
+  navigate "$right"
+  state=$(ipc dualState) || die "dual state is unavailable"
+  jq -e --arg left "$left" --arg right "$right" '.active and .panes[0].path == $left and .panes[1].path == $right
+      and all(.panes[]; .loading | not)' <<< "$state" >/dev/null || die "dual fixtures lost their independent listing identity: $state"
+  if [[ "$direction" == left ]]; then
+    source="$left"; destination="$right"; name=feedback-left; verb=Copy
+    target_points
+    native_key -k Tab
+  else
+    source="$right"; destination="$left"; name=feedback-right; verb=Move
+    native_key -k Tab
+    target_points
+    native_key -k Tab
+  fi
+  expect_ipc path "$source"
+  begin_pair "$name" "$verb"
+  visit_targets "$destination" "$verb"
+  owned_path "$source/$name-a.txt"; owned_path "$source/$name-b.txt"; owned_path "$destination/folder"
+  release
+  [[ "$verb" != Copy ]] || ctrl_up
+  pair_result "$source" "$destination/folder" "$name" "$verb"
+  expect_feedback "" ""
+done
+
+printf 'DRAG_SHARED routes=List-Grid,Grid-activeColumns,dual-left-right,dual-right-left real_relative_input=ok index_only=not_exercised transfer_preemption=not_exercised\n'
 echo "$((pass + fail)) checks, $fail failed"
 [ "$fail" = 0 ] || exit 1

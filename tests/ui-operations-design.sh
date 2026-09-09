@@ -528,15 +528,8 @@ operations_cancel_live() (
         || fail "operations: no filename-bearing live transfer before deadline: $state"
     observed_bytes=$(stat -c '%s' "$destination/a-large.bin") || fail "operations: live destination byte count unavailable"
     (( observed_bytes > 0 && observed_bytes < operations_bytes )) || operations_missed_window transfer-before-capture "$state"
-    printf 'OPERATIONS_LIVE_TRANSFER before_capture_bytes=%s state=%s\n' "$observed_bytes" "$state"
-    shot operations-transfer-unpaused-filename
-    state=$(ipc statusActivityState) || fail "operations: live post-capture observer failed"
-    observed_bytes=$(stat -c '%s' "$destination/a-large.bin") || fail "operations: post-capture destination byte count unavailable"
-    if ! jq -e '.activities[0].running and .activities[0].text == "Copying 1 of 2 · a-large.bin"' <<< "$state" >/dev/null \
-            || (( observed_bytes <= 0 || observed_bytes >= operations_bytes )); then
-        operations_missed_window transfer-after-capture "$state"
-    fi
-    printf 'OPERATIONS_LIVE_TRANSFER after_capture_bytes=%s state=%s\n' "$observed_bytes" "$state"
+    printf 'OPERATIONS_LIVE_TRANSFER before_cancel_bytes=%s state=%s\n' "$observed_bytes" "$state"
+    # The separately retained filename capture must not consume this real cancellation window.
     key -k Escape >/dev/null
     menus_expect statusActivityState '(.activities | length) == 0' "unpaused native Escape reaches a terminal transfer state"
     state=$(ipc statusActivityState) || fail "operations: live cancellation outcome unavailable"
@@ -551,7 +544,7 @@ operations_cancel_live() (
     menus_equal "unpaused Escape preserves listing marks" "$selected" "$(ipc selectedIndices)"
     menus_equal "unpaused Escape preserves listing cursor" "$cursor" "$(ipc cursor)"
     shot operations-cancelled-unpaused
-    printf 'OPERATIONS_CANCEL variant=escape unpaused_native=ok filename_capture=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok attempts=1\n'
+    printf 'OPERATIONS_CANCEL variant=escape unpaused_native=ok filename_observed=ok skipped=2 failed=0 partial_cleanup=ok source_preserved=ok attempts=1\n'
 )
 
 operations_search_live() (
@@ -631,15 +624,21 @@ case_operationsdesign() (
     for path in state config cache data cancel-source; do menus_guard "$menu_box/$path"; mkdir "$menu_box/$path"; done
     export XDG_STATE_HOME="$menu_box/state" XDG_CONFIG_HOME="$menu_box/config" XDG_CACHE_HOME="$menu_box/cache" XDG_DATA_HOME="$menu_box/data"
     "$flea_bin" --ui-state '{"view":"list","keys":"default","display":{"textSize":{"mode":14}},"menu":{"hidden":[]}}' >/dev/null || fail "operations: fixture settings failed"
-    operations_missing_footer || fail "operations: missing-filesystem proof failed"
-    operations_mixed || fail "operations: mixed-outcome proof failed"
-    operations_long_error || fail "operations: long-name footer proof failed"
-    operations_search_footer || fail "operations: search footer proof failed"
+    if [[ "${1:-all}" != live ]]; then
+        operations_missing_footer || fail "operations: missing-filesystem proof failed"
+        operations_mixed || fail "operations: mixed-outcome proof failed"
+        operations_long_error || fail "operations: long-name footer proof failed"
+        operations_search_footer || fail "operations: search footer proof failed"
+    fi
     menus_guard "$menu_box/cancel-source/a-large.bin"
     truncate -s "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
     menus_guard "$menu_box/cancel-source/b-after.txt"
     printf 'after cancellation\n' > "$menu_box/cancel-source/b-after.txt"
     printf 'OPERATIONS_WORKLOAD bytes=%s source=%q\n' "$operations_bytes" "$menu_box/cancel-source/a-large.bin"
+    if [[ "${1:-all}" == live ]]; then
+        operations_cancel_live || fail "operations: unpaused cancellation proof failed"
+        return
+    fi
     operations_cancel pointer || fail "operations: interrupted pointer cancellation proof failed"
     operations_cancel escape || fail "operations: interrupted Escape cancellation proof failed"
     if operations_cancel_live; then live_cancel=ok; fi
@@ -647,3 +646,5 @@ case_operationsdesign() (
     printf 'OPERATIONS_DESIGN mixed=ok retry=ok acknowledgement=ok undo=ok informational_footer=ok long_name_elision=ok search_initial=ok interrupted_pointer_cancel=ok interrupted_escape_cancel=ok unpaused_live=%s positive_scanned_live=%s visual_inspection=pending\n' "$live_cancel" "$live_search"
     [[ "$live_cancel" == ok && "$live_search" == ok ]] || fail "operations: required unpaused proof remains incomplete"
 )
+
+case_operationslive() { case_operationsdesign live; }

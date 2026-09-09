@@ -82,6 +82,7 @@ FocusScope {
     readonly property alias trash: trashHost
     readonly property alias menuActions: menuActions
     readonly property alias emptyState: emptyState
+    readonly property alias stateMessageItem: paneMessage
     readonly property alias retrySelectionText: wire.retrySelectionText
     readonly property string menuSelectionIdentity: JSON.stringify([root.path, root.held, root.rows,
         root.selectionVersion, root.cursorIndex, root.total, root.listInFlight])
@@ -585,7 +586,8 @@ FocusScope {
     function openCursorMenu() { return Menu.openAtCursor(root, menu, Theme.spacing.rowPaddingX) }
 
     Flea.StateMessage {
-        visible: !trashHost.opened
+        id: paneMessage
+        active: !trashHost.opened
         anchors.fill: root.listSlot
         anchors.leftMargin: Theme.spacing.rowPaddingX
         anchors.rightMargin: Theme.spacing.rowPaddingX

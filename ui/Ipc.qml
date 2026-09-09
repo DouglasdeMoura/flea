@@ -462,6 +462,9 @@ QtObject {
         }
         // The empty-directory mark's own visibility, off the same listingState the overlay binds to.
         function emptyShown(): bool { return root.pane.listingState === "empty" }
+        function stateLayers(): string {
+            return JSON.stringify({empty: root.pane.emptyState.visible, message: root.pane.stateMessageItem.visible})
+        }
         // "x y width height" of the empty mark in window pixels, for a painted-pixel count: the state
         // flag above cannot see a mark drawn under its own parent's paint.
         function emptyMarkRect(): string { return root.emptyState ? root.fleaWindow.rectOf(root.emptyState.markItem) : "" }

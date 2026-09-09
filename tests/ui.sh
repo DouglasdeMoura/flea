@@ -3913,7 +3913,10 @@ EOS
         || fail "network: escape did not close the dialog after the re-home walk"
 
     # Favourites owns the new row; Remove edits that store without touching GTK or unmounting.
-    click_rail_row 0 right
+    local added_favourite_index
+    added_favourite_index=$(ipc railEntries | jq -er 'map(.kind) | index("favourite")') \
+        || fail "network: the added favorite is not present in the rail"
+    click_rail_row "$added_favourite_index" right
     settle
     [[ "$(ipc contextMenuEntries)" == "Remove" ]] \
         || fail "network: the added favourite offers $(ipc contextMenuEntries), not Remove"

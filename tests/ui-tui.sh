@@ -5,6 +5,7 @@ exec python3 - "$0" "$@" <<'PY'
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -57,6 +58,71 @@ def frame(data, rows, columns):
     return raw, ESCAPE.sub(b"", text).decode("utf-8", errors="replace")
 
 
+def separator_pixel(pixels, width, height, grid_width, grid_height, rows):
+    if min(width, height, grid_width, grid_height, rows) <= 0 or grid_width > width or grid_height > height \
+            or len(pixels) != width * height * 3:
+        raise RuntimeError("terminal separator image and measured grid disagree")
+    stride = width * 3
+    cell_height = grid_height / rows
+    transitions = []
+    # Search every possible row-2 placement; only an observed full-grid-width stroke permits input.
+    for y in range(max(1, math.floor(cell_height)), min(height, math.ceil(height - grid_height + 2 * cell_height) + 1)):
+        before, after = pixels[(y - 1) * stride:y * stride], pixels[y * stride:(y + 1) * stride]
+        changed = [x for x in range(width) if before[x * 3:(x + 1) * 3] != after[x * 3:(x + 1) * 3]]
+        if len(changed) == grid_width and changed[-1] - changed[0] + 1 == grid_width:
+            transitions.append((y, changed[0]))
+    anchors = []
+    for (top, left), (bottom, next_left) in zip(transitions, transitions[1:]):
+        if left != next_left or bottom - top >= cell_height:
+            continue
+        section = lambda y: pixels[y * stride + left * 3:y * stride + (left + grid_width) * 3]
+        if section(top - 1) == section(bottom) and all(section(y) == section(top) for y in range(top + 1, bottom)):
+            anchors.append((left + grid_width // 2, (top + bottom - 1) // 2))
+    # ponytail: Clipped or overlaid rules require an unobscured native capture at the same geometry.
+    if len(anchors) != 1:
+        raise RuntimeError(f"terminal row-2 separator is missing or ambiguous: {len(anchors)} strokes")
+    return anchors[0]
+
+
+def separator_image(path, terminal_size):
+    # ImageMagick identify: 2536 1386; RGB output then contains exactly three bytes per pixel.
+    dimensions = command(["magick", "identify", "-format", "%w %h", path]).decode().split()
+    if len(dimensions) != 2 or not all(value.isdecimal() for value in dimensions):
+        raise RuntimeError("ImageMagick returned invalid terminal screenshot dimensions")
+    width, height = map(int, dimensions)
+    rows, _, grid_width, grid_height = terminal_size
+    pixels = command(["magick", path, "-depth", "8", "rgb:-"])
+    return (width, height), separator_pixel(pixels, width, height, grid_width, grid_height, rows)
+
+
+def calibration_check(path, dimensions, pixels):
+    if hashlib.sha256(path.read_bytes()).hexdigest() != "099561e36935a3c523bf4aade3cf477282f219a6e976883ef8b1211ed1865a8e":
+        raise RuntimeError("calibration check requires the archived f0d Kitty listing.png sample")
+    metadata = json.loads(path.with_suffix(".json").read_text())
+    rows, _, grid_width, grid_height = metadata["pty_rows_columns_pixels"]
+    width, height = dimensions
+    cell_height = grid_height / rows
+    padding = height - grid_height
+    old_anchor = round((padding + 2 * cell_height) / 2)
+    assert not padding <= old_anchor < 2 * cell_height
+    assert separator_pixel(pixels, width, height, grid_width, grid_height, rows) == (1267, 52)
+    background = bytes((20, 24, 26))
+    blank = background * width * height
+    ambiguous = bytearray(blank)
+    for y in (52, 72):
+        for stripe_y in (y, y + 1):
+            offset = (stripe_y * width + 21) * 3
+            ambiguous[offset:offset + grid_width * 3] = bytes((132, 139, 145)) * grid_width
+    for sample in (blank, ambiguous):
+        try:
+            separator_pixel(sample, width, height, grid_width, grid_height, rows)
+        except RuntimeError as error:
+            assert "missing or ambiguous" in str(error)
+        else:
+            raise AssertionError("calibration accepted an absent or ambiguous separator")
+    print("TUI_CALIBRATION_SELF_CHECK 4 passed; native SGR proof not exercised")
+
+
 def child(case, binary):
     case, binary = Path(case), Path(binary)
     guard(case, case / "listing")
@@ -88,6 +154,7 @@ class Native:
         self.product_pid = None
         self.checks = 0
         self.undriven = []
+        self.separator_anchors = {}
         self.environment = os.environ.copy()
         self.environment["FLEA_TUI_TEST_CASE"] = str(self.case)
         self.log = open(self.case / "commands.log", "xb", buffering=0)
@@ -174,13 +241,15 @@ class Native:
         evidence = self.case / "evidence"
         (evidence / (label + ".ansi")).write_bytes(self.raw)
         (evidence / (label + ".txt")).write_text(self.text)
-        (evidence / (label + ".json")).write_text(json.dumps({"window": self.window(), "pty_rows_columns_pixels": self.size}))
+        window = self.window()
+        (evidence / (label + ".json")).write_text(json.dumps({"window": window, "pty_rows_columns_pixels": self.size}))
         shot = guard(self.case, evidence / (label + ".png"))
         if shot.exists():
             raise RuntimeError("refused stale TUI screenshot")
         self.drive("shot", shot, self.address)
         if not shot.is_file() or shot.stat().st_size == 0:
             raise RuntimeError("native screenshot command returned no new image")
+        self.last_snapshot = (shot, window, self.size)
         print(f"TUI_SHOT {shot} sha256={hashlib.sha256(shot.read_bytes()).hexdigest()} inspection=pending", flush=True)
 
     def key(self, *args):
@@ -553,10 +622,25 @@ class Native:
         padding_x, padding_y = window["size"][0] - columns * cell_x, window["size"][1] - rows * cell_y
         anchor_x = round(window["at"][0] + window["size"][0] / 2)
         anchor_y = round(window["at"][1] + (padding_y + inert_rows * cell_y) / 2)
-        if min(padding_x, padding_y) < 0 \
-                or not (window["at"][0] + padding_x <= anchor_x < window["at"][0] + columns * cell_x
-                        and window["at"][1] + padding_y <= anchor_y < window["at"][1] + inert_rows * cell_y):
-            raise RuntimeError("measured terminal padding leaves no proven inert calibration pixel")
+        if min(padding_x, padding_y) < 0:
+            raise RuntimeError("measured terminal grid exceeds its native window")
+        image_anchor = not (window["at"][0] + padding_x <= anchor_x < window["at"][0] + columns * cell_x
+                            and window["at"][1] + padding_y <= anchor_y < window["at"][1] + inert_rows * cell_y)
+        geometry = (tuple(window["size"]), window["monitor"], rows, columns, cell_x, cell_y)
+        if image_anchor:
+            local_anchor = self.separator_anchors.get(geometry)
+            if local_anchor is None:
+                shot, captured_window, captured_size = self.last_snapshot
+                if any(captured_window[key] != window[key] for key in ("address", "size", "monitor")) \
+                        or captured_size != self.terminal_size():
+                    raise RuntimeError("terminal separator capture does not match the current owned geometry")
+                dimensions, pixel = separator_image(guard(self.case, shot), captured_size)
+                scale_x, scale_y = dimensions[0] / window["size"][0], dimensions[1] / window["size"][1]
+                if scale_x != scale_y or not math.isclose(scale_x * columns * cell_x, captured_size[2]):
+                    raise RuntimeError("terminal screenshot scale differs from the measured grid")
+                local_anchor = (round(pixel[0] / scale_x), round(pixel[1] / scale_y))
+                print(f"TUI_SEPARATOR shot={shot} image_size={dimensions} pixel={pixel} window_local={local_anchor}", flush=True)
+            anchor_x, anchor_y = window["at"][0] + local_anchor[0], window["at"][1] + local_anchor[1]
         owned_target(anchor_x, anchor_y)
         before = STRING_CONTROL.sub(b"", frame((self.case / "output.bin").read_bytes(), rows, columns)[0])
         if not before:
@@ -568,7 +652,7 @@ class Native:
         self.drive("click", anchor_x, anchor_y, "middle")
         self.wait(label + "-pointer-anchor", lambda: bool(anchors()))
         anchor = anchors()[-1]
-        if not (1 <= int(anchor[1]) <= columns and 1 <= int(anchor[2]) <= inert_rows):
+        if not (1 <= int(anchor[1]) <= columns and (int(anchor[2]) == 2 if image_anchor else 1 <= int(anchor[2]) <= inert_rows)):
             raise RuntimeError("native middle-button calibration escaped the inert chrome cells")
         self.wait(label + "-pointer-release", lambda: (b"1", anchor[1], anchor[2], b"m") in reports())
         owned_target(anchor_x, anchor_y)
@@ -577,6 +661,8 @@ class Native:
         cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
         if cursor["x"] != anchor_x or cursor["y"] != anchor_y:
             raise RuntimeError("native pointer moved during chrome calibration")
+        if image_anchor:
+            self.separator_anchors[geometry] = local_anchor
         target_x = round(anchor_x + (column - int(anchor[1])) * cell_x)
         target_y = round(anchor_y + (row - int(anchor[2])) * cell_y)
         owned_target(target_x, target_y)
@@ -1006,6 +1092,11 @@ class Native:
 
 
 def main():
+    if len(ARGS) == 2 and ARGS[0] == "--calibration-check":
+        path = Path(ARGS[1]).resolve(strict=True)
+        dimensions = tuple(map(int, command(["magick", "identify", "-format", "%w %h", path]).split()))
+        calibration_check(path, dimensions, command(["magick", path, "-depth", "8", "rgb:-"]))
+        return
     if ARGS == ["--self-check"]:
         assert frame(b"\x1b[Hbefore\x1b[2;1H1234567890\x1b[Hpartial", 2, 10) == (b"", "")
         assert frame(b"\x1b[Hheader\x1b[2;1Hsearch:ab", 2, 10) == (b"", "")
