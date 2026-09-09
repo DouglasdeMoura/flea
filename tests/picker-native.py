@@ -501,7 +501,7 @@ try:
         picker_env[key] = str(root / name)
     picker_env.update(FLEA_BIN=str(BIN), FLEA_UI=str(UI), WAYLAND_DISPLAY=str(Path(drive_env["XDG_RUNTIME_DIR"]) / drive_env["WAYLAND_DISPLAY"]))
     fixture, large = root / "files", root / "large"
-    for directory in [fixture, fixture / "folder", large, root / "portals", root / "config/xdg-desktop-portal", root / "state/flea"]:
+    for directory in [fixture, fixture / "folder", large, root / "portals", root / "state/flea"]:
         guard(directory).mkdir(parents=True, exist_ok=True)
     write(fixture / "alpha.txt", "one")
     write(fixture / "beta.txt", "four")
@@ -509,7 +509,7 @@ try:
     write(large / "zz-last.png", "image")
     state_file = root / "state/flea/ui.json"
     write(root / "portals/flea.portal", "[portal]\nDBusName=org.freedesktop.impl.portal.desktop.flea\nInterfaces=org.freedesktop.impl.portal.FileChooser;\n")
-    write(root / "config/xdg-desktop-portal/portals.conf", "[preferred]\norg.freedesktop.impl.portal.FileChooser=flea\n")
+    write(root / "portals/portals.conf", "[preferred]\norg.freedesktop.impl.portal.FileChooser=flea\n")
     picker_env["XDG_DESKTOP_PORTAL_DIR"] = str(root / "portals")
     daemon = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"], env=picker_env, stdout=subprocess.PIPE, stderr=guard(root / "bus.log").open("w"), text=True, start_new_session=True)
     processes.append(daemon)
@@ -521,6 +521,10 @@ try:
     wait("candidate backend owns name", lambda: owner(BACKEND))
     start(["/usr/lib/xdg-desktop-portal", "--verbose"], "frontend", picker_env)
     wait("public frontend owns name", lambda: owner(FRONTEND))
+    version = bus.call_sync(FRONTEND, OBJECT, "org.freedesktop.DBus.Properties", "Get",
+                           GLib.Variant("(ss)", ("org.freedesktop.portal.FileChooser", "version")),
+                           GLib.VariantType.new("(v)"), Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
+    check("public FileChooser interface exported", isinstance(version, int) and version > 0, version)
     main()
     print(f"picker-native: {checks} checks, 0 failed; native screenshots require inspection: {root}", flush=True)
 finally:

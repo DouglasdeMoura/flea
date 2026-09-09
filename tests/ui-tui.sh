@@ -189,13 +189,10 @@ class Native:
         self.wait("pty-input-" + str(self.checks), lambda: (self.case / "input.bin").stat().st_size > before)
 
     def chord(self, key, *modifiers):
-        args = []
-        for modifier in modifiers:
-            args.extend(["-M", modifier])
-        args.extend(["-k", key])
-        for modifier in reversed(modifiers):
-            args.extend(["-m", modifier])
-        self.key(*args)
+        self.identity()
+        before = (self.case / "input.bin").stat().st_size
+        self.drive("hotkey", "+".join(modifiers) or "none", key.lower() if len(key) == 1 else key, self.address)
+        self.wait("pty-input-" + str(self.checks), lambda: (self.case / "input.bin").stat().st_size > before)
 
     def cursor_is(self, name):
         # The listing cursor is reverse video; marked rows use a background without reverse video.
