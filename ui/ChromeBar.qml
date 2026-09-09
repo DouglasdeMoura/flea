@@ -395,14 +395,13 @@ Item {
             }
         }
 
-        // The Settings board draws the sliders button at the right end, past a rule that separates
-        // it from the three view buttons: it changes the window, not the way the listing is drawn.
-        // Row lays its own children out, so the rule takes the strip's height rather than anchoring.
+        // Row owns horizontal placement; the short Settings divider stays vertically centered.
         Rectangle {
             width: Theme.spacing.hairline
-            height: Theme.chromeHeight
-            color: Theme.color.muted
-            opacity: 0.4
+            height: Theme.chromeMarkSize - Theme.spacing.hairline
+            y: (parent.height - height) / 2
+            color: Theme.color.foreground
+            opacity: 0.12
         }
 
         Flea.ChromeButton {

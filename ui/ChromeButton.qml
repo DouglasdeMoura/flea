@@ -2,21 +2,20 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 
-// One glyph button in the window chrome: muted at rest, accent when it names the current view, and
-// dimmed when there is nowhere for it to go.
+// Enabled chrome uses foreground; active and focused controls use accent, disabled controls use muted.
 Item {
     id: root
 
     property string glyph: "file"
     property bool active: false
     property bool keyboardFocused: false
-    property color restingColor: Theme.color.muted
+    property color restingColor: Theme.color.foreground
     property real glyphSize: Theme.chromeMarkSize
 
     signal activated()
 
     // A control with nowhere to go still occupies its slot, so the bar never reflows as history changes.
-    property real disabledOpacity: 0.35
+    property real disabledOpacity: 1
 
     property string accessName: {
         if (root.glyph === "arrow-left")
