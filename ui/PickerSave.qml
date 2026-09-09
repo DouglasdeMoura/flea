@@ -88,8 +88,12 @@ Item {
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Output URI"
                     Accessible.description: uriText.text
-                    Keys.onHomePressed: contentX = 0
-                    Keys.onEndPressed: contentX = Math.max(0, contentWidth - width)
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Home) contentX = 0
+                        else if (event.key === Qt.Key_End) contentX = Math.max(0, contentWidth - width)
+                        else { event.accepted = false; return }
+                        event.accepted = true
+                    }
                     Keys.onLeftPressed: contentX = Math.max(0, contentX - Theme.font.caption)
                     Keys.onRightPressed: contentX = Math.min(Math.max(0, contentWidth - width), contentX + Theme.font.caption)
                     Keys.onTabPressed: function(event) { root.picker.stepFocus(outputUri, (event.modifiers & Qt.ShiftModifier) !== 0) }

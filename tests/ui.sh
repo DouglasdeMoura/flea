@@ -3518,6 +3518,9 @@ case_network() {
     # the newly functional Save action from dialing TEST-NET-2 or reopening on its later timeout.
     cat > "$fake_root/bin/gio" <<EOS
 #!/bin/sh
+case "\$*" in
+"info --attributes=trash::item-count trash:///"|"monitor --dir=trash:///") exec /usr/bin/gio "\$@" ;;
+esac
 case "\$1 \${2:-}" in
 "mount -l") exit 0 ;;
 "mount nfs://cancel.test/export")

@@ -372,7 +372,7 @@ Item {
         function onConvertDone(id, ok, path, err, requestId, source, collision) {
             if (requestId && (!pane.convertSource || pane.convertSource.requestId !== requestId || pane.convertSource.path !== source)) return
             pane.sticky("")
-            pane.message(ok ? "Converted to " + Ops.leaf(path) + "." : Errors.sentence("convert", err), !ok)
+            pane.message(ok ? "Converted to " + Ops.leaf(path) + "." : collision ? err : Errors.sentence("convert", err), !ok)
             if (ok) {
                 if (pane.searchMode === Search.RESULTS) root.stale = true
                 else pane.refresh(path)

@@ -535,49 +535,51 @@ class Native:
         return None
 
     def click_cell(self, column, row, label):
-        def move(x, y):
-            self.drive("move", x, y)
-            # Compositor warps emit no pointer frame; one uinput pixel delivers terminal motion.
-            self.log.write(b"ydotool mousemove -x 1 -y 0\n")
-            command(["ydotool", "mousemove", "-x", "1", "-y", "0"], env=self.environment)
-
         window, (rows, columns), (cell_x, cell_y) = self.cell_geometry()
         if not (1 <= column <= columns and 1 <= row <= rows):
             raise RuntimeError("native pointer target is outside the measured terminal grid")
         self.drive("focus", self.address)
-        anchor_x = window["at"][0] + window["size"][0] // 2
-        anchor_y = window["at"][1] + window["size"][1] // 2
-        cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
-        if abs(cursor["x"] - anchor_x) < cell_x and abs(cursor["y"] - anchor_y) < cell_y:
-            anchor_x += round(cell_x * 2)
+
+        def owned_target(x, y):
+            active = json.loads(command(["hyprctl", "activewindow", "-j"]))
+            current = self.identity()
+            if active.get("address") != self.address or current["at"] != window["at"] or current["size"] != window["size"] \
+                    or not (window["at"][0] <= x < window["at"][0] + window["size"][0]
+                            and window["at"][1] <= y < window["at"][1] + window["size"][1]):
+                raise RuntimeError("native pointer target moved or lost focus before activation")
+
+        # Intersect every possible padding placement of the measured grid's header and separator rows.
+        inert_rows = 2
+        padding_x, padding_y = window["size"][0] - columns * cell_x, window["size"][1] - rows * cell_y
+        anchor_x = round(window["at"][0] + window["size"][0] / 2)
+        anchor_y = round(window["at"][1] + (padding_y + inert_rows * cell_y) / 2)
+        if min(padding_x, padding_y) < 0 \
+                or not (window["at"][0] + padding_x <= anchor_x < window["at"][0] + columns * cell_x
+                        and window["at"][1] + padding_y <= anchor_y < window["at"][1] + inert_rows * cell_y):
+            raise RuntimeError("measured terminal padding leaves no proven inert calibration pixel")
+        owned_target(anchor_x, anchor_y)
+        before = STRING_CONTROL.sub(b"", frame((self.case / "output.bin").read_bytes(), rows, columns)[0])
+        if not before:
+            raise RuntimeError("native pointer calibration requires a complete rendered frame")
         offset = (self.case / "input.bin").stat().st_size
-        # Actual SGR mouse report: ESC[<35;column;rowM. Its coordinates locate the cell without guessing terminal padding.
+        # SGR middle press/release: ESC[<1;column;rowM/m, reported under the product's normal 1002 mode.
         reports = lambda: re.findall(rb"\x1b\[<(\d+);(\d+);(\d+)([Mm])", (self.case / "input.bin").read_bytes()[offset:])
-        move(anchor_x, anchor_y)
-        self.wait(label + "-pointer-anchor", lambda: bool(reports()))
-        anchor = reports()[-1]
+        anchors = lambda: [report for report in reports() if report[0] == b"1" and report[3] == b"M"]
+        self.drive("click", anchor_x, anchor_y, "middle")
+        self.wait(label + "-pointer-anchor", lambda: bool(anchors()))
+        anchor = anchors()[-1]
+        if not (1 <= int(anchor[1]) <= columns and 1 <= int(anchor[2]) <= inert_rows):
+            raise RuntimeError("native middle-button calibration escaped the inert chrome cells")
+        self.wait(label + "-pointer-release", lambda: (b"1", anchor[1], anchor[2], b"m") in reports())
+        owned_target(anchor_x, anchor_y)
+        self.wait(label + "-pointer-inert", lambda: STRING_CONTROL.sub(b"", frame(
+            (self.case / "output.bin").read_bytes(), rows, columns)[0]) == before)
         cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
-        anchor_x, anchor_y = cursor["x"], cursor["y"]
+        if cursor["x"] != anchor_x or cursor["y"] != anchor_y:
+            raise RuntimeError("native pointer moved during chrome calibration")
         target_x = round(anchor_x + (column - int(anchor[1])) * cell_x)
         target_y = round(anchor_y + (row - int(anchor[2])) * cell_y)
-        if not (window["at"][0] <= target_x < window["at"][0] + window["size"][0]
-                and window["at"][1] <= target_y < window["at"][1] + window["size"][1]):
-            raise RuntimeError("native cell mapping escaped its owned window")
-        if (int(anchor[1]), int(anchor[2])) != (column, row):
-            offset = (self.case / "input.bin").stat().st_size
-            move(target_x, target_y)
-            self.wait(label + "-pointer-cell", lambda: bool(reports()))
-            observed = reports()[-1]
-            if (int(observed[1]), int(observed[2])) != (column, row):
-                raise RuntimeError("native pointer did not reach the requested measured cell")
-            cursor = json.loads(command(["hyprctl", "cursorpos", "-j"]))
-            target_x, target_y = cursor["x"], cursor["y"]
-        active = json.loads(command(["hyprctl", "activewindow", "-j"]))
-        current = self.identity()
-        if active.get("address") != self.address or current["at"] != window["at"] or current["size"] != window["size"] \
-                or not (window["at"][0] <= target_x < window["at"][0] + window["size"][0]
-                        and window["at"][1] <= target_y < window["at"][1] + window["size"][1]):
-            raise RuntimeError("native pointer target moved or lost focus before activation")
+        owned_target(target_x, target_y)
         offset = (self.case / "input.bin").stat().st_size
         self.drive("click", target_x, target_y, "left")
         self.wait(label + "-pointer-press", lambda: any(int(button) == 0 and int(x) == column and int(y) == row and kind == b"M"
