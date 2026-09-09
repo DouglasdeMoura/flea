@@ -515,6 +515,19 @@ wait_rail() {
     fail "the rail never reached $want entries, it has $count"
 }
 
+# j down the rail until the cursor row carries this label. Row positions shift with the box's own
+# devices and the operator's Places switches, so no case may count rail rows.
+rail_seek() {
+    local want="$1" count
+    count=$(ipc railCount)
+    for _attempt in $(seq 1 "$count"); do
+        [[ "$(ipc railLabel "$(ipc railCursor)")" == "$want" ]] && return
+        key j >/dev/null
+        settle
+    done
+    fail "rail_seek never reached $want, the labels are $(ipc railLabels)"
+}
+
 # The Flea window is tiled here, so a pane coordinate needs its origin added before a click.
 window_box() {
     local clients geometry pid expected wx wy width height
@@ -5909,11 +5922,9 @@ EOS
     settle
     [[ "$(ipc focusView)" == "rail" ]] || fail "rename: Tab did not reach the rail"
 
-    # Home(0), isos(1), NAS(2): two j's from Home reaches the bookmark-only entry.
-    key j >/dev/null
-    key j >/dev/null
-    settle
-    [[ "$(ipc railCursor)" == "2" ]] || fail "rename: cursor did not reach NAS, it is $(ipc railCursor)"
+    # The rail also carries Trash and this box's own devices, so the bookmark-only entry is sought
+    # by its label rather than counted: j from the top until the cursor row says NAS.
+    rail_seek NAS
 
     # F2 starts the field pre-filled and pre-selected; typing replaces the whole label.
     key -k F2 >/dev/null
@@ -5959,7 +5970,8 @@ EOS
     # isos has no bookmark line at all yet: renaming it must create one, not fail silently.
     key k >/dev/null
     settle
-    [[ "$(ipc railCursor)" == "1" ]] || fail "rename: cursor did not reach isos, it is $(ipc railCursor)"
+    [[ "$(ipc railLabel "$(ipc railCursor)")" == "isos" ]] \
+        || fail "rename: k did not reach isos, the cursor row is $(ipc railLabel "$(ipc railCursor)")"
     key -k F2 >/dev/null
     settle
     key "ISOs Archive" >/dev/null

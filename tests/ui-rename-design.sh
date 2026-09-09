@@ -48,7 +48,7 @@ rename_design_backend_loss() {
     rename_stopped=""
     menus_expect renameState '.index == -1 and (.pending | not) and .listingState == "error"' "$mode backend loss releases the editor and its pending request"
     menus_expect statusError '. == true' "$mode backend loss remains an acknowledged error"
-    [[ "$(ipc statusPrimary)" == *'rename outcome is unknown'* ]] || fail 'rename: backend loss misreported the operation outcome'
+    [[ "$(ipc statusPrimary)" == *'rename outcome unknown'* ]] || fail 'rename: backend loss misreported the operation outcome'
     menus_shot "rename-$mode-backend-lost"
     menus_acknowledge
     menus_guard "$menu_dir/a-original.md"
