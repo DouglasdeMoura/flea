@@ -3641,6 +3641,9 @@ case_network() {
             jq -e "$filter" <<< "$seen" >/dev/null && return
             sleep 0.05
         done
+        printf 'NETWORK_PANE_FAILURE cursor=%q key=%s network=%s geometry=%s\n' \
+            "$(hyprctl cursorpos)" "$(ipc keyDeliveryState)" "$(ipc networkFocusState)" "$(ipc shareBrowserState)"
+        shot network-pane-focus-failure
         fail "network: pane transition did not satisfy $filter: $seen"
     }
     network_click_pane() {
@@ -3648,6 +3651,8 @@ case_network() {
         read -r x y width height <<< "$(ipc shareBrowserState | jq -r --argjson side "$side" '.paneRects[$side]')"
         [[ "$width" -gt 0 && "$height" -gt 0 ]] || fail "network: pane $side has no clickable listing"
         read -r wx wy _ww _wh < <(window_box) || fail "native window coordinates unavailable"
+        printf 'NETWORK_PANE_CLICK side=%s target=%s,%s rectangle=%s,%s,%s,%s before=%s\n' \
+            "$side" "$((wx + x + width / 2))" "$((wy + y + height / 2))" "$x" "$y" "$width" "$height" "$(ipc dualState)"
         omarchy-drive click "$((wx + x + width / 2))" "$((wy + y + height / 2))" >/dev/null
         network_wait_panes ".focused == $side"
     }

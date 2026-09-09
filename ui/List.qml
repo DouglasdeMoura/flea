@@ -143,7 +143,7 @@ ListView {
             root.pane.backend.dirsizecancel()
             root.dirSizesCancelled()
         }
-        coalesce.restart()
+        coalesce.start()
         settle.restart()
     }
 

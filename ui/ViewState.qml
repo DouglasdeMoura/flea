@@ -242,8 +242,10 @@ QtObject {
     }
     function refreshFavourites() {
         stateFile.reload()
+        // blockLoading covers only the first read; a reload otherwise returns the previous document.
+        stateFile.waitForJob()
+        if (!stateFile.loaded || root.favouritesReadError.length > 0) return false
         var text = stateFile.text()
-        if (!stateFile.loaded) return false
         return root.syncFavourites(text)
     }
 

@@ -126,7 +126,7 @@ Item {
         model: root.pane ? root.pane.shownTotal : root.rows.length
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        onContentYChanged: if (root.pane !== null) { coalesce.restart(); settle.restart() }
+        onContentYChanged: if (root.pane !== null) { coalesce.start(); settle.restart() }
         reuseItems: true
 
         // G7 needs an empty press target below the final row even when a long column fills the viewport.
