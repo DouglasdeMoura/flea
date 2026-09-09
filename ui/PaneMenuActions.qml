@@ -82,7 +82,7 @@ Loader {
     }
     function open(action, menuId) {
         if (opened) return
-        if (action === "rename" && pane.renamePending) { pane.message("A rename is still finishing.", false); return }
+        if (action === "rename" && pane.renamePending) { pane.message("Rename is still finishing.", false); return }
         if (deleting || survivorId) { pane.message("The deletion is still finishing.", false); return }
         if (action === "newFile") {
             requestId++

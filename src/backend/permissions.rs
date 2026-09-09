@@ -104,7 +104,7 @@ impl Permissions {
             .symlink_metadata()
             .map_err(|e| format!("Could not inspect permissions: {}.", crate::error::io_message(&e)))?;
         if !(before.is_file() || before.is_dir()) {
-            return Err("Permissions is available for one file or directory; symbolic links are not followed.".into());
+            return Err("Permissions takes one file or folder, not a link.".into());
         }
         let file = OpenOptions::new()
             .read(true)

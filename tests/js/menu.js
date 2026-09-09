@@ -3,7 +3,7 @@
 
 function state(changes) {
     var value = { hasRow: true, selectionCount: 1, rowMode: 0o100644, clipboardAvailable: false,
-        hiddenActions: ["delete", "openwith", "openTerminal", "moveto", "copyto", "properties", "permissions", "copypath"],
+        hiddenActions: ["delete", "openTerminal", "moveto", "copyto", "properties", "permissions", "copypath"],
         archiveFormats: ["zip"], canExtract: true, rowIsArchive: false, rowIsImage: true, canConvert: true,
         taildropInstalled: true, taildropPeers: [{ id: "box", label: "Box" }],
         dropboxInstalled: true, dropboxPath: "/tmp/Dropbox", rowInDropbox: false }

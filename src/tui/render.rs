@@ -708,8 +708,8 @@ mod tests {
         assert!(output.contains("│ show hidden │"));
         model.hidden = true;
         assert_eq!(menu_rows(&model), ["hide hidden", "taildrop  ▶"]);
-        model.taildrop.error = "Tailscale is signed out".into();
-        assert_eq!(menu_rows(&model), ["hide hidden", "taildrop · Tailscale is signed out"]);
+        model.taildrop.error = "signed out".into();
+        assert_eq!(menu_rows(&model), ["hide hidden", "taildrop · signed out"]);
     }
     #[test]
     fn confirmation_buttons_stay_visible_and_hit_testable_at_small_sizes() {

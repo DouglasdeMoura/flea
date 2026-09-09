@@ -71,7 +71,7 @@ pub fn key(model: &mut Model, key: &Key, map: &Map, wire: &mut Wire) -> io::Resu
                         model.taildrop_target = Some(peer.clone());
                         model.menu_action = "taildropRefresh".into();
                         model.taildrop.refresh();
-                        model.say("Checking Taildrop availability".into());
+                        model.say("Checking Taildrop".into());
                         model.menu = false;
                     }
                     return Ok(());

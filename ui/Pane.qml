@@ -325,7 +325,7 @@ FocusScope {
     function openPermissions() {
         var row = root.permissionSelection()
         if (!row || Menu.permissionsEntry(row.p, Ops.targetIndices(root).length).disabled) {
-            root.message("Permissions is available for one file or directory; symbolic links are not followed.", true)
+            root.message("Permissions takes one file or folder, not a link.", true)
             return
         }
         root.permissionsRequested(root.join(root.path, row.n))

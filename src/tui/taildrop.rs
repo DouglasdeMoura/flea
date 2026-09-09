@@ -83,8 +83,8 @@ impl Taildrop {
         self.child.is_some()
     }
     pub fn reason(&self) -> &str {
-        if self.sending.is_some() { "Sending files" }
-        else if self.loading() { "Checking availability" }
+        if self.sending.is_some() { "sending" }
+        else if self.loading() { "checking" }
         else { &self.error }
     }
     pub fn current_peer(&self, selected: &Peer) -> Option<Peer> {
@@ -207,18 +207,18 @@ fn text<'a>(value: &'a Json, key: &str) -> &'a str {
 fn available_peers(value: &Json) -> Result<Vec<Peer>, String> {
     match text(value, "BackendState") {
         "Running" => {}
-        "NeedsLogin" => return Err("Tailscale is signed out".into()),
-        "" => return Err("Tailscale is unavailable".into()),
-        state => return Err(format!("Tailscale is {}", state)),
+        "NeedsLogin" => return Err("signed out".into()),
+        "" => return Err("unavailable".into()),
+        state => return Err(state.to_lowercase()),
     }
     let capability = "https://tailscale.com/cap/file-sharing";
     let owner = value.get("Self");
     let mapped = owner.and_then(|owner| owner.get("CapMap")).and_then(|map| map.get(capability)).is_some();
     let listed = owner.and_then(|owner| owner.get("Capabilities")).and_then(Json::as_array)
         .unwrap_or(&[]).iter().any(|value| value.as_str() == Some(capability));
-    if !mapped && !listed { return Err("Taildrop is disabled for this account".into()); }
+    if !mapped && !listed { return Err("disabled for this account".into()); }
     let peers = peers(value);
-    if peers.is_empty() { Err("No peers reachable".into()) } else { Ok(peers) }
+    if peers.is_empty() { Err("no peers".into()) } else { Ok(peers) }
 }
 
 // Sample input: {"Self":{"UserID":1},"Peer":{"node":{"Online":true,"TaildropTarget":1,"DNSName":"host.tail.ts.net."}}}.
@@ -303,17 +303,17 @@ mod tests {
     fn provider_state_overrides_stale_peer_eligibility() {
         let fixture = r#"{"BackendState":"Running","Self":{"Capabilities":["https://tailscale.com/cap/file-sharing"]},"Peer":{"old":{"Online":true,"TaildropTarget":1,"HostName":"alpha"}}}"#;
         assert_eq!(available_peers(&jsondoc::parse(fixture).unwrap()).unwrap()[0].label, "alpha");
-        for (state, reason) in [("NeedsLogin", "Tailscale is signed out"), ("Stopped", "Tailscale is Stopped"), ("", "Tailscale is unavailable")] {
+        for (state, reason) in [("NeedsLogin", "signed out"), ("Stopped", "stopped"), ("", "unavailable")] {
             let value = jsondoc::parse(&fixture.replace("Running", state)).unwrap();
             assert_eq!(available_peers(&value).err().as_deref(), Some(reason));
         }
         let disabled = jsondoc::parse(&fixture.replace("https://tailscale.com/cap/file-sharing", "unrelated")).unwrap();
-        assert_eq!(available_peers(&disabled).err().as_deref(), Some("Taildrop is disabled for this account"));
+        assert_eq!(available_peers(&disabled).err().as_deref(), Some("disabled for this account"));
         let mapped = fixture.replace(r#""Capabilities":["https://tailscale.com/cap/file-sharing"]"#,
                                      r#""CapMap":{"https://tailscale.com/cap/file-sharing":[]}"#);
         assert_eq!(available_peers(&jsondoc::parse(&mapped).unwrap()).unwrap().len(), 1);
         let empty = jsondoc::parse(&fixture.replace(r#""Online":true"#, r#""Online":false"#)).unwrap();
-        assert_eq!(available_peers(&empty).err().as_deref(), Some("No peers reachable"));
+        assert_eq!(available_peers(&empty).err().as_deref(), Some("no peers"));
     }
 
     #[test]

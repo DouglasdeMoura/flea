@@ -147,11 +147,11 @@ function commitRename(pane, newName) {
     if (pane.renamePending) return
     var row = pane.rowFor(pane.renamingIndex)
     if (!row) {
-        pane.renameError = "Selected item changed; reopen Rename."
+        pane.renameError = "Item changed; reopen Rename."
         return
     }
     if (!newName.length || newName === "." || newName === ".." || newName.indexOf("/") >= 0 || newName.indexOf("\u0000") >= 0) {
-        pane.renameError = "A name cannot be empty, . or .., or contain a separator."
+        pane.renameError = "A name cannot be empty, . or .., or contain /."
         return
     }
     pane.renameError = ""

@@ -64,10 +64,10 @@ Item {
         // A dropped request is the app being busy, not a failure, so it takes the plain role.
         onBusy: function (path) { pane.message("Still opening the last file; try again in a moment.", false) }
         // canonicalize proved the path before every failure src/open.rs and src/terminal.rs report under their one status, so neither sentence below names a cause.
-        onFailed: function (path) { pane.message("That file could not be opened; nothing on this system took it.", true) }
+        onFailed: function (path) { pane.message("No application on this system opened that file.", true) }
         onIsDirectory: function (path) { pane.open(path) }
         onTerminalBusy: function (path) { pane.message("Still opening the last terminal; try again in a moment.", false) }
-        onTerminalFailed: function (path) { pane.message("That directory could not be opened in a terminal; nothing on this system took it.", true) }
+        onTerminalFailed: function (path) { pane.message("No terminal on this system opened that directory.", true) }
     }
 
     Flea.ShareLink {
@@ -409,11 +409,11 @@ Item {
                 pane.renameRequest = null
                 pane.renameKeepsPointerRow = false
                 if (terminal) {
-                    text = "The backend stopped; rename outcome is unknown. Reopen Flea and check both names before retrying."
+                    text = "Backend stopped; rename outcome unknown."
                 } else if (where === "rename-kept" || (where === "journal" && input === request.destination)) {
                     // A destination-side journal failure happens after the filesystem rename succeeded.
                     pane.renamingIndex = -1
-                    if (where === "journal") text = Errors.capitalised("rename completed, but Undo could not be recorded: " + message)
+                    if (where === "journal") text = Errors.capitalised("renamed, but Undo was not recorded: " + message)
                     pane.message(text, true)
                     root.refreshRename(request, where === "journal" ? request.destination : "")
                     return

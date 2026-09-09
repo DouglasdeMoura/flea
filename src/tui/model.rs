@@ -417,14 +417,14 @@ impl Model {
         self.menu_action.clear();
         self.menu = false;
         self.message.clear();
-        self.fail("Taildrop cancelled: selection changed".into());
+        self.fail("Taildrop cancelled; selection changed.".into());
         true
     }
     pub fn advance_taildrop(&mut self, wire: &mut Wire) -> io::Result<()> {
         if self.menu_action != "taildropRefresh" || self.taildrop.loading() { return Ok(()); }
         let current = self.taildrop_target.as_ref().and_then(|peer| self.taildrop.current_peer(peer));
         if current.is_none() || !self.taildrop.error.is_empty() {
-            let reason = if self.taildrop.error.is_empty() { "Selected Taildrop device changed or is no longer reachable".into() }
+            let reason = if self.taildrop.error.is_empty() { "Taildrop device is unreachable.".into() }
                 else { self.taildrop.error.clone() };
             self.taildrop_target = None;
             self.menu_action.clear();
@@ -993,7 +993,7 @@ impl Model {
                         self.message.clear();
                         if let Some(peer) = self.taildrop_target.take() {
                             if self.menu_count == 0 || paths.len() < self.menu_count {
-                                self.fail("Taildrop failed: the validated selection is incomplete".into());
+                                self.fail("Taildrop: selection is incomplete.".into());
                             } else {
                                 match self.taildrop.send(&peer, &paths[..self.menu_count]) {
                                     Ok(()) => self.say(format!("Sending to {}", peer.label)),
@@ -1070,12 +1070,12 @@ mod tests {
         let mut model = Model::new(PathBuf::from("/"), &Json::Null);
         model.taildrop_target = Some(super::super::taildrop::Peer { id: "node".into(), label: "peer".into(), address: "peer.invalid".into() });
         model.menu_action = "taildropRefresh".into();
-        model.message = "Checking Taildrop availability".into();
+        model.message = "Checking Taildrop".into();
         model.invalidate_rows();
         assert!(model.taildrop_target.is_none());
         assert!(model.menu_action.is_empty());
         assert!(model.message.is_empty());
-        assert_eq!(model.error, "Taildrop cancelled: selection changed");
+        assert_eq!(model.error, "Taildrop cancelled; selection changed.");
         assert!(!model.cancel_taildrop(), "late invalidation must not create another error");
     }
 

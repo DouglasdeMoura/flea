@@ -13,7 +13,7 @@ pub const DEFAULTS: &str = r#"{
   "groupByKind": false,
   "hidden": false,
   "wrapAtEnds": false,
-  "keyHints": true,
+  "keyHints": false,
   "places": {
     "favourites": [],
     "showHome": true, "showNetwork": true,
@@ -27,7 +27,7 @@ pub const DEFAULTS: &str = r#"{
   },
   "keys": "default",
   "display": { "textSize": { "mode": "system" }, "hyprlandIcons": false },
-  "menu": { "hidden": ["delete", "openwith", "openTerminal",
+  "menu": { "hidden": ["delete", "openTerminal",
             "moveto", "copyto", "properties", "permissions", "copypath"] }
 }"#;
 
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(d.get("groupByKind").and_then(Json::as_bool), Some(false));
         assert_eq!(d.get("hidden").and_then(Json::as_bool), Some(false));
         assert_eq!(d.get("wrapAtEnds").and_then(Json::as_bool), Some(false));
-        assert_eq!(d.get("keyHints").and_then(Json::as_bool), Some(true));
+        assert_eq!(d.get("keyHints").and_then(Json::as_bool), Some(false));
         let cols: Vec<&str> = d.get("columns").and_then(Json::as_array).expect("columns").iter().filter_map(Json::as_str).collect();
         assert_eq!(cols, ["name", "size", "date"]);
         assert_eq!(d.get("sort").and_then(|s| s.get("key")).and_then(Json::as_str), Some("name"));
@@ -212,7 +212,7 @@ mod tests {
             .collect();
         assert_eq!(
             hidden,
-            ["delete", "openwith", "openTerminal", "moveto", "copyto", "properties", "permissions", "copypath"]
+            ["delete", "openTerminal", "moveto", "copyto", "properties", "permissions", "copypath"]
         );
     }
 

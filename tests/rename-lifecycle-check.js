@@ -68,7 +68,7 @@ equal([p.renamePending, p.sent.length, p.renameRequest.destination], [true, 2, "
 p = editing();
 p.fail("journal", "/fixture/list/after.txt", "permission denied");
 equal([p.renamePending, p.renamingIndex, p.refreshed], [false, -1, ["/fixture/list/after.txt"]]);
-equal(p.messages, [["Rename completed, but Undo could not be recorded: permission denied.", true]]);
+equal(p.messages, [["Renamed, but Undo was not recorded: permission denied.", true]]);
 
 p = editing();
 p.fail("rename-kept", "/fixture/list/before.txt", "permission denied");
@@ -106,7 +106,7 @@ for (const where of ["backend", "read"]) {
     p = editing();
     p.fail(where, "", "the backend stopped");
     equal([p.renamePending, p.renamingIndex, p.listingState, p.total], [false, -1, "error", 0]);
-    equal(p.messages, [["The backend stopped; rename outcome is unknown. Reopen Flea and check both names before retrying.", true]]);
+    equal(p.messages, [["Backend stopped; rename outcome unknown.", true]]);
 }
 
 p = editing();

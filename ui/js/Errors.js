@@ -27,7 +27,7 @@ function sentence(where, message) {
     }
     // undo reverses a rename through the same call, so this sentence names no direction.
     if (where === "rename-kept") {
-        return "The copy is complete; the name it came from could not be fully removed and may now be incomplete, so check it before deleting anything."
+        return "Copied, but the old name was only partly removed. Check it."
     }
     // Deliberately not the capitalised branch: every other mkdir refusal reaches the UI through
     // src/error.rs from_io, which passes std::io::Error::to_string straight through, errno and all.

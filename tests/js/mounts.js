@@ -176,7 +176,7 @@ function run(check) {
     // Only the safe verdict may say safe; the other two tell the user to leave the stick in.
     check("the safe verdict earns the unplug sentence", Eject.sentence("safe", "128GB").text, "Ejected 128GB, it is safe to unplug.")
     check("the safe verdict is not an error", Eject.sentence("safe", "128GB").isError, false)
-    check("the mounted verdict with the row itself still mounted says try again", Eject.sentence("mounted", "128GB", []).text, "128GB could not be ejected; it is still mounted, close anything using it and try again.")
+    check("the mounted verdict with the row itself still mounted says try again", Eject.sentence("mounted", "128GB", []).text, "128GB is still mounted; close what is using it.")
     check("the mounted verdict is an error", Eject.sentence("mounted", "128GB", []).isError, true)
     check("a sibling blocker is named instead of an instruction that would do nothing", Eject.sentence("mounted", "second", ["first"]).text, "second could not be ejected; first on the same drive is still mounted, eject that instead.")
     check("two blockers are both named", Eject.sentence("mounted", "third", ["first", "second"]).text, "third could not be ejected; first, second on the same drive are still mounted, eject those instead.")

@@ -169,8 +169,8 @@ Item {
             root.focusPart = 2
             cancelButton.forceActiveFocus()
             root.errorText = pending
-                ? "Conversion outcome is unknown because the backend stopped responding; restart Flea and inspect the output before trying again."
-                : "Conversion is unavailable because the backend stopped responding; restart Flea and reopen Convert."
+                ? "Backend stopped; conversion outcome unknown. Check the output."
+                : "Backend stopped; reopen Flea to convert."
         }
     }
 

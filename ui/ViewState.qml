@@ -269,7 +269,7 @@ QtObject {
         onLoadFailed: function (error) {
             if (error === FileViewError.FileNotFound && !root.initialReadComplete) return
             if (!root.initialReadComplete) root.unreadable = true
-            root.favouritesReadError = "Favorites could not be refreshed: ui.json could not be read; previous entries kept."
+            root.favouritesReadError = "Favorites not refreshed: ui.json unreadable; kept the old entries."
             root.favouritesReadFailed(root.favouritesReadError)
         }
     }

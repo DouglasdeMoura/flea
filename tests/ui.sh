@@ -406,11 +406,11 @@ seed_ui_state() {
 }
 
 # The shipped menu.hidden set less Open in terminal, so a case can drive that row without changing
-# any other row of the menu; src/uischema.rs DEFAULTS is where the eight come from.
-terminal_shown='["delete","openwith","moveto","copyto","properties","permissions","copypath"]'
+# any other row of the menu; src/uischema.rs DEFAULTS is where the seven come from.
+terminal_shown='["delete","moveto","copyto","properties","permissions","copypath"]'
 # The shipped set whole, from the same DEFAULTS. A case asserting a menu's exact row list seeds this
 # rather than reading whatever the operator has switched off in the Menus section.
-menu_shipped='["delete","openwith","openTerminal","moveto","copyto","properties","permissions","copypath"]'
+menu_shipped='["delete","openTerminal","moveto","copyto","properties","permissions","copypath"]'
 
 launch() {
     local start_path="$1"
@@ -1404,7 +1404,7 @@ case_openterminal() {
     chmod +x "$dir/bin/flea"
     : > "$ran"
     hotkey --global ctrl t flea >/dev/null
-    wait_message "That directory could not be opened in a terminal; nothing on this system took it."
+    wait_message "No terminal on this system opened that directory."
     shot openterminal-failed
     [[ ! -s "$ran" ]] || fail "openterminal: the failing stub still logged $(cat "$ran")"
 
@@ -1794,7 +1794,7 @@ case_background() {
     : > "$dir/c.txt"
     # Every row list below is the shipped column, and ui/js/Menu.js applyHidden builds it from
     # menu.hidden, which is operator state: without this seed the assertions read the operator's own
-    # Menus section and fail on a box that has switched any of the eight back on.
+    # Menus section and fail on a box that has switched any of the seven back on.
     local real_state="${XDG_STATE_HOME-}"
     seed_ui_state "$fixture_root/background-state" "{\"menu\":{\"hidden\":$menu_shipped}}"
     launch "$dir"
@@ -5821,7 +5821,7 @@ EOS
     settle
     grep -q "^mount -e $dir/mnt/FLEASTICK\$" "$gio_log" \
         || fail "eject: the menu row did not run gio mount -e on the mount point, log is: $(cat "$gio_log")"
-    local refusal="FLEASTICK could not be ejected; it is still mounted, close anything using it and try again."
+    local refusal="FLEASTICK is still mounted; close what is using it."
     local seen=""
     for _attempt in $(seq 1 250); do
         seen=$(ipc lastMessage)

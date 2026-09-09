@@ -296,7 +296,7 @@ function run(check) {
     Focus.act("eject", outside)
     check("ctrl e in a listing on the internal disk says so, even with the rail cursor on the stick",
           outside.sidebar.released.length + "|" + outside.said,
-          "0|This directory is not inside a removable volume, so there is nothing to eject.")
+          "0|This is not inside a removable volume.")
 
     // The listing's m goes through the pane, which says whether a delegate was under the cursor; an
     // empty directory and a filter that hides every row both get the sentence rather than silence.
