@@ -7600,13 +7600,14 @@ case_views() {
         key -k Home >/dev/null
         settle
         sleep 2
-        shot "views-$mode-thumbs"
+        # $pass, not $mode: the "again" pass runs the grid a second time and shot keeps every capture.
+        shot "views-$pass-thumbs"
         # Directories sort first, so the fixture's four media files are rows 2 to 5 in this order.
         local names=(a-clip.mp4 b-clip.mp4 c-pic.png d-pic.jpg)
         for r in 2 3 4 5; do
             [[ "$(ipc rowAt "$r")" == "${names[r - 2]}|"* ]] || fail "$mode: row $r is $(ipc rowAt "$r" | cut -d'|' -f1), not ${names[r - 2]}"
             [[ "$(ipc rowThumbReady "$r")" == "true" ]] || fail "$mode: row $r ($(ipc rowAt "$r" | cut -d'|' -f1)) has no decoded thumbnail"
-            lit=$(lit_in_rect "$evidence_dir/views-$mode-thumbs.png" $(ipc rowThumbRect "$r"))
+            lit=$(lit_in_rect "$evidence_dir/views-$pass-thumbs.png" $(ipc rowThumbRect "$r"))
             (( lit > 30 )) || fail "$mode: row $r's thumbnail box painted $lit lit pixels"
         done
         if [[ "$mode" == "columns" ]]; then
@@ -7703,8 +7704,8 @@ case_views() {
         [[ "$(ipc path)" == "$dir/empty" && "$(ipc emptyShown)" == "true" ]] || fail "$mode: Return on row 0 did not enter the empty directory ($(ipc path), empty $(ipc emptyShown))"
         lit=0
         for _attempt in $(seq 1 "$mark_poll_shots"); do
-            shot "views-$mode-empty"
-            lit=$(lit_in_rect "$evidence_dir/views-$mode-empty.png" $(ipc emptyMarkRect))
+            shot "views-$pass-empty-$_attempt"
+            lit=$(lit_in_rect "$evidence_dir/views-$pass-empty-$_attempt.png" $(ipc emptyMarkRect))
             (( lit > 0 )) && break
             sleep "$mark_poll_s"
         done
