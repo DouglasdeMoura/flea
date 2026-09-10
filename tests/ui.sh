@@ -853,6 +853,19 @@ wait_network_result() {
     fail "network result never became $want (last: ${seen:-unavailable})"
 }
 
+# networkResult is a state machine value that moves on; the sentence the dialog shows is what the
+# operator reads and what the assertions below check, so a terminal verdict is waited for by name.
+wait_network_status() {
+    local want="$1" timeout_s="${2:-40}" seen=""
+    local deadline=$(( $(date +%s%3N) + timeout_s * 1000 ))
+    while (( $(date +%s%3N) < deadline )); do
+        seen=$(timeout 2 omarchy-drive ipc -p "$flea_ui" flea networkStatus 2>/dev/null || true)
+        [[ "$seen" == "$want" ]] && return 0
+        sleep 0.1
+    done
+    fail "the network dialog never said: $want (last: ${seen:-unavailable})"
+}
+
 wait_network_entry_state() {
     local want="$1" timeout_s="${2:-20}" seen=""
     local deadline=$(( $(date +%s%3N) + timeout_s * 1000 ))
@@ -4815,15 +4828,9 @@ EOS
         || fail "networkauth: missing-helper setup did not reach Password"
     printf '%s' "$runtime_canary" | omarchy-drive key --window flea - >/dev/null
     mv "$dir/bin/flea-gio-auth" "$dir/bin/flea-gio-auth.real"
-    printf 'NETWORKAUTH_DIAG before focus=%s pw=%s result=%s uri=%s\n' \
-        "$(ipc networkFocus)" "$(ipc networkPasswordState)" "$(ipc networkResult)" "$(ipc networkUri)"
     key -k Return >/dev/null
-    settle
-    printf 'NETWORKAUTH_DIAG after pw=%s result=%s status=%q\n' \
-        "$(ipc networkPasswordState)" "$(ipc networkResult)" "$(ipc networkStatus)"
-    wait_network_result failed 5
+    wait_network_status "Connect failed: authentication helper is unavailable" 10
     [[ "$(ipc dialogOpen)" == "true" \
-        && "$(ipc networkStatus)" == "Connect failed: authentication helper is unavailable" \
         && "$(ipc networkPasswordState)" == "masked|set" ]] \
         || fail "networkauth: missing helper did not fail closed and retain fields"
     [[ "$(wc -l < "$helper_log")" -eq "$helper_calls" ]] \
@@ -4833,9 +4840,8 @@ EOS
     chmod 0644 "$dir/bin/flea-gio-auth"
     key -k Escape >/dev/null
     key -k Return >/dev/null
-    wait_network_result failed 5
+    wait_network_status "Connect failed: authentication helper is unavailable" 10
     [[ "$(ipc dialogOpen)" == "true" \
-        && "$(ipc networkStatus)" == "Connect failed: authentication helper is unavailable" \
         && "$(ipc networkPasswordState)" == "masked|set" ]] \
         || fail "networkauth: permission-denied helper did not fail closed and retain fields"
     [[ "$(wc -l < "$helper_log")" -eq "$helper_calls" ]] \
