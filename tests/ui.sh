@@ -1796,7 +1796,8 @@ case_menu() {
     [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "menu: the m key did not reopen the menu under the resting pointer"
     # The target is proven before the move is judged: the reopened menu's Rename row is where it was, and the pointer is over it.
     [[ "$(ipc contextMenuRowCentre "$rest_row")" == "$rest_x $rest_y" ]] || fail "menu: the reopened menu put Rename at $(ipc contextMenuRowCentre "$rest_row"), not $rest_x $rest_y"
-    [[ "$(ipc contextMenuRowProbe "$rest_row")" == "true "* ]] || fail "menu: the pointer is not over Rename after the reopen, probe '$(ipc contextMenuRowProbe "$rest_row")'"
+    # Where the pointer is, is what the centre above proves. Qt reports no hover on a row built
+    # under a pointer that has not moved since, which is the very rule the two checks below read.
     [[ "$(ipc contextMenuCursor)" == "0" ]] || fail "menu: a menu opened under a resting pointer moved its cursor to row $(ipc contextMenuCursor)"
     printf 'MENU probe before the move: %s\n' "$(ipc contextMenuRowProbe "$rest_row")"
     YDOTOOL_SOCKET="$XDG_RUNTIME_DIR/.ydotool_socket" ydotool mousemove -x 3 -y 0 >/dev/null 2>&1
@@ -7611,9 +7612,11 @@ case_views() {
         if [[ "$mode" == "columns" ]]; then
             # The child column's hero: polled across one draw, the way case_background polls the pane's own.
             lit=0
+            # Each attempt keeps its own capture: shot refuses to overwrite evidence, so one name
+            # across the poll failed the case the moment the first draw came up blank.
             for _attempt in $(seq 1 "$mark_poll_shots"); do
-                shot views-child-hero
-                lit=$(lit_in_rect "$evidence_dir/views-child-hero.png" $(ipc columnChildMarkRect))
+                shot "views-child-hero-$_attempt"
+                lit=$(lit_in_rect "$evidence_dir/views-child-hero-$_attempt.png" $(ipc columnChildMarkRect))
                 (( lit > 0 )) && break
                 sleep "$mark_poll_s"
             done
