@@ -128,6 +128,9 @@ Item {
         if (!root.opened || !root.connecting || requestId !== root.requestId || uri !== root.pendingUri) return
         root.connecting = false
         if (!success) { root.saveFailed(reason); return }
+        // The location answered, so nothing about it is left unacknowledged.
+        root.unacknowledgedUri = ""
+        root.unacknowledgedReason = ""
         root.mountedUri = uri
         root.saveFavourite()
     }
