@@ -1937,7 +1937,8 @@ case_background() {
     settle
     [[ "$(ipc contextMenuEntries)" == "New Folder|New File|-|Paste|Select all|-|Add to Favorites|-|Sort by|Show hidden files|-|Settings" ]] \
         || fail "background: an empty directory drew $(ipc contextMenuEntries)"
-    shot background-empty
+    # Its own name: the empty-mark poll above already owns background-empty.png.
+    shot background-empty-menu
     key -k Escape >/dev/null
     settle
     menu_click "Paste"
