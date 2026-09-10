@@ -5156,10 +5156,8 @@ case_gvfs() {
 
     key -k Tab >/dev/null
     key g >/dev/null
-    key j >/dev/null
     settle
-    [[ "$(ipc railLabel "$(ipc railCursor)")" == "share.zip" ]] \
-        || fail "gvfs: the rail cursor is on $(ipc railLabel "$(ipc railCursor)"), not the share"
+    rail_seek share.zip
     key -k Return >/dev/null
     wait_path "$local_path"
     wait_listing 2
@@ -5633,7 +5631,7 @@ EOS
     # Right click raises the menu over the row and nothing else: the release row first, then the two
     # rows the saved place itself owns, and no unmount has run. The old two-right-click arm is gone,
     # see ui/Sidebar.qml "openRailMenu" and ui/js/Mounts.js "rowMenu".
-    click_rail_row "$(rail_row_of stubshare)" right
+    click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     printf 'UNMOUNT menu visible=%s entries=%s glyphs=%s\n' \
         "$(ipc contextMenuVisible)" "$(ipc contextMenuEntries)" "$(ipc contextMenuGlyphs)"
@@ -5652,7 +5650,7 @@ EOS
     [[ -z "$(cat "$unmount_log")" ]] || fail "unmount: Escape unmounted anyway: $(cat "$unmount_log")"
 
     # Choosing the row is what unmounts, and the row's key is what says which share, not its index.
-    click_rail_row "$(rail_row_of stubshare)" right
+    click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     key -k Return >/dev/null
     wait_message "Unmounted stubshare."
@@ -5680,7 +5678,7 @@ EOS
 
     # PR #21's Remove row, driven at last: three of the states ui/NetworkMounts.qml "forget" answers
     # for, each with its own sentence. This home has no bookmarks file, so the live share is unsaved.
-    click_rail_row "$(rail_row_of stubshare)" right
+    click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     [[ "$(ipc contextMenuEntries)" == "Unmount|Rename|Remove" ]] \
         || fail "unmount: the share's menu is $(ipc contextMenuEntries) before Remove"
@@ -5720,7 +5718,7 @@ EOS
     # stub keeps is the only thing that can, and it already carries the deliberate unmount above.
     local unmount_log_before
     unmount_log_before=$(cat "$unmount_log")
-    click_rail_row "$(rail_row_of stubshare)" right
+    click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     menu_seek Remove
     key -k Return >/dev/null
@@ -5758,7 +5756,7 @@ EOS
     before_press4=$(stat -c %y "$bookmarks")
     # The second press on the row that is still there, which is the state one sentence used to blame
     # on a file nobody had read: the file has been read, and this share is simply not in it.
-    click_rail_row "$(rail_row_of stubshare)" right
+    click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     menu_seek Remove
     key -k Return >/dev/null
