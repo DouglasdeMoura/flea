@@ -5719,9 +5719,6 @@ EOS
     # stub keeps is the only thing that can, and it already carries the deliberate unmount above.
     local unmount_log_before
     unmount_log_before=$(cat "$unmount_log")
-    printf 'UNMOUNT_DIAG net=%s rail=%s bookmarks=%q home=%s\n' \
-        "$(ipc networkEntries | tr '\n' ',')" "$(ipc railEntries | jq -c 'map(.label)')" \
-        "$(cat "$bookmarks" 2>&1)" "$(ipc uiSettings >/dev/null 2>&1 && echo ok || echo no-ipc)"
     click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     menu_seek Remove
@@ -5760,7 +5757,7 @@ EOS
     before_press4=$(stat -c %y "$bookmarks")
     # The second press on the row that is still there, which is the state one sentence used to blame
     # on a file nobody had read: the file has been read, and this share is simply not in it.
-    click_rail_row "$(rail_row_of 'Saved Share')" right
+    click_rail_row "$(rail_row_of stubshare)" right
     settle
     menu_seek Remove
     key -k Return >/dev/null
