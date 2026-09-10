@@ -530,6 +530,18 @@ rail_seek() {
 
 # The rail index of a named row. Row positions move with Trash, Favorites and this box's own
 # devices, so a case names the row it means and never writes a number.
+# Waits for a named rail row to exist. A saved network location is a Favorite now, so a case that
+# restarts with nothing mounted waits for that row rather than for a network row that cannot exist.
+wait_rail_label() {
+    local want="$1" index
+    for _attempt in $(seq 1 200); do
+        index=$(ipc railEntries | jq -r --arg want "$want" 'map(.label) | index($want) // -1')
+        [[ "$index" -ge 0 ]] && return 0
+        sleep 0.1
+    done
+    fail "the rail never carried a row labelled $want; model is $(ipc railEntries | jq -c 'map(.label)')"
+}
+
 rail_row_of() {
     local want="$1" index
     index=$(ipc railEntries | jq -r --arg want "$want" 'map(.label) | index($want) // -1')
@@ -4781,7 +4793,7 @@ EOS
     export HOME="$fixture_home"
     launch "$dir"
     export HOME="$real_home"
-    wait_network_entry_state false
+    wait_rail_label data
     key -k Tab >/dev/null
     key g >/dev/null
     settle
@@ -4848,7 +4860,7 @@ EOS
     export HOME="$fixture_home"
     launch "$dir"
     export HOME="$real_home"
-    wait_network_entry_state false
+    wait_rail_label data
     key -k Tab >/dev/null
     key g >/dev/null
     settle
