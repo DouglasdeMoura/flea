@@ -57,7 +57,7 @@ fn restore_one(path: &Path, roots: &[PathBuf]) -> Result<(), FleaError> {
     let (trash, leaf) = trash_of(path, roots).ok_or_else(|| refuse(path, "is not a trashed entry"))?;
     let text = std::fs::read_to_string(trash.join("info").join(format!("{leaf}.trashinfo")))
         .map_err(|_| refuse(path, "has no trash entry, so where it came from is unknown"))?;
-    let original = crate::backend::trashinfo::parse(&text)
+    let original = crate::backend::trashinfo::parse_at(&text, crate::backend::trashlist::topdir_of(&trash).as_deref())
         .original
         .ok_or_else(|| refuse(path, "has no original path, so it cannot be restored"))?;
     if let Some(parent) = original.parent() {

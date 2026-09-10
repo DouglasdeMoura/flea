@@ -2,7 +2,7 @@
 // entry came from and when it was deleted. These files are shared state every GTK application
 // writes, so they are parsed defensively: only the one group is read, and every field stands on
 // its own, so a file with a good Path and a bad DeletionDate still restores.
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 // Only this group is read. Keys before the first group and keys in any other group are skipped,
 // the same boundary thumbspec.rs draws around [Thumbnailer Entry]: a group is what names the
@@ -20,6 +20,12 @@ pub struct Info {
 }
 
 pub fn parse(text: &str) -> Info {
+    parse_at(text, None)
+}
+
+// top is the $topdir a top-directory trash lives on: a relative Path= is resolved against it.
+// Home trash passes None, so a relative Path is still not an original.
+pub fn parse_at(text: &str, top: Option<&Path>) -> Info {
     let mut info = Info { original: None, deleted: String::new() };
     let mut in_group = false;
     let mut saw_path = false;
@@ -42,7 +48,7 @@ pub fn parse(text: &str) -> Info {
         match key.trim() {
             "Path" if !saw_path => {
                 saw_path = true;
-                info.original = decode_path(value);
+                info.original = decode_path(value, top);
             }
             "DeletionDate" if !saw_date => {
                 saw_date = true;
@@ -58,7 +64,7 @@ pub fn parse(text: &str) -> Info {
 // The spec escapes Path= as a URI path, so %XX decodes one UTF-8 byte at a time and a bare %
 // or a non-hex pair refuses the whole value rather than guessing. A + stays a +, which is what
 // distinguishes a URI escape from a form encoding.
-fn decode_path(value: &str) -> Option<PathBuf> {
+fn decode_path(value: &str, top: Option<&Path>) -> Option<PathBuf> {
     if value.is_empty() {
         return None;
     }
@@ -77,13 +83,22 @@ fn decode_path(value: &str) -> Option<PathBuf> {
         }
     }
     let decoded = String::from_utf8(out).ok()?;
-    // A Path that is not absolute, or that smuggles a control character past the percent form
-    // (%0A decodes without complaint), is refused the way the D-Bus service refuses one: it can
-    // only name somewhere this listing must not offer to restore to.
-    if !decoded.starts_with('/') || decoded.chars().any(|c| c.is_control()) {
+    // A control character smuggled past the percent form (%0A decodes without complaint) is
+    // refused the way the D-Bus service refuses one.
+    if decoded.chars().any(|c| c.is_control()) {
         return None;
     }
-    Some(PathBuf::from(decoded))
+    if decoded.starts_with('/') {
+        return Some(PathBuf::from(decoded));
+    }
+    // Top-directory trash may store Path relative to $topdir. Home trash has no $topdir, and
+    // a relative path with .. would climb out of it, so both are refused.
+    let top = top?;
+    let rel = Path::new(&decoded);
+    if rel.components().any(|c| matches!(c, Component::ParentDir | Component::Prefix(_) | Component::RootDir)) {
+        return None;
+    }
+    Some(top.join(rel))
 }
 
 // The spec's own shape, "YYYY-MM-DDThh:mm:ss" in local time with no zone. Shape only, never
@@ -145,6 +160,17 @@ mod tests {
         let info = parse("[Trash Info]\nPath=relative/file.txt\nDeletionDate=2025-08-26T21:38:03\n");
         assert_eq!(info.original, None);
         assert_eq!(info.deleted, "2025-08-26T21:38:03", "the date stands on its own");
+    }
+
+    #[test]
+    fn a_relative_path_resolves_against_the_topdir() {
+        let top = Path::new("/mnt/data");
+        let info = parse_at("[Trash Info]\nPath=photos/a.jpg\nDeletionDate=2025-08-26T21:38:03\n", Some(top));
+        assert_eq!(info.original, Some(PathBuf::from("/mnt/data/photos/a.jpg")));
+        let info = parse_at("[Trash Info]\nPath=../escape\n", Some(top));
+        assert_eq!(info.original, None, "a relative path may not climb out of the topdir");
+        let info = parse_at("[Trash Info]\nPath=/abs/already\n", Some(top));
+        assert_eq!(info.original, Some(PathBuf::from("/abs/already")), "an absolute Path is unchanged");
     }
 
     #[test]

@@ -75,6 +75,19 @@ pub fn top_trashes(mounts: &[PathBuf], uid: u32) -> Vec<PathBuf> {
     mounts.iter().map(|m| m.join(format!(".Trash-{uid}"))).collect()
 }
 
+// The $topdir a relative Path= in this trash is resolved against. Home trash has none.
+pub fn topdir_of(trash: &Path) -> Option<PathBuf> {
+    let name = trash.file_name()?.to_str()?;
+    if name.starts_with(".Trash-") {
+        return trash.parent().map(Path::to_path_buf);
+    }
+    let parent = trash.parent()?;
+    if parent.file_name()?.to_str() == Some(".Trash") {
+        return parent.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
 // The one line that reads /proc/self/mountinfo lives with the caller that needs it, the same rule
 // renamecompat.rs follows: the parser owns the body, never the file.
 pub fn mount_points() -> Vec<PathBuf> {
@@ -107,8 +120,9 @@ pub fn list(home: Option<&Path>, tops: &[PathBuf]) -> Vec<Entry> {
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = files.join(&name);
             let info_path = info.join(name + ".trashinfo");
+            let top = topdir_of(&root);
             let parsed = std::fs::read_to_string(&info_path)
-                .map(|t| trashinfo::parse(&t))
+                .map(|t| trashinfo::parse_at(&t, top.as_deref()))
                 .unwrap_or(trashinfo::parse(""));
             out.push(Entry {
                 path,
@@ -254,6 +268,18 @@ mod tests {
         let got = list(None, &tops);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].original, PathBuf::from("/mnt/u.txt"));
+    }
+
+    #[test]
+    fn a_relative_path_in_a_top_trash_resolves_against_the_mount() {
+        let t = TestDir::new("trashlist-rel");
+        t.dir("mnt/.Trash-7/files");
+        t.file("mnt/.Trash-7/files/u.txt", "u");
+        t.dir("mnt/.Trash-7/info");
+        t.file("mnt/.Trash-7/info/u.txt.trashinfo", "[Trash Info]\nPath=u.txt\nDeletionDate=2025-08-26T21:38:05\n");
+        let got = list(None, &[t.join("mnt/.Trash-7")]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].original, t.join("mnt/u.txt"));
     }
 
     #[test]
