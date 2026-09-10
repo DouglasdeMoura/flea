@@ -36,7 +36,6 @@ dropbox_roots_open_rail() {
         menus_equal 'keyboard selects the current account row' "$target" "$(ipc railCursor)"
         key -k Return >/dev/null || fail 'dropboxroots: rail Enter failed'
     fi
-    printf 'ROOTS_DIAG want=%q rail=%q paneBefore=%q\n' "$path" "$(ipc railEntries | jq -c '[.[]|select(.kind=="dropbox")]')" "$(ipc path)"
     wait_path "$path"
     wait_listing 2
     menus_expect listInFlight '. == false' "$input rail activation opens the actual account listing"
