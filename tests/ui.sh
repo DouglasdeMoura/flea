@@ -153,13 +153,17 @@ flea_process_owned() {
     process=$(flea_process_dir "$1") || return 3
     [[ -d "$process" ]] || return 2
     [[ -O "$process" ]] || return 1
-    environment=$(tr '\0' '\n' 2>/dev/null < "$process/environ") || {
+    # The environ of a process this run started is unreadable for the moment it spends in exec and
+    # for as long as it stays unreaped, so a single failed read is not evidence of a foreign process.
+    local attempt read=0
+    for attempt in 1 2 3 4; do
+        environment=$(tr '\0' '\n' 2>/dev/null < "$process/environ") && { read=1; break; }
         [[ -d "$process" ]] || return 2
-        # A process that has exited but is not reaped yet keeps its /proc entry with an unreadable
-        # environ. Sample /proc/PID/stat: "347 (gio) Z 1 347 ...", so the state follows the ")".
+        # Sample /proc/PID/stat: "347 (gio) Z 1 347 ...", so the state is the field after the ")".
         [[ "$(sed 's/.*) //' "$process/stat" 2>/dev/null | cut -d' ' -f1)" == Z ]] && return 2
-        return 3
-    }
+        sleep 0.05
+    done
+    (( read )) || return 3
     grep -Fx "FLEA_TEST_RUN_ROOT=$run_root" <<< "$environment" >/dev/null
 }
 
