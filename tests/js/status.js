@@ -40,13 +40,6 @@ function run(check) {
     check("transfer precedes search", Status.rightText(both), "Copying 2 of 5")
     check("transfer retains foreground during search", Status.rightRole(both), "foreground")
 
-    var saidWhileSearching = slot({ transient: "Share link copied to the clipboard.",
-                                    searching: true, searchKeys: "esc cancels" })
-    check("a message the operator just caused outranks the search summary",
-          Status.rightText(saidWhileSearching), "Share link copied to the clipboard.")
-    check("and reads as an ordinary message, not an error",
-          Status.rightRole(saidWhileSearching), "foreground")
-
     var failed = slot({ transient: "Copy failed: photo.heic · disk full", transientIsError: true })
     check("a failure owns the slot", Status.rightText(failed), "Copy failed: photo.heic · disk full")
     check("and takes the error role", Status.rightRole(failed), "error")

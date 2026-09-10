@@ -11,14 +11,9 @@ function rightText(slot) {
         return slot.transient
     if (slot.stickyHere)
         return slot.sticky
-    // A message the operator's own action just produced answers that action, so it goes above the
-    // search summary, which is standing context: a share link copied from a result said nothing at
-    // all while the walk's count held the slot. It clears itself and the summary comes back.
-    if (slot.transient.length > 0)
-        return slot.transient
     if (slot.searching)
         return slot.searchKeys
-    return slot.fsText
+    return slot.transient.length > 0 ? slot.transient : slot.fsText
 }
 
 function rightRole(slot) {
