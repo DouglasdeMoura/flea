@@ -46,10 +46,11 @@ Item {
     readonly property var listItem: list
     function applicationItem(index) { return rowItems.itemAt(OpenWith.rowOf(root.rows, index)) }
 
-    // Rule 5: seven rows before the list scrolls. A box with fewer applications than that leaves the
-    // rest of the area empty rather than resizing the card as the search narrows it.
+    // Rule 5: seven applications before the list scrolls. Measured once from the whole catalogue, so
+    // rule 6's "keeps its height" holds for every search the user types into it, not only the empty one.
     readonly property int viewportRows: 7
-    readonly property int listHeight: root.viewportRows * Theme.rowHeight
+    readonly property int eyebrowHeight: Math.round(Theme.font.caption * 1.6) + Theme.spacing.gap
+    property int listHeight: root.viewportRows * Theme.rowHeight
     readonly property int clampMargin: 8
 
     anchors.fill: parent
@@ -101,6 +102,7 @@ Item {
             root.handlers = message.applications || []
             root.installed = message.installed || []
             root.cursor = 0
+            root.listHeight = OpenWith.viewportHeight(root.rows, root.viewportRows, Theme.rowHeight, root.eyebrowHeight)
             return
         }
         if (message.op !== "openWith") return
@@ -328,7 +330,7 @@ Item {
                                 // The cursor counts applications only, so an eyebrow never takes it.
                                 readonly property int appIndex: row.isEyebrow ? -1 : row.modelData.at
                                 width: rowsColumn.width
-                                height: row.isEyebrow ? eyebrow.implicitHeight + Theme.spacing.gap : menuRow.height
+                                height: row.isEyebrow ? root.eyebrowHeight : menuRow.height
 
                                 Rectangle {
                                     anchors.top: parent.top

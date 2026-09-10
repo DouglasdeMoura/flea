@@ -53,6 +53,19 @@ function rowOf(rows, cursor) {
     return -1
 }
 
+// Rule 5's viewport: seven applications show before the list scrolls, and the eyebrows standing over
+// them are in view too, so the height lands on a row boundary instead of cutting the eighth in half.
+function viewportHeight(rows, applications, rowHeight, eyebrowHeight) {
+    var seen = 0, total = 0
+    for (var i = 0; i < (rows || []).length && seen < applications; i++) {
+        if (rows[i].eyebrow !== undefined) { total += eyebrowHeight; continue }
+        total += rowHeight
+        seen++
+    }
+    // Rule 6 keeps this height when a search matches nothing, so a short catalogue still fills it.
+    return seen < applications ? total + (applications - seen) * rowHeight : total
+}
+
 // The caption rule 6 centres in the list's own height when the search names nothing installed.
 function noMatch(query) {
     return "No application matches “" + String(query).trim()
