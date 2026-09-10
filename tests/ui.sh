@@ -1309,21 +1309,22 @@ case_openterminal() {
     sandbox_scratch "$dir"
     mkdir -p "$dir/bin"
     printf 'abc' > "$dir/target.txt"
-    local ran="$dir/ran.log" opened="$dir/opened.log" real_bin="$flea_bin"
+    local ran="$dir/ran.log" opened="$dir/opened.log"
     : > "$ran"
     : > "$opened"
-    # FLEA_BIN is the backend's binary as well as the opener's, so only --terminal is intercepted
-    # and every other mode execs the real one: a stub that swallowed --backend would leave the
-    # window with no listing to press a key in. The sleep is what makes the single-flight guard and
-    # the two-paths-at-once check observable at all.
+    # src/terminal.rs spawns xdg-terminal-exec --dir=PATH, so that is the name this stubs on PATH.
+    # A stub named flea cannot work: src/gui.rs sets FLEA_BIN from current_exe(), so the moment the
+    # stub execs the real binary for --gui the shell is handed the real path and calls it instead,
+    # which is how this case used to open a real terminal and leave its window on the display.
+    # The sleep is what makes the single-flight guard and the two-paths-at-once check observable.
     {
       printf '#!/bin/sh\n'
-      printf '[ "$1" = --terminal ] || exec %q "$@"\n' "$real_bin"
+      printf '# Sample input: xdg-terminal-exec --dir=/home/flea-sandbox/fixtures/openterminal\n'
       printf 'sleep 1\n'
-      printf 'printf "TERMINAL %%s\\n" "$2" >> %q\n' "$ran"
+      printf 'printf "TERMINAL %%s\\n" "${1#--dir=}" >> %q\n' "$ran"
       printf 'exit 0\n'
-    } > "$dir/bin/flea"
-    chmod +x "$dir/bin/flea"
+    } > "$dir/bin/xdg-terminal-exec"
+    chmod +x "$dir/bin/xdg-terminal-exec"
     # Only the open subcommand is intercepted, so stubbing the opener leaves the gio mount calls
     # ui/NetworkMounts.qml makes on every launch answering from the real gio. That name is the mount
     # tool's own and is spelled by hand here; the stub's name is derived from src/open.rs instead.
@@ -1340,10 +1341,8 @@ case_openterminal() {
     seed_ui_state "$fixture_root/openterminal-state" "{\"menu\":{\"hidden\":$terminal_shown}}"
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
-    flea_bin="$dir/bin/flea"
     launch "$dir"
     export PATH="$saved_path"
-    flea_bin="$real_bin"
     # bin, opened.log, ran.log, target.txt.
     wait_listing 4
 
