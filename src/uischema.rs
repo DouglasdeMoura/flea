@@ -37,8 +37,6 @@ pub const OPTIONAL_COLUMNS: [&str; 4] = ["mode", "size", "date", "kind"];
 // Omarchy's own textSizeStops, so an override can never land on a size the OEM panel could not produce.
 pub const TEXT_SIZE_STOPS: [f64; 7] = [9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 20.0];
 // A rail narrower than a mark plus a label is not a rail, and one wider than this is a second pane.
-pub const SIDEBAR_MIN: f64 = 160.0;
-pub const SIDEBAR_MAX: f64 = 256.0;
 pub const SIDEBAR_STOPS: [f64; 4] = [160.0, 192.0, 224.0, 256.0];
 
 // What a value has to be for the key to keep it. A key that fails its rule falls back to its default.

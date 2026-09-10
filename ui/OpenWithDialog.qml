@@ -27,6 +27,7 @@ Item {
     property int focusPart: 1
 
     signal requested(var message)
+    signal closed()
 
     readonly property string name: root.path.split("/").pop()
     readonly property var rows: OpenWith.rows(root.handlers, root.installed, root.kind, field.text)
@@ -81,9 +82,13 @@ Item {
 
     function close() {
         if (!root.opened) return
+        // The close op expires the snapshot and cancels the owned launcher, so Cancel during a launch
+        // ends the child rather than leaving it running behind a card that is already gone.
+        root.requested({c: "menuaction", op: "close", id: root.requestId})
         root.opened = false
         root.busy = false
         root.committing = false
+        root.closed()
         if (root.focusHolder) root.focusHolder.forceActiveFocus()
     }
 

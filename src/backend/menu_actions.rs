@@ -288,12 +288,13 @@ impl Snapshot {
             "openWith" => {
                 let app = menu_registry::resolve(&field_str(line, "application").unwrap_or_default(), cancel)?;
                 item.current()?;
-                // OpenWith.html rule 1: the dialog is the one place a default is written, and it says so first.
+                registry.launch(&app.path, &item.path, cancel)?;
+                // OpenWith.html rule 1: the dialog is the one place a default is written. It is written
+                // after the launch, so an entry that cannot open anything is never left as the default.
                 if field_bool(line, "always") {
                     let mime = menu_registry::content_type(registry, &item.path, cancel)?;
                     menu_registry::set_default(registry, &mime, &app.id, cancel)?;
                 }
-                registry.launch(&app.path, &item.path, cancel)?;
                 Ok(format!(r#""path":"{}""#, escape(&item.path.to_string_lossy())))
             }
             _ => Err("Unknown menu operation.".into()),
