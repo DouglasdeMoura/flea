@@ -83,8 +83,13 @@ case_openwithdesign() (
         'the desktop default leads the flyout and says so'
     menus_expect menuState '[.entries[] | select(.action == "openWith") | .submenu[]] | (.[-2].separator == true) and (.[-1].glyph == "app-window")' \
         'the tail row sits under its own separator with the app-window glyph'
-    menus_expect menuState '[.entries[] | select(.action == "openWith") | .submenu[]][0] | .icon | startswith("/")' \
-        "the entry's own Icon= is resolved to a file, not left as a name"
+    # Both rungs of AppLibrary.qml's ladder: the app and device index answers with a file where it
+    # can, and a name it cannot place is passed through for the themed lookup rather than dropped.
+    # The fixture names a mimetype icon on purpose, which is exactly what that index does not hold.
+    menus_expect menuState '[.entries[] | select(.action == "openWith") | .submenu[] | .icon // empty] | any(startswith("/"))' \
+        "an entry the app icon index places arrives as a file"
+    menus_expect menuState '[.entries[] | select(.action == "openWith") | .submenu[] | select(.id == "zzflea-openwith.desktop")][0].icon == "text-x-generic"' \
+        "a name that index cannot place is left for the themed lookup"
     shot openwith-flyout
     key -k Escape >/dev/null
 
