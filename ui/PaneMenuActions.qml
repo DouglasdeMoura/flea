@@ -20,6 +20,8 @@ Loader {
     property string pendingAction: ""
     property bool pendingActivation: false
     property bool activationUsed: false
+    // Which row a keyboard rename was asked for, so its reply cannot open the editor over another.
+    property int pendingRenameIndex: -1
     property int launchingId: 0
     // OpenWith.html's flyout: the registry for the cursor row, asked for as the menu opens so the
     // submenu is populated by the time the row is reached. The flyout writes nothing; the dialog
@@ -77,7 +79,10 @@ Loader {
         }
     }
 
-    function snapshot() {
+    // rows, when the caller has one: a keyboard rename acts on the cursor, and Ops.targetIndices
+    // answers with the selection whenever there is one, so the snapshot covered rows the rename was
+    // never going to touch and the backend refused the cursor's own path as "not in the selection".
+    function snapshot(rows) {
         if (deleting || survivorId) return
         requestId++
         ready = false
@@ -90,7 +95,8 @@ Loader {
         // offered one file's applications for another, and kept the self-hide rule from ever firing.
         openWithApps = []
         openWithLoaded = false
-        pane.backend.send({c: "menuaction", op: "snapshot", id: requestId, rows: Ops.targetIndices(pane), cursor: pane.cursorIndex})
+        pane.backend.send({c: "menuaction", op: "snapshot", id: requestId,
+            rows: rows !== undefined ? rows : Ops.targetIndices(pane), cursor: pane.cursorIndex})
     }
     function open(action, menuId) {
         if (opened) return
@@ -102,7 +108,11 @@ Loader {
             show(action)
             return
         }
-        if (!requestId || identity !== pane.menuSelectionIdentity || (action === "rename" && !menuId)) snapshot()
+        // The row the editor will open over, captured now: the cursor can move between this request
+        // and its reply, and the editor used to open over wherever it had got to by then.
+        if (action === "rename" && !menuId) pendingRenameIndex = pane.cursorIndex
+        if (!requestId || identity !== pane.menuSelectionIdentity || (action === "rename" && !menuId))
+            snapshot(action === "rename" && !menuId ? [pane.cursorIndex] : undefined)
         pendingAction = action
         pendingActivation = false
         if (ready) show(action)
@@ -150,7 +160,7 @@ Loader {
     }
     function show(action) {
         pendingAction = ""
-        if (action === "rename") { Ops.startRename(pane, requestId); return }
+        if (action === "rename") { Ops.startRename(pane, requestId, pendingRenameIndex); pendingRenameIndex = -1; return }
         dialogFor = action
         active = true
         item.open(action, requestId, folder, pane.listArea)

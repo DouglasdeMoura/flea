@@ -131,15 +131,17 @@ function newFolder(pane) {
 
 // Every view draws the same inline editor: the list and the grid inside the row, the columns view
 // over its active column, see ui/ColumnPane.qml's own corner.
-function startRename(pane, menuId) {
+function startRename(pane, menuId, index) {
     if (pane.renamePending) return
-    var row = pane.rowFor(pane.cursorIndex)
+    // The row the request named, not wherever the cursor has reached by the time the reply lands.
+    var at = index !== undefined && index >= 0 ? index : pane.cursorIndex
+    var row = pane.rowFor(at)
     if (row) {
-        pane.setCursor(pane.cursorIndex)
+        pane.setCursor(at)
         pane.renameError = ""
         pane.renameSource = pane.join(pane.path, row.n)
         pane.renameMenuId = menuId || 0
-        pane.renamingIndex = pane.cursorIndex
+        pane.renamingIndex = at
     }
 }
 
