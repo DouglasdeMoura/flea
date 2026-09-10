@@ -1208,8 +1208,10 @@ case_rows() {
     [[ "$(hint_of Copy)" == "y" ]] || fail "rows: Copy prints $(hint_of Copy), not y"
     [[ "$(hint_of Paste)" == "p" ]] || fail "rows: Paste prints $(hint_of Paste), not p"
     [[ "$(hint_of Rename)" == "r" ]] || fail "rows: Rename prints $(hint_of Rename), not r"
-    [[ "$(hint_of 'Move to Trash')" == "d" ]] \
-        || fail "rows: Move to Trash prints $(hint_of 'Move to Trash'), not d"
+    # dd, not d: a single d only arms the trash, and a hint that says otherwise invites a press
+    # that does not do what it advertises. tests/js/keymap.js pins the same rule.
+    [[ "$(hint_of 'Move to Trash')" == "dd" ]] \
+        || fail "rows: Move to Trash prints $(hint_of 'Move to Trash'), not dd"
     [[ "$(hint_of 'Show hidden files')" == "." ]] \
         || fail "rows: the hidden toggle prints $(hint_of 'Show hidden files'), not ."
     # The unbound row, and the whole point of the slot being derived rather than written by hand.
@@ -3324,6 +3326,18 @@ case_focus() {
 }
 
 # Catches t not opening a tab, 1-9 not switching, w not closing, or the bar showing with one tab.
+# Click a tab in the bar. The GUI leaves bare digits unbound, so this is the only pointer or key
+# route a case has to a particular tab.
+click_tab() {
+    local index="$1" centre cx cy wx wy
+    centre=$(ipc tabCentre "$index")
+    [[ -n "$centre" ]] || fail "click_tab: tab $index has no centre"
+    read -r cx cy <<< "$centre"
+    read -r wx wy _ww _wh < <(window_box) || fail "click_tab: native window coordinates unavailable"
+    omarchy-drive click "$((cx + wx))" "$((cy + wy))" >/dev/null
+    settle
+}
+
 case_tabs() {
     local dir="$fixture_root/tabs"
     sandbox_scratch "$dir"
@@ -3341,20 +3355,20 @@ case_tabs() {
     seek_row_named "alpha" || fail "tabs: could not find alpha"
     key -k Return >/dev/null
     wait_path "$dir/alpha"
-    key 1 >/dev/null
+    # The bar is how a tab is chosen here: ui/js/Keymap.js answers 1 to 9 with a tab in the TUI
+    # alone, and lookupFor leaves a bare digit unbound in this frontend on purpose.
+    click_tab 0
     wait_path "$dir"
-    [[ "$(ipc tabIndex)" == "0" ]] || fail "tabs: 1 did not return to the first tab, index=$(ipc tabIndex)"
-    key 2 >/dev/null
+    [[ "$(ipc tabIndex)" == "0" ]] || fail "tabs: clicking tab 0 did not return to it, index=$(ipc tabIndex)"
+    click_tab 1
     wait_path "$dir/alpha"
-    [[ "$(ipc tabIndex)" == "1" ]] || fail "tabs: 2 did not return to the second tab, index=$(ipc tabIndex)"
+    [[ "$(ipc tabIndex)" == "1" ]] || fail "tabs: clicking tab 1 did not return to it, index=$(ipc tabIndex)"
     key w >/dev/null
     wait_path "$dir"
     [[ "$(ipc tabCount)" == "1" ]] || fail "tabs: w did not close the current tab, count=$(ipc tabCount)"
     [[ "$(ipc tabBarVisible)" == "false" ]] || fail "tabs: the bar stayed up after the last extra tab closed"
     key w >/dev/null
     wait_message "Can't close the last tab."
-    key 3 >/dev/null
-    wait_message "No tab 3."
     shot tabs-one
     key t >/dev/null
     settle

@@ -152,15 +152,6 @@ var SHARED_KEYS = [
     {"mods":"text","key":":","keys":":","action":"pathBar","context":"listing","frontend":"all","preset":"all","code":"","text":":","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
     {"mods":"text","key":"t","keys":"t","action":"tabNew","context":"listing","frontend":"all","preset":"all","code":"","text":"t","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
     {"mods":"text","key":"w","keys":"w","action":"tabClose","context":"listing","frontend":"all","preset":"all","code":"","text":"w","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"1","keys":"1","action":"tab1","context":"listing","frontend":"all","preset":"all","code":"","text":"1","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"2","keys":"2","action":"tab2","context":"listing","frontend":"all","preset":"all","code":"","text":"2","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"3","keys":"3","action":"tab3","context":"listing","frontend":"all","preset":"all","code":"","text":"3","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"4","keys":"4","action":"tab4","context":"listing","frontend":"all","preset":"all","code":"","text":"4","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"5","keys":"5","action":"tab5","context":"listing","frontend":"all","preset":"all","code":"","text":"5","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"6","keys":"6","action":"tab6","context":"listing","frontend":"all","preset":"all","code":"","text":"6","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"7","keys":"7","action":"tab7","context":"listing","frontend":"all","preset":"all","code":"","text":"7","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"8","keys":"8","action":"tab8","context":"listing","frontend":"all","preset":"all","code":"","text":"8","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
-    {"mods":"text","key":"9","keys":"9","action":"tab9","context":"listing","frontend":"all","preset":"all","code":"","text":"9","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
     {"mods":"text","key":"y","keys":"y","action":"copy","context":"listing","frontend":"all","preset":"all","code":"","text":"y","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
     {"mods":"text","key":"Y","keys":"Y","action":"copydirpath","context":"listing","frontend":"all","preset":"all","code":"","text":"Y","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
     {"mods":"text","key":"x","keys":"x","action":"cut","context":"listing","frontend":"all","preset":"all","code":"","text":"x","ctrl":false,"shift":false,"alt":false,"super":false,"keycode":0,"mask":(0)},
@@ -275,8 +266,7 @@ function setPreset(name) {
         if (row.mods !== "text" && row.mods !== "none") continue
         var action = actionGroup(row.action), rank = (row.preset === preset ? 0 : 2) + (row.mods === "text" ? 0 : 1)
         if (ranks[action] !== undefined && ranks[action] <= rank) continue
-        // A menu hint is the key the operator presses, so an armed chord like dd prints its first d.
-        HINTS[action] = row.mods === "text" ? row.key : row.keys
+        HINTS[action] = row.keys
         ranks[action] = rank
     }
 }
