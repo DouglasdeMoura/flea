@@ -15,6 +15,7 @@ use crate::backend::trashinfo;
 use crate::error::FleaError;
 use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -72,7 +73,28 @@ pub fn search_scope(path: &str) -> Result<String, FleaError> {
 // One candidate per mount, in mountinfo order; list() skips whatever is not a readable dir, so
 // /proc, /sys and every unmounted name on the list cost one failed read_dir each and nothing else.
 pub fn top_trashes(mounts: &[PathBuf], uid: u32) -> Vec<PathBuf> {
-    mounts.iter().map(|m| m.join(format!(".Trash-{uid}"))).collect()
+    mounts.iter().map(|m| top_trash(m, uid)).collect()
+}
+
+// One root per mount: $topdir/.Trash/$uid when .Trash is a non-symlink, world-writable,
+// sticky directory; otherwise $topdir/.Trash-$uid. Never both, so one entry cannot appear twice.
+fn top_trash(mount: &Path, uid: u32) -> PathBuf {
+    let shared = mount.join(".Trash");
+    if is_valid_shared_trash(&shared) {
+        return shared.join(uid.to_string());
+    }
+    mount.join(format!(".Trash-{uid}"))
+}
+
+fn is_valid_shared_trash(dir: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(dir) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return false;
+    }
+    let mode = meta.permissions().mode();
+    (mode & 0o1002) == 0o1002
 }
 
 // The $topdir a relative Path= in this trash is resolved against. Home trash has none.
@@ -195,6 +217,7 @@ pub fn answer(
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+    use std::os::unix::fs::PermissionsExt;
 
     fn trash_fixture(tag: &str) -> TestDir {
         let t = TestDir::new(tag);
@@ -280,6 +303,24 @@ mod tests {
         let got = list(None, &[t.join("mnt/.Trash-7")]);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].original, t.join("mnt/u.txt"));
+    }
+
+    #[test]
+    fn a_valid_shared_trash_wins_over_the_uid_named_one() {
+        let t = TestDir::new("trashlist-shared");
+        let shared = t.dir("mnt/.Trash");
+        let mut perms = std::fs::metadata(&shared).unwrap().permissions();
+        perms.set_mode(0o1777);
+        std::fs::set_permissions(&shared, perms).unwrap();
+        let uid = 7;
+        assert_eq!(top_trashes(&[t.join("mnt")], uid), vec![t.join("mnt/.Trash/7")]);
+        // A .Trash that is not sticky and world-writable is not the shared layout, so the
+        // uid-named directory is the one that is listed.
+        let other = t.dir("other/.Trash");
+        let mut perms = std::fs::metadata(&other).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&other, perms).unwrap();
+        assert_eq!(top_trashes(&[t.join("other")], uid), vec![t.join("other/.Trash-7")]);
     }
 
     #[test]
