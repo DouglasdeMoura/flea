@@ -8,7 +8,9 @@ Loader {
     anchors.fill: parent
     z: 2
     active: false
-    source: "MenuActionDialog.qml"
+    // OpenWith.html rule 4: Open with owns its own card, so the shared dialog is not asked to be one.
+    property string dialogFor: ""
+    source: root.dialogFor === "openWith" ? "OpenWithDialog.qml" : "MenuActionDialog.qml"
     readonly property bool opened: item !== null && item.opened
     readonly property bool deleting: item !== null && item.deletionActive
     property int requestId: 0
@@ -145,7 +147,7 @@ Loader {
     function show(action) {
         pendingAction = ""
         if (action === "rename") { Ops.startRename(pane, requestId); return }
-        if (action === "openWith") { active = true; item.open(action, requestId, folder, pane.listArea); return }
+        dialogFor = action
         active = true
         item.open(action, requestId, folder, pane.listArea)
     }
@@ -220,6 +222,8 @@ Loader {
             }
             if (message.id !== root.requestId) return
             if (message.op === "applications") {
+                // Both readers want it: the flyout's registry, and an open dialog that asked for it.
+                if (root.item) root.item.receive(message)
                 root.openWithApps = message.applications || []
                 root.openWithLoaded = true
                 root.pane.contextMenu().refreshProviderRows()

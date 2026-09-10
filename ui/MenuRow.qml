@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import qs.Commons
 import "." as Flea
 import "js/Keymap.js" as Keymap
@@ -61,6 +62,18 @@ Item {
 
     // The rail's mark slot is its icon size, exactly as ui/SidebarRow.qml sizes its own.
     readonly property int slotSize: root.compact ? Theme.railIconSize : Theme.markSize
+    // OpenWith.html: an application's own Icon= rides in the mark slot, full colour and no plate.
+    // The ladder is AppLibrary.qml's iconSource: the backend's app and device index has already
+    // answered with a path where it could, and only a name it could not place reaches the themed
+    // lookup here. Where that service falls back to application-x-executable, the board rules the
+    // muted app-window glyph instead, so an unresolved name leaves the mark below standing.
+    readonly property string appIcon: root.entry.icon !== undefined ? String(root.entry.icon) : ""
+    readonly property string appIconSource: root.appIcon.length === 0 ? ""
+                                          : root.appIcon.indexOf("file://") === 0 ? root.appIcon
+                                          : root.appIcon.charAt(0) === "/" ? Util.fileUrl(root.appIcon)
+                                          : Quickshell.iconPath(root.appIcon, true)
+    // That board draws the mark at 16 of the slot's 19 units, where a stroked glyph takes the slot whole.
+    readonly property int appIconSize: Math.round(root.slotSize * 16 / 19)
 
     height: root.isSeparator ? root.separatorHeight
           : (root.compact ? Theme.railRowHeight : Theme.rowHeight)
@@ -100,9 +113,23 @@ Item {
         // A brand mark is a reproduction and takes its own component; every other row is a cut glyph.
         Flea.Glyph {
             anchors.fill: parent
-            visible: root.entry.mark === undefined
+            visible: root.entry.mark === undefined && !appMark.visible
             name: root.entry.glyph !== undefined ? root.entry.glyph : "file"
             color: root.markColor
+        }
+
+        // The theme that cannot name the entry leaves the glyph above standing in its muted role.
+        Image {
+            id: appMark
+            anchors.centerIn: parent
+            width: root.appIconSize
+            height: root.appIconSize
+            visible: root.appIconSource.length > 0 && appMark.status === Image.Ready
+            source: root.appIconSource
+            sourceSize.width: root.appIconSize
+            sourceSize.height: root.appIconSize
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
         }
 
         Flea.TailscaleMark {

@@ -4,6 +4,7 @@ use std::ffi::OsStr;
 use std::io::Read;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -24,7 +25,8 @@ extern "C" {
 struct Running { pid: i32, pidfd: OwnedFd, group: bool }
 
 #[derive(Clone, Default)]
-pub(crate) struct Registry { running: Arc<Mutex<Option<Running>>> }
+pub(crate) struct Registry { running: Arc<Mutex<Option<Running>>>,
+                             icons: Arc<Mutex<Option<Arc<HashMap<String, PathBuf>>>>> }
 
 impl Registry {
     pub fn cancel(&self) -> Result<(), String> {
@@ -65,6 +67,25 @@ impl Registry {
             return Err(format!("GIO application query failed: {}.", detail.lines().last().unwrap_or("no diagnostic")));
         }
         String::from_utf8(stdout).map_err(|_| "GIO returned invalid application registry text.".into())
+    }
+
+    // The name an entry's Icon= resolves to, following /usr/share/omarchy/shell/services/AppLibrary.qml:
+    // the app and device icon directories answer first, because an unconstrained themed lookup can
+    // resolve a name such as "zoom" to an action icon instead. A name the index cannot place is
+    // returned as it came, for the themed lookup ui/MenuRow.qml does with it.
+    fn icon(&self, name: &str, cancel: &Cancellation) -> Result<String, String> {
+        if name.is_empty() || name.starts_with('/') { return Ok(name.into()); }
+        let index = self.icon_index(cancel)?;
+        Ok(index.get(name).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| name.into()))
+    }
+
+    // Scanned once per process, the way that service scans once per shell start.
+    fn icon_index(&self, cancel: &Cancellation) -> Result<Arc<HashMap<String, PathBuf>>, String> {
+        let mut held = self.icons.lock().map_err(|_| "The icon index service stopped.")?;
+        if let Some(index) = held.as_ref() { return Ok(index.clone()); }
+        let index = Arc::new(icon_index(cancel)?);
+        *held = Some(index.clone());
+        Ok(index)
     }
 
     pub fn launch(&self, desktop: &Path, path: &Path, cancel: &Cancellation) -> Result<(), String> {
@@ -170,11 +191,33 @@ fn wait_exit(fd: i32) -> Result<(), String> {
 pub(crate) struct Application { pub id: String, pub label: String, pub path: PathBuf,
                                pub icon: String, pub default: bool }
 
-pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellation) -> Result<Vec<Application>, String> {
+// The flyout's registry, plus the whole installed set and the kind's own name that the dialog groups by.
+pub(crate) struct Catalogue { pub mime: String, pub kind: String,
+                              pub handlers: Vec<Application>, pub installed: Vec<Application> }
+
+pub(crate) fn catalogue(registry: &Registry, path: &Path, cancel: &Cancellation) -> Result<Catalogue, String> {
+    let mime = content_type(registry, path, cancel)?;
+    Ok(Catalogue { kind: describe(&mime, cancel)?, handlers: handlers(registry, &mime, cancel)?,
+                   installed: installed(registry, cancel)?, mime })
+}
+
+pub(crate) fn content_type(registry: &Registry, path: &Path, cancel: &Cancellation) -> Result<String, String> {
     let info = registry.query(&["info".as_ref(), "--nofollow-symlinks".as_ref(), "--attributes=standard::content-type".as_ref(), path.as_os_str()], cancel)?;
     // Sample GIO info attribute: "  standard::content-type: text/plain".
-    let mime = info.lines().find_map(|line| line.trim().strip_prefix("standard::content-type: "))
-        .filter(|m| !m.is_empty()).ok_or("GIO did not report the selected item's content type.")?;
+    info.lines().find_map(|line| line.trim().strip_prefix("standard::content-type: "))
+        .filter(|m| !m.is_empty()).map(str::to_string)
+        .ok_or_else(|| "GIO did not report the selected item's content type.".into())
+}
+
+// The desktop's own default handler, written the one way the desktop reads it back.
+pub(crate) fn set_default(registry: &Registry, mime: &str, id: &str, cancel: &Cancellation) -> Result<(), String> {
+    registry.query(&["mime".as_ref(), mime.as_ref(), id.as_ref()], cancel)
+        .map(|_| ())
+        .map_err(|error| format!("Could not make {} the default for {}: {}", id, mime, error))
+}
+
+// The applications the registry names for one type, the desktop's own default at the head.
+pub(crate) fn handlers(registry: &Registry, mime: &str, cancel: &Cancellation) -> Result<Vec<Application>, String> {
     let output = registry.query(&["mime".as_ref(), mime.as_ref()], cancel)?;
     // Sample GIO mime output: the default is named on its own line before the indented registry.
     // "Default application for \u{201c}text/plain\u{201d}: org.gnome.TextEditor.desktop".
@@ -193,10 +236,11 @@ pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellati
         let id = line.trim();
         if !id.ends_with(".desktop") || id.contains('/') || id.contains('\0') || apps.iter().any(|a: &Application| a.id == id) { continue; }
         if let Some(path) = desktop_file(id, cancel)? {
-            let label = desktop_label(&path)?.unwrap_or_else(|| id.trim_end_matches(".desktop").into());
-            let icon = desktop_key(&path, "Icon=")?.unwrap_or_default();
-            let is_default = id == default;
-            apps.push(Application { id: id.into(), label, path, icon, default: is_default });
+            if let Some(mut app) = launchable(id, &path)? {
+                app.icon = registry.icon(&app.icon, cancel)?;
+                app.default = id == default;
+                apps.push(app);
+            }
         }
     }
     // OpenWith.html: the desktop's current default is first, and the registry order follows it.
@@ -207,7 +251,18 @@ pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellati
     Ok(apps)
 }
 
-fn desktop_file(id: &str, cancel: &Cancellation) -> Result<Option<PathBuf>, String> {
+// The dialog can open with an application the registry never named for this type, so an id resolves
+// through the data roots the desktop itself searches rather than through one type's handler list.
+pub(crate) fn resolve(id: &str, cancel: &Cancellation) -> Result<Application, String> {
+    if !id.ends_with(".desktop") || id.contains('/') || id.contains('\0') {
+        return Err("That application id is not a desktop entry.".into());
+    }
+    let path = desktop_file(id, cancel)?.ok_or("That application is no longer installed.")?;
+    launchable(id, &path)?.ok_or_else(|| "That application cannot open a file.".into())
+}
+
+// The XDG data roots in search order, the user's own first, which every lookup below walks.
+fn data_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(home) = std::env::var_os("XDG_DATA_HOME").filter(|p| !p.is_empty()) {
         roots.push(PathBuf::from(home));
@@ -215,7 +270,122 @@ fn desktop_file(id: &str, cancel: &Cancellation) -> Result<Option<PathBuf>, Stri
         roots.push(PathBuf::from(home).join(".local/share"));
     }
     roots.extend(std::env::split_paths(&std::env::var_os("XDG_DATA_DIRS").filter(|p| !p.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".into())));
-    for root in roots.into_iter().filter(|root| root.is_absolute()) {
+    roots.retain(|root| root.is_absolute());
+    roots
+}
+
+// The same roots and the same shape AppLibrary.qml's own scan walks: every apps/ and devices/ icon
+// under the XDG icon directories, plus /usr/share/pixmaps' own top level. An SVG beats a PNG of the
+// same name and an earlier root beats a later one, which is that scan's "first hit per name" rule.
+fn icon_index(cancel: &Cancellation) -> Result<HashMap<String, PathBuf>, String> {
+    let mut svg: HashMap<String, PathBuf> = HashMap::new();
+    let mut png: HashMap<String, PathBuf> = HashMap::new();
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") { roots.push(PathBuf::from(home).join(".icons")); }
+    roots.extend(data_roots().into_iter().map(|root| root.join("icons")));
+    for root in roots {
+        cancelled(cancel)?;
+        let mut pending = vec![root];
+        while let Some(at) = pending.pop() {
+            cancelled(cancel)?;
+            let Ok(entries) = std::fs::read_dir(at) else { continue; };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                match entry.file_type() {
+                    Ok(kind) if kind.is_dir() => pending.push(path),
+                    // A device icon is what entries such as Print Settings name instead of an app icon.
+                    Ok(_) if in_group(&path, "apps") || in_group(&path, "devices") => index_icon(&path, &mut svg, &mut png),
+                    _ => (),
+                }
+            }
+        }
+    }
+    // Pixmaps has no theme layout, so only its own level is an icon directory.
+    if let Ok(entries) = std::fs::read_dir("/usr/share/pixmaps") {
+        for entry in entries.flatten() {
+            cancelled(cancel)?;
+            if entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) { index_icon(&entry.path(), &mut svg, &mut png); }
+        }
+    }
+    for (name, path) in png { svg.entry(name).or_insert(path); }
+    Ok(svg)
+}
+
+fn index_icon(path: &Path, svg: &mut HashMap<String, PathBuf>, png: &mut HashMap<String, PathBuf>) {
+    let Some(name) = path.file_stem().map(|stem| stem.to_string_lossy().to_string()).filter(|name| !name.is_empty()) else { return; };
+    let target = match path.extension().and_then(|ext| ext.to_str()) {
+        Some("svg") => svg,
+        Some("png") => png,
+        _ => return,
+    };
+    target.entry(name).or_insert_with(|| path.to_path_buf());
+}
+
+fn in_group(path: &Path, group: &str) -> bool {
+    path.parent().map(|dir| dir.components().any(|part| part.as_os_str() == group)).unwrap_or(false)
+}
+
+// OpenWith.html's ALL APPLICATIONS group: every entry a desktop menu would show, alphabetical.
+fn installed(registry: &Registry, cancel: &Cancellation) -> Result<Vec<Application>, String> {
+    let mut apps: Vec<Application> = Vec::new();
+    for root in data_roots() {
+        let dir = root.join("applications");
+        let mut pending = vec![dir.clone()];
+        while let Some(at) = pending.pop() {
+            cancelled(cancel)?;
+            let Ok(entries) = std::fs::read_dir(at) else { continue; };
+            for entry in entries.flatten() {
+                cancelled(cancel)?;
+                let path = entry.path();
+                let Ok(kind) = entry.file_type() else { continue; };
+                if kind.is_dir() { pending.push(path); continue; }
+                if path.extension() != Some(OsStr::new("desktop")) { continue; }
+                let Ok(id) = path.strip_prefix(&dir) else { continue; };
+                let id = id.to_string_lossy().replace('/', "-");
+                // The first root that names an id owns it, the way the desktop resolves one itself.
+                if apps.iter().any(|a| a.id == id) { continue; }
+                if let Some(mut app) = launchable(&id, &path)? {
+                    app.icon = registry.icon(&app.icon, cancel)?;
+                    apps.push(app);
+                }
+            }
+        }
+    }
+    apps.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    Ok(apps)
+}
+
+// A desktop entry the user can open something with: an application, shown, and with a command to run.
+fn launchable(id: &str, path: &Path) -> Result<Option<Application>, String> {
+    if desktop_key(path, "Type=")?.as_deref() != Some("Application") { return Ok(None); }
+    if desktop_key(path, "NoDisplay=")?.as_deref() == Some("true") { return Ok(None); }
+    if desktop_key(path, "Hidden=")?.as_deref() == Some("true") { return Ok(None); }
+    if desktop_key(path, "Exec=")?.is_none() { return Ok(None); }
+    let label = desktop_label(path)?.unwrap_or_else(|| id.trim_end_matches(".desktop").into());
+    Ok(Some(Application { id: id.into(), label, path: path.to_path_buf(),
+                          icon: desktop_key(path, "Icon=")?.unwrap_or_default(), default: false }))
+}
+
+// The kind's own name, from the shared mime database the desktop describes a type with.
+// Sample row: "  <comment>PNG image</comment>"; the translated siblings carry an xml:lang attribute.
+fn describe(mime: &str, cancel: &Cancellation) -> Result<String, String> {
+    if mime.contains("..") || mime.matches('/').count() != 1 { return Ok(mime.into()); }
+    for root in data_roots() {
+        cancelled(cancel)?;
+        let path = root.join("mime").join(format!("{}.xml", mime));
+        let Ok(text) = std::fs::read_to_string(&path) else { continue; };
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("<comment>") {
+                if let Some(name) = rest.strip_suffix("</comment>") { return Ok(name.into()); }
+            }
+        }
+    }
+    Ok(mime.into())
+}
+
+fn desktop_file(id: &str, cancel: &Cancellation) -> Result<Option<PathBuf>, String> {
+    for root in data_roots() {
         cancelled(cancel)?;
         let apps = root.join("applications");
         let direct = apps.join(id);

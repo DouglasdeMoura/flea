@@ -20,7 +20,7 @@ var OPEN_WITH_OTHER = "__another__"
 // SettingsMenus and SettingsPlaces share one order; F=file/folder, B=background, T=Trash rail.
 var INVENTORY = [
     ["open", "Open", "folder-open", "FT", "open"],
-    ["openwith", "Open with", "external-link", "F", "open", "openWith"],
+    ["openwith", "Open with", "app-window", "F", "open", "openWith"],
     ["newFolder", "New Folder", "folder-plus", "B", "open"],
     ["newFile", "New File", "file-plus", "B", "open"],
     ["cut", "Cut", "scissors", "F", "basic"],
@@ -118,7 +118,7 @@ function availableEntry(e, p, kind) {
                      hint: app.default === true ? "default" : "" }
         })
         if (rows.length) rows.push({ separator: true })
-        rows.push({ id: OPEN_WITH_OTHER, label: "Another application...", glyph: "external-link" })
+        rows.push({ id: OPEN_WITH_OTHER, label: "Another application\u2026", glyph: "app-window" })
         e.submenu = rows
         e.disabled = count !== 1
     }

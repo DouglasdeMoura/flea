@@ -112,6 +112,8 @@ var PATHS = {
     // The canvas's own open folder, which keeps the closed folder's back panel byte for byte.
     "folder-open": "M2 20V3h6l2 3h12v3 M22 11l-2.5 9H2l2.5-9z",
     "external-link": "M14 3h7v7 M21 3 11 13 M18 13v8H3V6h8",
+    // OpenWith.html draws this window for the Open with row, its tail row and an app the theme cannot name.
+    "app-window": "M3 4h18v16H3z M3 9h18 M6 6.5h.01 M9 6.5h.01",
     "undo": "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8 M3 3v5h5",
     "rename": "M3 21l1-4L17 4l3 3L7 20l-4 1z M14 7l3 3",
     "file-plus": "M6 22V2h8l4 4v16H6z M14 2v4h4 M12 11v6 M9 14h6",

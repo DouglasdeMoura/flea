@@ -2,7 +2,7 @@
 use crate::backend::opsreq::OpMsg;
 use super::menu_registry::{self, Registry};
 use super::trashmanifest::Cancellation;
-use crate::json::{escape, field_str, field_usize};
+use crate::json::{escape, field_bool, field_str, field_usize};
 use std::fs::{Metadata, OpenOptions};
 use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
@@ -280,17 +280,19 @@ impl Snapshot {
                     meta.len(), meta.mtime(), meta.mode() & 0o7777, escape(&super::owner::name(meta.uid())), meta.uid(), meta.gid()))
             }
             "applications" => {
-                let apps = menu_registry::applications(registry, &item.path, cancel)?;
-                let entries: Vec<String> = apps.iter().map(|a| format!(
-                    r#"{{"id":"{}","label":"{}","icon":"{}","default":{}}}"#,
-                    escape(&a.id), escape(&a.label), escape(&a.icon), a.default)).collect();
-                Ok(format!(r#""applications":[{}]"#, entries.join(",")))
+                let found = menu_registry::catalogue(registry, &item.path, cancel)?;
+                Ok(format!(r#""applications":[{}],"installed":[{}],"mime":"{}","kind":"{}","path":"{}""#,
+                    application_entries(&found.handlers), application_entries(&found.installed),
+                    escape(&found.mime), escape(&found.kind), escape(&item.path.to_string_lossy())))
             }
             "openWith" => {
-                let requested = field_str(line, "application").unwrap_or_default();
-                let app = menu_registry::applications(registry, &item.path, cancel)?.into_iter().find(|a| a.id == requested)
-                    .ok_or("That application is no longer registered for the selected item.")?;
+                let app = menu_registry::resolve(&field_str(line, "application").unwrap_or_default(), cancel)?;
                 item.current()?;
+                // OpenWith.html rule 1: the dialog is the one place a default is written, and it says so first.
+                if field_bool(line, "always") {
+                    let mime = menu_registry::content_type(registry, &item.path, cancel)?;
+                    menu_registry::set_default(registry, &mime, &app.id, cancel)?;
+                }
                 registry.launch(&app.path, &item.path, cancel)?;
                 Ok(format!(r#""path":"{}""#, escape(&item.path.to_string_lossy())))
             }
@@ -311,6 +313,13 @@ impl Snapshot {
     fn handle(&mut self, line: &str, paths: Vec<String>) -> String {
         self.handle_request(line, paths, None, &Registry::default(), &Cancellation::default())
     }
+}
+
+// One application row, the shape ui/js/Menu.js and ui/OpenWithDialog.qml both read.
+fn application_entries(apps: &[menu_registry::Application]) -> String {
+    apps.iter().map(|a| format!(r#"{{"id":"{}","label":"{}","icon":"{}","default":{}}}"#,
+        escape(&a.id), escape(&a.label), escape(&a.icon), a.default))
+        .collect::<Vec<String>>().join(",")
 }
 
 pub(crate) fn response(line: &str, result: Result<String, String>) -> String {
