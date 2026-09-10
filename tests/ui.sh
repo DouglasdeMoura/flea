@@ -7710,10 +7710,13 @@ case_views() {
             sleep "$mark_poll_s"
         done
         (( lit > 0 )) || fail "$mode: the empty directory's hero painted nothing"
-        # Its box is the listing slot exactly, the middle column in the columns view: a lazy view's item reports a local origin, and the hero placed on it once drew over the sidebar, still inside a wide slot.
+        # Its box is the listing slot exactly, and in the columns view every slot right of the
+        # ancestor column: an empty active column has no peek beside it, so the hero centres in the
+        # space there actually is. A lazy view's item reports a local origin, and the hero placed on
+        # it once drew over the sidebar, still inside a wide slot.
         read -r sx sy sw sh <<< "$(ipc listAreaRect)"
         local ex=$sx ew=$sw
-        [[ "$mode" == "columns" ]] && { ex=$((sx + sw / 3)); ew=$((sw / 3)); }
+        [[ "$mode" == "columns" ]] && { ex=$((sx + sw / 3)); ew=$((sw - sw / 3)); }
         rect_is "$(ipc emptyStateRect)" "$ex" "$sy" "$ew" "$sh" 1 \
             || fail "$mode: the hero's box is $(ipc emptyStateRect), not the slot $ex $sy $ew $sh"
         key -k Backspace >/dev/null

@@ -604,9 +604,13 @@ FocusScope {
 
     Flea.EmptyState {
         id: emptyState
+        // An empty active column has no peek beside it, so the hero takes every column to its right
+        // rather than the active column alone: GM read one drawn in the second of three slots as
+        // sitting off to the left of an empty half-window, which is exactly where it was.
         x: root.listSlot.x + (root.viewMode === "columns" && root.columnsArea ? root.columnsArea.columnWidth : 0)
         y: root.listSlot.y
-        width: root.viewMode === "columns" && root.columnsArea ? root.columnsArea.columnWidth : root.listSlot.width
+        width: root.viewMode === "columns" && root.columnsArea
+               ? root.listSlot.width - root.columnsArea.columnWidth : root.listSlot.width
         height: root.listSlot.height
         visible: !trashHost.opened && root.listingState === "empty"
         caption: root.searchMode === "results" ? "Nothing matches " + root.searchQuery : ""
