@@ -12,10 +12,14 @@ use std::path::{Path, PathBuf};
 // journalled: undoing a restore by rename would recreate the files/ entry without its info,
 // and re-trashing is a new operation rather than a reversal.
 pub fn restore_paths(paths: &[PathBuf]) -> (usize, usize) {
+    restore_in(paths, &discovered_roots())
+}
+
+fn restore_in(paths: &[PathBuf], roots: &[PathBuf]) -> (usize, usize) {
     let mut ok = 0;
     let mut failed = 0;
     for p in paths {
-        if restore_one(p).is_ok() {
+        if restore_one(p, roots).is_ok() {
             ok += 1;
         } else {
             failed += 1;
@@ -24,15 +28,33 @@ pub fn restore_paths(paths: &[PathBuf]) -> (usize, usize) {
     (ok, failed)
 }
 
-fn restore_one(path: &Path) -> Result<(), FleaError> {
-    let leaf = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| refuse(path, "is not a trashed entry"))?;
-    // <trash>/files/<leaf>, so the info beside it is <trash>/info/<leaf>.trashinfo. Anything
-    // else is not a trashed entry and is refused before anything is touched.
-    let files = path.parent().ok_or_else(|| refuse(path, "is not a trashed entry"))?;
-    if files.file_name().and_then(|n| n.to_str()) != Some("files") {
-        return Err(refuse(path, "is not a trashed entry"));
+fn discovered_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(h) = crate::backend::trashlist::home_trash() {
+        roots.push(h);
     }
-    let trash = files.parent().ok_or_else(|| refuse(path, "is not a trashed entry"))?;
+    roots.extend(crate::backend::trashlist::top_trashes(
+        &crate::backend::trashlist::mount_points(),
+        crate::backend::trashlist::euid(),
+    ));
+    roots
+}
+
+// A restore or delete names a direct child of <root>/files for a root this process actually
+// enumerates. The parent being named "files" is not enough: that would restore out of any
+// directory of that name, including one a caller planted beside a crafted info file.
+fn trash_of(path: &Path, roots: &[PathBuf]) -> Option<(PathBuf, String)> {
+    let leaf = path.file_name()?.to_str()?.to_string();
+    let files = path.parent()?;
+    if files.file_name()?.to_str()? != "files" {
+        return None;
+    }
+    let trash = files.parent()?;
+    roots.iter().any(|r| r == trash).then(|| (trash.to_path_buf(), leaf))
+}
+
+fn restore_one(path: &Path, roots: &[PathBuf]) -> Result<(), FleaError> {
+    let (trash, leaf) = trash_of(path, roots).ok_or_else(|| refuse(path, "is not a trashed entry"))?;
     let text = std::fs::read_to_string(trash.join("info").join(format!("{leaf}.trashinfo")))
         .map_err(|_| refuse(path, "has no trash entry, so where it came from is unknown"))?;
     let original = crate::backend::trashinfo::parse(&text)
@@ -68,29 +90,24 @@ fn refuse(path: &Path, msg: &str) -> FleaError {
 // The info file is removed only after the entry is gone, so a half-deleted directory still has
 // somewhere to restore from rather than becoming an unrestorable leftover.
 pub fn delete_paths(paths: &[PathBuf]) -> (usize, usize) {
+    delete_in(paths, &discovered_roots())
+}
+
+fn delete_in(paths: &[PathBuf], roots: &[PathBuf]) -> (usize, usize) {
     let mut ok = 0;
     let mut failed = 0;
     for p in paths {
-        let Some(leaf) = p.file_name().and_then(|n| n.to_str()) else {
+        let Some((trash, leaf)) = trash_of(p, roots) else {
             failed += 1;
             continue;
         };
-        let Some(files) = p.parent() else {
-            failed += 1;
-            continue;
-        };
-        if files.file_name().and_then(|n| n.to_str()) != Some("files") {
-            failed += 1;
-            continue;
-        }
         let gone = match std::fs::symlink_metadata(p) {
             Err(_) => true,
             Ok(m) if m.is_dir() => std::fs::remove_dir_all(p).is_ok(),
             Ok(_) => std::fs::remove_file(p).is_ok(),
         } && std::fs::symlink_metadata(p).is_err();
         if gone {
-            let info = files.parent().unwrap_or(Path::new("/")).join("info").join(format!("{leaf}.trashinfo"));
-            let _ = std::fs::remove_file(&info);
+            let _ = std::fs::remove_file(trash.join("info").join(format!("{leaf}.trashinfo")));
             ok += 1;
         } else {
             failed += 1;
@@ -113,11 +130,16 @@ pub fn empty() -> (usize, usize) {
 // The roots as parameters, so a test names fixture trashes without touching the process
 // environment: XDG_DATA_HOME is process-global and cargo runs tests on threads.
 pub fn empty_at(home: Option<&Path>, tops: &[PathBuf]) -> (usize, usize) {
+    let mut roots = Vec::new();
+    if let Some(h) = home {
+        roots.push(h.to_path_buf());
+    }
+    roots.extend(tops.iter().cloned());
     let paths: Vec<PathBuf> = crate::backend::trashlist::list(home, tops)
         .into_iter()
         .map(|e| e.path)
         .collect();
-    delete_paths(&paths)
+    delete_in(&paths, &roots)
 }
 
 #[cfg(test)]
@@ -141,12 +163,20 @@ mod tests {
         );
     }
 
+    fn roots(t: &crate::backend::testdir::TestDir) -> Vec<PathBuf> {
+        vec![t.join("Trash")]
+    }
+
+    fn entry(t: &crate::backend::testdir::TestDir, leaf: &str) -> PathBuf {
+        t.join(&format!("Trash/files/{leaf}"))
+    }
+
     #[test]
     fn restore_puts_the_entry_back_and_drops_its_info() {
         let t = trash_home("restore-ok");
         let original = t.join("back/a.txt").to_string_lossy().into_owned();
         plant(&t, "a.txt", &original);
-        let (ok, failed) = restore_paths(&[t.join("Trash/files/a.txt")]);
+        let (ok, failed) = restore_in(&[entry(&t, "a.txt")], &roots(&t));
         assert_eq!((ok, failed), (1, 0));
         assert_eq!(std::fs::read_to_string(t.join("back/a.txt")).unwrap(), "bytes");
         assert!(t.join("Trash/files/a.txt").symlink_metadata().is_err());
@@ -158,7 +188,7 @@ mod tests {
         let t = trash_home("restore-parent");
         let original = t.join("back/deep/down/b.txt").to_string_lossy().into_owned();
         plant(&t, "b.txt", &original);
-        let (ok, failed) = restore_paths(&[t.join("Trash/files/b.txt")]);
+        let (ok, failed) = restore_in(&[entry(&t, "b.txt")], &roots(&t));
         assert_eq!((ok, failed), (1, 0), "gio recreates the parents, measured");
         assert_eq!(std::fs::read_to_string(t.join("back/deep/down/b.txt")).unwrap(), "bytes");
     }
@@ -169,9 +199,9 @@ mod tests {
         let original = t.join("back/c.txt").to_string_lossy().into_owned();
         plant(&t, "c.txt", &original);
         t.file("back/c.txt", "someone else");
-        let (ok, failed) = restore_paths(&[t.join("Trash/files/c.txt")]);
+        let (ok, failed) = restore_in(&[entry(&t, "c.txt")], &roots(&t));
         assert_eq!((ok, failed), (0, 1), "gio's own File exists answer, measured");
-        let err = restore_one(&t.join("Trash/files/c.txt")).expect_err("still refused");
+        let err = restore_one(&entry(&t, "c.txt"), &roots(&t)).expect_err("still refused");
         assert!(err.msg.contains("already there"), "a collision names the collision: {}", err.msg);
         assert!(t.join("Trash/files/c.txt").symlink_metadata().is_ok(), "the entry stays in the trash");
         assert_eq!(std::fs::read_to_string(t.join("back/c.txt")).unwrap(), "someone else");
@@ -183,7 +213,7 @@ mod tests {
         t.file("back/notdir", "x");
         let original = t.join("back/notdir/c.txt").to_string_lossy().into_owned();
         plant(&t, "c.txt", &original);
-        let err = restore_one(&t.join("Trash/files/c.txt")).expect_err("must refuse");
+        let err = restore_one(&entry(&t, "c.txt"), &roots(&t)).expect_err("must refuse");
         assert!(!err.msg.contains("already there"), "a blocked parent is not a collision: {}", err.msg);
         assert_eq!(err.where_, "trashrestore");
         assert!(t.join("Trash/files/c.txt").symlink_metadata().is_ok(), "the entry stays in the trash");
@@ -193,12 +223,24 @@ mod tests {
     fn restore_refuses_what_has_no_info_and_what_is_not_a_files_entry() {
         let t = trash_home("restore-refused");
         t.file("Trash/files/orphan.txt", "x");
-        let (ok, failed) = restore_paths(&[t.join("Trash/files/orphan.txt")]);
+        let (ok, failed) = restore_in(&[entry(&t, "orphan.txt")], &roots(&t));
         assert_eq!((ok, failed), (0, 1), "no info, no original, no restore");
-        let (ok, failed) = restore_paths(&[t.join("Trash/info/orphan.txt.trashinfo")]);
+        let (ok, failed) = restore_in(&[t.join("Trash/info/orphan.txt.trashinfo")], &roots(&t));
         assert_eq!((ok, failed), (0, 1), "only a files/ entry is ever restored");
-        let (ok, failed) = restore_paths(&[t.join("back/c.txt")]);
+        let (ok, failed) = restore_in(&[t.join("back/c.txt")], &roots(&t));
         assert_eq!((ok, failed), (0, 1), "a plain path is never a trashed entry");
+    }
+
+    #[test]
+    fn restore_refuses_a_files_dir_that_is_not_a_discovered_trash() {
+        let t = crate::backend::testdir::TestDir::new("not-a-trash");
+        t.dir("files");
+        t.file("files/a.txt", "x");
+        t.dir("info");
+        t.file("info/a.txt.trashinfo", "[Trash Info]\nPath=/tmp/target\nDeletionDate=2025-08-26T21:38:03\n");
+        let (ok, failed) = restore_paths(&[t.join("files/a.txt")]);
+        assert_eq!((ok, failed), (0, 1), "a planted files/ dir is not a trash root");
+        assert!(t.join("files/a.txt").is_file(), "the planted file was left alone");
     }
 
     #[test]
@@ -206,7 +248,7 @@ mod tests {
         let t = trash_home("delete-file");
         t.file("Trash/files/a.txt", "a");
         t.file("Trash/info/a.txt.trashinfo", "[Trash Info]\nPath=/home/gm/a.txt\n");
-        let (ok, failed) = delete_paths(&[t.join("Trash/files/a.txt")]);
+        let (ok, failed) = delete_in(&[entry(&t, "a.txt")], &roots(&t));
         assert_eq!((ok, failed), (1, 0));
         assert!(!t.join("Trash/files/a.txt").exists());
         assert!(!t.join("Trash/info/a.txt.trashinfo").exists());
@@ -220,7 +262,7 @@ mod tests {
         t.file("Trash/info/tree.trashinfo", "[Trash Info]\nPath=/home/gm/tree\n");
         std::os::unix::fs::symlink("a.txt", t.join("Trash/files/link.txt")).unwrap();
         t.file("Trash/info/link.txt.trashinfo", "[Trash Info]\nPath=/home/gm/link.txt\n");
-        let (ok, failed) = delete_paths(&[t.join("Trash/files/tree"), t.join("Trash/files/link.txt")]);
+        let (ok, failed) = delete_in(&[entry(&t, "tree"), entry(&t, "link.txt")], &roots(&t));
         assert_eq!((ok, failed), (2, 0));
         assert!(!t.join("Trash/files/tree").exists());
         assert!(t.join("Trash/files/link.txt").symlink_metadata().is_err());
@@ -229,9 +271,9 @@ mod tests {
     #[test]
     fn delete_counts_gone_as_done_and_refuses_a_non_trash_path() {
         let t = trash_home("delete-gone");
-        let (ok, failed) = delete_paths(&[t.join("Trash/files/never-was.txt")]);
+        let (ok, failed) = delete_in(&[entry(&t, "never-was.txt")], &roots(&t));
         assert_eq!((ok, failed), (1, 0), "the end state is what was asked for");
-        let (ok, failed) = delete_paths(&[t.join("Trash/info/a.txt.trashinfo")]);
+        let (ok, failed) = delete_in(&[t.join("Trash/info/a.txt.trashinfo")], &roots(&t));
         assert_eq!((ok, failed), (0, 1), "only a files/ entry is ever deleted");
     }
 
@@ -244,7 +286,7 @@ mod tests {
         let mut perms = std::fs::metadata(&dir).unwrap().permissions();
         perms.set_mode(0o555);
         std::fs::set_permissions(&dir, perms.clone()).unwrap();
-        let (ok, failed) = delete_paths(&[dir.clone()]);
+        let (ok, failed) = delete_in(&[dir.clone()], &roots(&t));
         assert_eq!((ok, failed), (0, 1));
         assert!(dir.is_dir(), "the half-deleted tree stays");
         assert!(t.join("Trash/info/locked.trashinfo").is_file(), "the info stays so a restore can still find it");
