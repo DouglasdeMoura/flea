@@ -119,6 +119,8 @@ echo "--- trash browser: restore, permanent delete and empty, all sandboxed ---"
 # daemon and runs anywhere the suite runs; the gio round trip is the scenario above. The data
 # home redirect is per-scenario and restored afterwards, because emptying the wrong trash would
 # be the operator's real one.
+saved_data_home_set="${XDG_DATA_HOME+x}"
+saved_data_home_value="${XDG_DATA_HOME-}"
 export XDG_DATA_HOME="$D/trashhome"
 # start_backend remakes $D from scratch, so the fixture trash is built after it, not before.
 start_backend
@@ -158,7 +160,11 @@ send '{"c":"undo"}'
 await '"t":"error"' || fail=1
 check "none of the three journalled anything to undo" "1" "$(seen 'there is nothing to undo')"
 stop_backend
-export XDG_DATA_HOME=""
+if [ -n "$saved_data_home_set" ]; then
+  export XDG_DATA_HOME="$saved_data_home_value"
+else
+  unset XDG_DATA_HOME
+fi
 
 echo "--- copy transfer, and undo removes what it created ---"
 start_backend
