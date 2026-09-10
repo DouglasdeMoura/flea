@@ -24,6 +24,17 @@ function pad(n) {
     return n < 10 ? "0" + n : "" + n
 }
 
+// The trash's DeletionDate, carried raw because the backend stays timezone-free: a stamp with
+// no zone designator parses as local time, which is exactly what the .trashinfo means. A stamp
+// no clock can read answers "", and the row keeps the file's own mtime instead.
+function dateIso(iso, nowMs) {
+    var ms = new Date(String(iso)).getTime()
+    if (isNaN(ms)) {
+        return ""
+    }
+    return date(ms / 1000, nowMs)
+}
+
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 var SECONDS_PER_DAY = 86400
 var MILLISECONDS_PER_MINUTE = 60000

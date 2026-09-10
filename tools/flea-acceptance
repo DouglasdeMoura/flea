@@ -198,6 +198,10 @@ declare -a REQUEST_DRIVERS=(
   'transfercancel|transferstarted|{"c":"transfer","op":"copy","paths":["@SB@/a.txt"],"dest":"@SB@/dest"}
 {"c":"transfercancel","id":1}'
   'trash|trashed|{"c":"trash","paths":["@SB@/b.txt"]}'
+  'listtrash|listed|'
+  'trashrestore|restored|{"c":"trashrestore","rows":[1]}'
+  'trashdelete|trashdeleted|{"c":"trashdelete","rows":[0]}'
+  'trashempty|trashemptied|{"c":"trashempty"}'
   'rename|renamed|{"c":"rename","path":"@SB@/a.txt","to":"renamed.txt"}'
   'duplicate|duplicated|{"c":"duplicate","path":"@SB@/a.txt"}'
   'mkdir|made|{"c":"mkdir","path":"@SB@","name":"made-here"}'
@@ -277,6 +281,64 @@ drive_request() {
     *"\"t\":\"$want\""*) pass request "$name" ;;
     *) bad request "$name" "no $want line in the answer" ;;
   esac
+}
+
+# The trash verbs all run against a fixture trash under a redirected XDG_DATA_HOME, never the
+# operator's real one: listtrash only reads, but restore moves, delete removes and empty removes
+# everything, so an unredirected run would rearrange the operator's own trash. Each verb gets its
+# own backend session over a fresh fixture, the battery's one-session-per-request rule, and the
+# fixture is hand-built files-and-info rather than trashed through gio, so no daemon is involved.
+trash_fixture() {
+  local dir=$1
+  mkdir -p "$dir/data/Trash/files" "$dir/data/Trash/info" "$dir/orig"
+  printf 'restore me' > "$dir/data/Trash/files/victim.txt"
+  printf '[Trash Info]\nPath=%s/victim.txt\nDeletionDate=2025-08-26T21:38:03\n' "$dir/orig" \
+    > "$dir/data/Trash/info/victim.txt.trashinfo"
+  printf 'delete me' > "$dir/data/Trash/files/goner.txt"
+  printf '[Trash Info]\nPath=%s/goner.txt\nDeletionDate=2025-08-26T21:38:04\n' "$dir/orig" \
+    > "$dir/data/Trash/info/goner.txt.trashinfo"
+}
+
+drive_trash_sandboxed() {
+  local name=$1 want=$2 body=$3 out dir
+  dir=$(fresh_dir "$name")
+  trash_fixture "$dir"
+  out=$( { printf '{"c":"listtrash","first":8,"hidden":true}\n'
+           emit_body "$body"
+           sleep "$ASYNC_WAIT_S"
+           printf '{"c":"quit"}\n'; } | XDG_DATA_HOME="$dir/data" "$BIN" --backend 2>&1 )
+  case $out in
+    *'"t":"error"'*)
+      bad request "$name" "the backend answered error: $(printf '%s' "$out" | grep -m1 '"t":"error"')"
+      return ;;
+  esac
+  case $out in
+    *"\"t\":\"$want\""*) ;;
+    *) bad request "$name" "no $want line in the answer"; return ;;
+  esac
+  # The type proves the wire accepted the verb; the filesystem proves it did the work, because a
+  # count line alone cannot tell a restore that stayed from one that landed.
+  case $name in
+    listtrash)
+      [ "$(printf '%s' "$out" | grep -m1 -oE '"n":[0-9]+' | cut -d: -f2)" = 2 ] \
+        || { bad request "$name" "the fixture trash lists two entries, got $out"; return; } ;;
+    trashrestore)
+      [ "$(cat "$dir/orig/victim.txt" 2>/dev/null)" = "restore me" ] \
+        || { bad request "$name" "the victim is not back with its bytes"; return; }
+      [ -e "$dir/data/Trash/files/victim.txt" ] \
+        && { bad request "$name" "the restored entry is still in the trash"; return; } ;;
+    trashdelete)
+      [ -e "$dir/data/Trash/files/goner.txt" ] \
+        && { bad request "$name" "the deleted entry is still in the trash"; return; }
+      [ -e "$dir/data/Trash/info/goner.txt.trashinfo" ] \
+        && { bad request "$name" "the deleted entry's info survived it"; return; } ;;
+    trashempty)
+      [ -z "$(ls -A "$dir/data/Trash/files")" ] \
+        || { bad request "$name" "files still holds entries after the empty"; return; }
+      [ -z "$(ls -A "$dir/data/Trash/info")" ] \
+        || { bad request "$name" "info still holds entries after the empty"; return; } ;;
+  esac
+  pass request "$name"
 }
 
 # quit is the one request whose effect is the absence of an answer, so it gets its own driver: a
@@ -361,6 +423,7 @@ for name in "${REQUESTS[@]}"; do
   case $name in
     quit) drive_quit ;;
     *cancel) drive_cancel "$name" "$body" ;;
+    listtrash|trashrestore|trashdelete|trashempty) drive_trash_sandboxed "$name" "$want" "$body" ;;
     *) drive_request "$name" "$want" "$body" ;;
   esac
 done

@@ -4,6 +4,7 @@ import "js/DirSizes.js" as DirSizes
 import "js/Drag.js" as DragOps
 import "js/Filter.js" as Filter
 import "js/Tap.js" as Tap
+import "js/Trash.js" as Trash
 import "js/Thumbs.js" as Thumbs
 
 // The listing's render, scroll and settle-triggered refetch, split out of Pane.qml; reaches Pane's state through the pane reference and the context menu through menu, both handed in at instantiation.
@@ -63,6 +64,7 @@ ListView {
         // ordinary columns, because these rows are still this directory's own and not walk results.
         searchQuery: root.pane.searchMode.length > 0 ? root.pane.searchQuery : root.pane.filterQuery
         filtering: root.pane.shown !== null
+        inTrash: Trash.isTrash(root.pane.path)
         renaming: listingIndex === root.pane.renamingIndex
         // -1 is also what Filter.at answers for a stale delegate, so an idle list must never light one.
         dropTarget: root.dropIndex >= 0 && listingIndex === root.dropIndex
@@ -94,7 +96,7 @@ ListView {
             target: null
             // The list is a Flickable and would take the grab past its own threshold; without ApprovesTakeOverByItems it cannot.
             grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfDifferentType | PointerHandler.ApprovesTakeOverByHandlersOfSameType
-            onActiveChanged: if (active) root.liftBegan(cell.listingIndex, ghost, lift.centroid)
+            onActiveChanged: if (active && !cell.inTrash) root.liftBegan(cell.listingIndex, ghost, lift.centroid)
             onCentroidChanged: if (active) root.liftMoved(lift.centroid)
             onGrabChanged: function (transition, point) {
                 if (transition === PointerDevice.UngrabExclusive || transition === PointerDevice.CancelGrabExclusive)
@@ -123,7 +125,9 @@ ListView {
             // external drag on its mime types, so naming the type here is the whole of accepting one.
             keys: [root.dragKey, "text/uri-list"]
             onEntered: function (drag) {
-                if (!DragOps.canDrop(root.dragRows, cell.listingIndex, cell.row)) {
+                // No lift and no landing in the trash: a drag out would hand foreign apps a path
+                // joined onto the token, and a drop in would plant entries with no info file.
+                if (cell.inTrash || !DragOps.canDrop(root.dragRows, cell.listingIndex, cell.row)) {
                     drag.accepted = false
                     return
                 }

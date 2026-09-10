@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Ops.js" as Ops
+.import "Trash.js" as Trash
 
 // A drop is a gesture that calls the transfer request Ops.moveToDropbox already sends, with the folder
 // row under the pointer as its destination, so there is no second copy path here. States.dc.html
@@ -51,9 +52,11 @@ function line(n, name, copy) {
 
 // The drop: rows, not paths, for the reason Ops.moveToDropbox gives, and the clipboard is left alone
 // for its reason too. Answers whether a request went out, so a refused drop is silent by design.
+// Never into the trash: a drop there would plant entries with no info file, the same orphan a cut
+// out of it would leave behind, so both directions stay shut for the same reason.
 function drop(pane, rows, index, copy) {
     var row = pane.rowFor(index)
-    if (!canDrop(rows, index, row)) {
+    if (Trash.isTrash(pane.path) || !canDrop(rows, index, row)) {
         return false
     }
     pane.backend.send({ c: "transfer", op: copy ? "copy" : "move", rows: rows, dest: pane.join(pane.path, row.n) })
@@ -84,7 +87,7 @@ function pathsFromUrls(urls) {
 // external drop inherits the progress card, the status line and undo like any other transfer.
 function dropExternal(pane, urls, index) {
     var row = pane.rowFor(index)
-    if (!canDrop([], index, row)) {
+    if (Trash.isTrash(pane.path) || !canDrop([], index, row)) {
         return false
     }
     var paths = pathsFromUrls(urls)

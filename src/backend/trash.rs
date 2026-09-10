@@ -96,6 +96,8 @@ pub fn restore(entry: &Entry) -> Result<(), FleaError> {
     }
 }
 
+pub use crate::backend::trashfs::{delete_paths, empty, restore_paths};
+
 fn err(msg: &str) -> FleaError {
     FleaError { where_: "undo".to_string(), path: String::new(), msg: msg.to_string() }
 }

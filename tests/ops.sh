@@ -114,6 +114,52 @@ check "undo names trash as what it reversed" "1" "$(seen '"t":"undone","op":"tra
 check "the file is back with its bytes" "trash me" "$(cat "$D/doomed.txt" 2>/dev/null)"
 stop_backend
 
+echo "--- trash browser: restore, permanent delete and empty, all sandboxed ---"
+# A hand-built fixture trash rather than one trashed through gio, so this scenario needs no
+# daemon and runs anywhere the suite runs; the gio round trip is the scenario above. The data
+# home redirect is per-scenario and restored afterwards, because emptying the wrong trash would
+# be the operator's real one.
+export XDG_DATA_HOME="$D/trashhome"
+# start_backend remakes $D from scratch, so the fixture trash is built after it, not before.
+start_backend
+mkdir -p "$D/trashhome/Trash/files" "$D/trashhome/Trash/info" "$D/orig"
+printf 'restore me' > "$D/trashhome/Trash/files/victim.txt"
+printf '[Trash Info]\nPath=%s/victim.txt\nDeletionDate=2025-08-26T21:38:03\n' "$D/orig" > "$D/trashhome/Trash/info/victim.txt.trashinfo"
+printf 'delete me' > "$D/trashhome/Trash/files/goner.txt"
+printf '[Trash Info]\nPath=%s/goner.txt\nDeletionDate=2025-08-26T21:38:04\n' "$D/orig" > "$D/trashhome/Trash/info/goner.txt.trashinfo"
+printf 'orphan bytes' > "$D/trashhome/Trash/files/orphan.txt"
+printf 'third wheel' > "$D/trashhome/Trash/files/third.txt"
+printf '[Trash Info]\nPath=%s/third.txt\nDeletionDate=2025-08-26T21:38:05\n' "$D/orig" > "$D/trashhome/Trash/info/third.txt.trashinfo"
+send '{"c":"listtrash","first":80,"hidden":false}'
+await '"t":"listed"' || fail=1
+check "the fixture trash lists four entries" "1" "$(seen '"t":"listed","n":4')"
+# Sorted by full path, so goner is row 0, orphan row 1, third row 2 and victim row 3.
+send '{"c":"trashrestore","rows":[3]}'
+await '"t":"restored"' || fail=1
+check "restore reports one ok and no failures" "1" "$(seen '"t":"restored","ok":1,"failed":0')"
+check "the file is back at its original with its bytes" "restore me" "$(cat "$D/orig/victim.txt" 2>/dev/null)"
+check "the entry left the trash" "no" "$([ -e "$D/trashhome/Trash/files/victim.txt" ] && echo yes || echo no)"
+check "and its info went with it" "no" "$([ -e "$D/trashhome/Trash/info/victim.txt.trashinfo" ] && echo yes || echo no)"
+send '{"c":"trashdelete","rows":[0]}'
+await '"t":"trashdeleted"' || fail=1
+check "permanent delete reports one ok" "1" "$(seen '"t":"trashdeleted","ok":1,"failed":0')"
+check "the entry is gone" "no" "$([ -e "$D/trashhome/Trash/files/goner.txt" ] && echo yes || echo no)"
+check "and its info went with it" "no" "$([ -e "$D/trashhome/Trash/info/goner.txt.trashinfo" ] && echo yes || echo no)"
+send '{"c":"trashrestore","rows":[1]}'
+await '"t":"restored"' || fail=1
+check "restoring the info-less orphan fails" "1" "$(seen '"t":"restored","ok":0,"failed":1')"
+check "and the orphan stays where it is" "yes" "$([ -f "$D/trashhome/Trash/files/orphan.txt" ] && echo yes || echo no)"
+send '{"c":"trashempty"}'
+await '"t":"trashemptied"' || fail=1
+check "empty reports the two entries that were left" "1" "$(seen '"t":"trashemptied","ok":2,"failed":0')"
+check "files is empty" "" "$(ls -A "$D/trashhome/Trash/files")"
+check "info is empty" "" "$(ls -A "$D/trashhome/Trash/info")"
+send '{"c":"undo"}'
+await '"t":"error"' || fail=1
+check "none of the three journalled anything to undo" "1" "$(seen 'there is nothing to undo')"
+stop_backend
+export XDG_DATA_HOME=""
+
 echo "--- copy transfer, and undo removes what it created ---"
 start_backend
 printf 'one' > "$D/c1.txt"; printf 'two' > "$D/c2.txt"; mkdir -p "$D/dest"

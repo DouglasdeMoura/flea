@@ -1,7 +1,6 @@
 // The operations request layer: the response lines, and the one thread an operation runs on.
 use crate::backend::copyfile::{copy_any, move_any, Progress};
 use crate::backend::ops;
-use crate::backend::trash;
 use crate::backend::undo::{Entry, Step};
 use crate::error::FleaError;
 use crate::json::escape;
@@ -20,6 +19,10 @@ pub enum OpMsg {
     Item { id: usize, index: usize, name: String, ok: bool, err: String },
     TransferDone { id: usize, ok: usize, failed: usize, skipped: usize, cancelled: bool, entry: Entry },
     Trashed { ok: usize, failed: usize, entry: Entry },
+    // Counts only, like trashed: a restore names no per-path text because gio answers none.
+    Restored { ok: usize, failed: usize },
+    TrashDeleted { ok: usize, failed: usize },
+    TrashEmptied { ok: usize, failed: usize },
     Duplicated { ok: bool, path: String, err: String, entry: Entry },
     // Not an operation: meta rides this channel because a media probe is a subprocess and the loop
     // must not wait on one. Nothing about it claims the one-at-a-time slot.
@@ -59,10 +62,6 @@ pub fn transferdone_line(id: usize, ok: usize, failed: usize, skipped: usize, ca
         r#"{{"t":"transferdone","id":{},"ok":{},"failed":{},"skipped":{},"cancelled":{}}}"#,
         id, ok, failed, skipped, cancelled
     )
-}
-
-pub fn trashed_line(ok: usize, failed: usize) -> String {
-    format!(r#"{{"t":"trashed","ok":{},"failed":{}}}"#, ok, failed)
 }
 
 pub fn renamed_line(ok: bool, path: &str) -> String {
@@ -184,15 +183,6 @@ fn one_item(
     outcome
 }
 
-pub fn run_trash(paths: Vec<String>, tx: Sender<OpMsg>) {
-    let owned: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    let (entries, failed) = trash::trash(&owned);
-    let ok = entries.len();
-    let steps = entries.into_iter().map(Step::Trashed).collect();
-    let entry = Entry { op: "trash".to_string(), steps };
-    let _ = tx.send(OpMsg::Trashed { ok, failed, entry });
-}
-
 pub fn run_duplicate(path: String, tx: Sender<OpMsg>) {
     let (outcome, steps) = ops::duplicate(Path::new(&path));
     // Carried on a failure too: the steps then name the partial copy the failure left behind.
@@ -250,7 +240,6 @@ mod tests {
             transferdone_line(12, 1, 1, 0, false),
             r#"{"t":"transferdone","id":12,"ok":1,"failed":1,"skipped":0,"cancelled":false}"#
         );
-        assert_eq!(trashed_line(1, 0), r#"{"t":"trashed","ok":1,"failed":0}"#);
         assert_eq!(renamed_line(true, "/home/gm/new.txt"), r#"{"t":"renamed","ok":true,"path":"/home/gm/new.txt"}"#);
         assert_eq!(
             duplicated_line(true, "/home/gm/photo copy.jpg"),

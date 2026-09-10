@@ -159,6 +159,23 @@ QtObject {
             var cell = item ? item.cell("size") : null
             return cell ? cell.text : ""
         }
+        // What the row draws for its name and location, rather than the wire's own full path: in
+        // the trash the name is the leaf and the location is the original, so a test asserts the
+        // split rather than the listing it already proved through rowAt.
+        function rowDisplayName(i: int): string {
+            var item = root.pane.itemFor(i)
+            return item && item.displayName !== undefined ? String(item.displayName) : ""
+        }
+        function rowLocation(i: int): string {
+            var item = root.pane.itemFor(i)
+            return item && item.locationText !== undefined ? String(item.locationText) : ""
+        }
+        // The date cell's text, which in the trash is the deletion the info file vouches for.
+        function rowDateText(i: int): string {
+            var item = root.pane.itemFor(i)
+            var cell = item ? item.cell("date") : null
+            return cell ? cell.text : ""
+        }
         function headerTitles(): string { return root.pane.header.titles() }
         function sortMark(): string { return root.pane.header.sortBy + ":" + (root.pane.header.sortDesc ? "desc" : "asc") }
         // Four siblings share one parent, so plain x/width already agree; itemRect reads a Text's painted bounds, not its anchored box.

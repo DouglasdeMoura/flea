@@ -7,6 +7,7 @@ use crate::backend::listing::Listing;
 use crate::backend::mime::Db;
 use crate::backend::search::Search;
 use crate::backend::thumbspec::Thumbnailers;
+use crate::backend::trashlist::Extra;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -40,5 +41,9 @@ pub struct State {
     pub search: Option<Search>,
     // When the running walk last announced its count, so SEARCH_REPORT can throttle the stream.
     pub search_reported: Instant,
+    // What each trash row carries beside its file stat, keyed by arena name so a sort reorders
+    // nothing here. Set by listtrash alone; every other fresh listing clears it, and a sort keeps
+    // it, because the rows are still the trash after one.
+    pub trash_extra: HashMap<String, Extra>,
 }
 

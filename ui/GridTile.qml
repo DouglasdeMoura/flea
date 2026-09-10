@@ -3,12 +3,17 @@ import qs.Commons
 import "." as Flea
 import "js/Format.js" as Format
 import "js/Icons.js" as Icons
+import "js/Match.js" as Match
 
 // One grid cell: the same mark the list row draws, in a larger slot, with the name under it.
 Item {
     id: root
 
     property var row: null
+    // True while the pane stands on the trash location, where a row's name is its path under the
+    // trash: the leaf is drawn, the way ui/Row.qml draws it.
+    property bool inTrash: false
+    readonly property string displayName: root.row ? (root.inTrash ? Match.base(root.row.n) : root.row.n) : ""
     property bool cursor: false
     property bool hovered: false
     property bool selected: false
@@ -21,7 +26,7 @@ Item {
     readonly property bool thumbDrawn: root.thumb.length > 0 && tileThumb.status !== Image.Error
 
     Accessible.role: Accessible.ListItem
-    Accessible.name: root.row ? root.row.n : ""
+    Accessible.name: root.displayName
 
     Rectangle {
         anchors.fill: parent
@@ -83,7 +88,7 @@ Item {
         anchors.leftMargin: Theme.spacing.gap
         anchors.rightMargin: Theme.spacing.gap
         horizontalAlignment: Text.AlignHCenter
-        text: root.row ? root.row.n : ""
+        text: root.displayName
         color: Theme.color.foreground
         font.family: Theme.font.family
         font.pixelSize: Theme.font.caption
@@ -109,7 +114,7 @@ Item {
             id: tip
             anchors.centerIn: parent
             width: parent.width - 2 * Theme.spacing.gap
-            text: root.row ? root.row.n : ""
+            text: root.displayName
             color: Theme.color.foreground
             font.family: Theme.font.family
             font.pixelSize: Theme.font.caption

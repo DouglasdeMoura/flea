@@ -21,6 +21,10 @@ D="$SB/tree"
 # src/backend/thumbcache.rs honours XDG_CACHE_HOME, so this suite's thumbnails land inside its own
 # sandbox and the operator's real cache is never written to, read from, or cleaned up after.
 export XDG_CACHE_HOME="$SB/cache"
+# The trash enumeration follows XDG_DATA_HOME the same way, so listtrash below reads a fixture
+# trash and the operator's real one is never listed; thumbnailer discovery still reads the system
+# directories, which a redirected data home does not hide.
+export XDG_DATA_HOME="$SB/data"
 fail=0
 
 setup() {
@@ -69,6 +73,33 @@ check "listpaths reports no sort pass" "0.000" "$(echo "$out" | head -1 | grep -
 # A relative path and the root itself are refused: this list is read out of a file every application writes.
 out=$(printf '{"c":"listpaths","paths":["etc/hostname","/",""],"first":10}\n{"c":"quit"}\n' | $BIN --backend)
 check "listpaths refuses a path that is not absolute" "0" "$(echo "$out" | head -1 | grep -oE '"n":[0-9]+' | cut -d: -f2)"
+
+# listtrash: the freedesktop trash as one listing; see docs/protocol.md "listtrash". The fixture
+# trash is hand-built files-and-info rather than trashed through gio, so this case needs no daemon
+# and runs anywhere the suite runs; the gio round trip is ops.sh's to prove. Originals point at
+# the tree above, which needs to exist for nothing here: listing never stats an original.
+TD="$SB/data"
+mkdir -p "$TD/Trash/files/olddir" "$TD/Trash/info"
+printf 'doomed bytes' > "$TD/Trash/files/doomed.txt"
+printf '[Trash Info]\nPath=%s/doomed.txt\nDeletionDate=2025-08-26T21:38:03\n' "$D" > "$TD/Trash/info/doomed.txt.trashinfo"
+printf '[Trash Info]\nPath=%s/olddir\nDeletionDate=2025-08-26T21:38:04\n' "$D" > "$TD/Trash/info/olddir.trashinfo"
+# An info file with no entry is metadata about nothing and lists nothing; an entry with no info
+# lists bare, with nowhere to restore to.
+printf '[Trash Info]\nPath=%s/ghost.txt\n' "$D" > "$TD/Trash/info/ghost.txt.trashinfo"
+: > "$TD/Trash/files/lonely.txt"
+out=$(printf '{"c":"listtrash","first":10,"hidden":false}\n{"c":"quit"}\n' | $BIN --backend)
+check "listtrash lists entries, not info files" "3" "$(echo "$out" | head -1 | grep -oE '"n":[0-9]+' | cut -d: -f2)"
+check "listtrash is followed by rows" "rows" "$(echo "$out" | sed -n 2p | grep -oE '"t":"[a-z]+"' | head -1 | cut -d'"' -f4)"
+check "a trash row is its path under the trash, base slash" "1" \
+  "$(echo "$out" | sed -n 2p | grep -c "\"n\":\"${TD#/}/Trash/files/doomed.txt\"")"
+check "directories sort first in a trash listing too" "${TD#/}/Trash/files/olddir" \
+  "$(echo "$out" | sed -n 2p | grep -oE '"n":"[^"]+"' | head -1 | cut -d'"' -f4)"
+check "a row carries its original path" "1" \
+  "$(echo "$out" | sed -n 2p | grep -c "\"o\":\"$D/doomed.txt\"")"
+check "and its deletion date rides beside it" "1" \
+  "$(echo "$out" | sed -n 2p | grep -c "\"o\":\"$D/doomed.txt\",\"x\":\"2025-08-26T21:38:03\"")"
+check "an entry with no info carries neither field" "0" \
+  "$(echo "$out" | sed -n 2p | grep -oE '"n":"[^"]*lonely[^"]*"[^}]*' | grep -c '"o":"')"
 
 # Task 11: rows carries a per-response Kind dictionary, read against the box's real freedesktop tables, see docs/protocol.md "rows".
 kind_out=$(printf '{"c":"list","path":"%s","first":10}\n{"c":"quit"}\n' "$D" | $BIN --backend)

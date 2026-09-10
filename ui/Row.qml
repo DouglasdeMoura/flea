@@ -38,15 +38,22 @@ Item {
     property string searchQuery: ""
     // Which of the two is narrowing. A filter keeps the ordinary columns, because its rows are this directory's own and their names are plain names, not paths.
     property bool filtering: false
+    // True while the pane stands on the trash location, where a row's name is its path under the
+    // trash: the leaf is drawn and the original is the location, the search shape with the info
+    // file's path as the source instead of the walk root.
+    property bool inTrash: false
     // A search row's name is its path relative to the search root, so the name and location split here; see docs/protocol.md "search".
     readonly property bool searching: !root.filtering && root.searchQuery.length > 0 && root.row !== null && root.row.n.length > 0
-    readonly property string displayName: root.row ? (root.searching ? Match.base(root.row.n) : root.row.n) : ""
+    readonly property string displayName: root.row ? ((root.searching || root.inTrash) ? Match.base(root.row.n) : root.row.n) : ""
     // The name, then this surface's directory slash, then a link's target; never both, a link's d is false.
     readonly property string dirMark: root.dirSuffix && root.row && root.row.d ? "/" : ""
     // FleaWindow.html and ThemeRoles.html both spell it "shell -> /usr/share/omarchy".
     readonly property string linkMark: root.row && root.row.l ? " -> " + root.row.l : ""
     readonly property string decoratedName: root.displayName + root.dirMark + root.linkMark
-    readonly property string locationText: root.searching ? Match.location(root.row.n) : ""
+    // In the trash the location is where the entry came from, read off the row the backend's info
+    // file vouches for; an info-less orphan draws no location, because it restores to nowhere.
+    readonly property string locationText: root.searching ? Match.location(root.row.n)
+        : (root.inTrash && root.row && root.row.o ? root.row.o : "")
     readonly property var nameRun: Match.run(root.displayName, root.searchQuery)
     // A long name would otherwise hide the location entirely, and the location is what tells two matches apart.
     readonly property real nameShare: 0.66
@@ -351,6 +358,11 @@ Item {
         // null marks a row with no real mtime yet (ui/ShareBrowser.qml's share rows).
         if (root.row.m === null) {
             return "--"
+        }
+        // A trash row's date is its deletion, carried raw because the backend stays timezone-free;
+        // an info-less orphan keeps the file's own mtime, the same fallback the listing gives it.
+        if (root.inTrash && root.row.x) {
+            return Format.dateIso(root.row.x, Date.now())
         }
         return root.compactDate ? Format.compactDate(root.row.m, Date.now()) : Format.date(root.row.m, Date.now())
     }

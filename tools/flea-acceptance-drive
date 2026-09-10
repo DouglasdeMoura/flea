@@ -962,6 +962,13 @@ keycase_trash() {
   return 0
 }
 
+# u restores, but only in the trash: the driven window stands on the fixture directory, so the
+# key is driven by the refusal it answers with there, which is the observable half. The restore
+# itself is tests/ui.sh case_trash's, through the real window standing on a real trash.
+keycase_restore() {
+  keycase_message_is "There is nothing to restore here." "$@"
+}
+
 keycase_undo() {
   reset_state || return 1
   [ -e "$DRIVE_FIXTURE/op-undo.txt" ] \
@@ -1464,6 +1471,9 @@ drive_menu_action() {
       return ;;
     sharelink)
       skip menu "$action" "the row appears only for a row already inside \$HOME/Dropbox, which this battery must not create"
+      return ;;
+    restore|deletePermanent|emptyTrash)
+      skip menu "$action" "the row appears only in the trash view, which this battery never enters; tests/ui.sh case_trash drives it through the real window"
       return ;;
   esac
   if ! declare -F "menucase_$action" >/dev/null; then

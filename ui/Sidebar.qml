@@ -109,9 +109,14 @@ Item {
 
     // Home is always first and is not in either file, so it is prepended rather than parsed; the
     // merge and its first-position-wins rule are Places.favorites', which tests/js/places.js checks.
+    // The trash closes the group: a location, not a directory, so it is appended here rather than
+    // parsed from any file, and it flows through the favourite branch everywhere below because it
+    // needs none of the mount machinery: no menu, no rename, no eject, and opened() carries the
+    // token the pane lists. Its kind tells the acceptance battery apart from a real favourite.
     function rebuild() {
         var home = Quickshell.env("HOME")
         root.favoriteEntries = Places.favorites(home, userDirsFile.text(), bookmarksFile.text(), Icons.sidebarGlyphFor)
+        root.favoriteEntries.push({ path: "flea:trash", label: "Trash", group: "favorite", kind: "trash", glyph: Icons.sidebarGlyphFor("Trash") })
     }
 
     // ui/NetworkDialog.qml writes this same file; a watch set up before its parent directory

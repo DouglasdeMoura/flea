@@ -1,6 +1,6 @@
 use crate::backend::fsinfo::dev_of;
 use crate::backend::listing::Listing;
-use crate::backend::proto::listed_line;
+use crate::backend::responses::listed_line;
 use crate::backend::run::{forget_rows, write_window};
 use crate::backend::searchreq::finish_search;
 use crate::backend::state::{State, Tables};
@@ -52,6 +52,8 @@ pub fn answer(
     // base and listing only move together, exactly as a list moves them.
     st.base = PathBuf::from(BASE);
     st.listing = l;
+    // A path set is not the trash either, so a map from a trash left open stays behind here.
+    st.trash_extra.clear();
     forget_rows(st, pool);
     // The sort figure is always zero: nothing here is sorted, see docs/protocol.md "listpaths".
     writeln!(out, "{}", listed_line(st.listing.len(), read_ms, 0.0, dev_of(&st.base))).ok();

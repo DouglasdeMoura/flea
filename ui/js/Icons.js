@@ -53,7 +53,8 @@ var SIDEBAR_GLYPHS = {
     "Pictures": "image",
     "Videos": "film",
     "Music": "music",
-    "Projects": "folder-git-2"
+    "Projects": "folder-git-2",
+    "Trash": "trash"
 }
 
 var SIDEBAR_FALLBACK = "folder"

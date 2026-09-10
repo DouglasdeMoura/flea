@@ -1,10 +1,11 @@
-use crate::error::FleaError;
-use crate::json::{escape, field_bool, field_str, field_str_array, field_usize, field_usize_array};
+use crate::json::{field_bool, field_str, field_str_array, field_usize, field_usize_array};
 
 pub enum Request {
     List { path: String, first: usize, hidden: bool },
     // A listing built from paths the client names, in the order it named them; the picker's Recent.
     ListPaths { paths: Vec<String>, first: usize },
+    // The freedesktop trash as one listing, home trash beside every top-directory trash.
+    ListTrash { first: usize, hidden: bool },
     Window { start: usize, count: usize },
     Sort { by: String, desc: bool },
     Search { path: String, query: String, hidden: bool },
@@ -19,6 +20,10 @@ pub enum Request {
     Transfer { op: String, paths: Vec<String>, rows: Vec<usize>, dest: String },
     TransferCancel { id: usize },
     Trash { paths: Vec<String>, rows: Vec<usize> },
+    // Restore to the original path, delete permanently, and empty every trash gio sees.
+    TrashRestore { paths: Vec<String>, rows: Vec<usize> },
+    TrashDelete { paths: Vec<String>, rows: Vec<usize> },
+    TrashEmpty,
     Rename { path: String, to: String },
     Duplicate { path: String },
     // One new empty directory inside parent path; an empty name asks for the first free "New Folder".
@@ -52,6 +57,10 @@ pub fn parse_request(line: &str) -> Request {
             hidden: field_bool(line, "hidden"),
         },
         Some("listpaths") => Request::ListPaths { paths: field_str_array(line, "paths"), first: field_usize(line, "first").unwrap_or(0) },
+        Some("listtrash") => Request::ListTrash {
+            first: field_usize(line, "first").unwrap_or(0),
+            hidden: field_bool(line, "hidden"),
+        },
         Some("window") => Request::Window {
             start: field_usize(line, "start").unwrap_or(0),
             count: field_usize(line, "count").unwrap_or(0),
@@ -83,6 +92,17 @@ pub fn parse_request(line: &str) -> Request {
             paths: field_str_array(line, "paths"),
             rows: field_usize_array(line, "rows"),
         },
+        // A restore and a permanent delete name trashed entries, so both take the same two forms
+        // trash does: explicit paths win and a rows form resolves against the listing at request time.
+        Some("trashrestore") => Request::TrashRestore {
+            paths: field_str_array(line, "paths"),
+            rows: field_usize_array(line, "rows"),
+        },
+        Some("trashdelete") => Request::TrashDelete {
+            paths: field_str_array(line, "paths"),
+            rows: field_usize_array(line, "rows"),
+        },
+        Some("trashempty") => Request::TrashEmpty,
         Some("rename") => Request::Rename {
             path: field_str(line, "path").unwrap_or_default(),
             to: field_str(line, "to").unwrap_or_default(),
@@ -123,76 +143,6 @@ pub fn parse_request(line: &str) -> Request {
         Some("quit") => Request::Quit,
         _ => Request::Unknown,
     }
-}
-
-pub fn listed_line(n: usize, read_ms: f64, sort_ms: f64, dev: u64) -> String {
-    format!(
-        r#"{{"t":"listed","n":{},"read":{:.3},"sort":{:.3},"v":{}}}"#,
-        n, read_ms, sort_ms, dev
-    )
-}
-
-// The streaming progress of a search: its own type rather than a listed line, because a mid-walk update is not a fresh listing and carries no read or sort timing.
-pub fn searching_line(n: usize, scanned: usize, ms: f64) -> String {
-    format!(r#"{{"t":"searching","n":{},"scanned":{},"ms":{:.3}}}"#, n, scanned, ms)
-}
-
-// The terminal line of a search: cancelled is true when the client stopped the walk or a new listing replaced it.
-pub fn searched_line(n: usize, scanned: usize, ms: f64, cancelled: bool) -> String {
-    format!(
-        r#"{{"t":"searched","n":{},"scanned":{},"ms":{:.3},"cancelled":{}}}"#,
-        n, scanned, ms, cancelled
-    )
-}
-
-// The file is empty rather than absent on failure, so a client never waits forever for a row that will not arrive.
-pub fn thumbed_line(row: usize, file: &str, ms: f64) -> String {
-    format!(r#"{{"t":"thumbed","row":{},"file":"{}","ms":{:.3}}}"#, row, escape(file), ms)
-}
-
-// partial is true when the 2000 ms deadline cut the walk short, see docs/protocol.md "dirsized".
-pub fn dirsized_line(row: usize, bytes: u64, partial: bool, ms: f64) -> String {
-    format!(r#"{{"t":"dirsized","row":{},"bytes":{},"partial":{},"ms":{:.3}}}"#, row, bytes, partial, ms)
-}
-
-// Sample output: {"t":"paths","paths":["/home/gm/a.txt","/home/gm/b.txt"]}
-pub fn paths_line(paths: &[String]) -> String {
-    let mut out = String::from(r#"{"t":"paths","paths":["#);
-    for (i, p) in paths.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push('"');
-        out.push_str(&escape(p));
-        out.push('"');
-    }
-    out.push_str("]}");
-    out
-}
-
-pub fn error_line(e: &FleaError) -> String {
-    format!(
-        r#"{{"t":"error","where":"{}","path":"{}","msg":"{}"}}"#,
-        escape(&e.where_),
-        escape(&e.path),
-        escape(&e.msg)
-    )
-}
-
-// A denied listing is the only failure a pane draws more than a sentence for: States.dc.html gives
-// it the directory's own mode string. The field is written only when the mode is known, so every
-// other error line on this wire keeps exactly the three fields it has always had.
-pub fn error_line_with_mode(e: &FleaError, mode: u32) -> String {
-    if mode == 0 {
-        return error_line(e);
-    }
-    format!(
-        r#"{{"t":"error","where":"{}","path":"{}","msg":"{}","mode":{}}}"#,
-        escape(&e.where_),
-        escape(&e.path),
-        escape(&e.msg),
-        mode
-    )
 }
 
 #[cfg(test)]
@@ -237,65 +187,36 @@ mod tests {
         }
         assert!(matches!(parse_request(r#"{"c":"searchcancel"}"#), Request::SearchCancel));
         assert!(matches!(parse_request(r#"{"c":"quit"}"#), Request::Quit));
-    }
-
-    #[test]
-    fn a_paths_line_escapes_every_element_and_survives_an_empty_list() {
-        assert_eq!(paths_line(&[]), r#"{"t":"paths","paths":[]}"#);
-        assert_eq!(
-            paths_line(&["/home/gm/a.txt".to_string(), "/home/gm/say \"hi\".txt".to_string()]),
-            r#"{"t":"paths","paths":["/home/gm/a.txt","/home/gm/say \"hi\".txt"]}"#
-        );
-    }
-
-    #[test]
-    fn junk_is_unknown_rather_than_a_panic() {
-        assert!(matches!(parse_request(""), Request::Unknown));
-        assert!(matches!(parse_request("not json at all"), Request::Unknown));
-        assert!(matches!(parse_request("{"), Request::Unknown));
-        assert!(matches!(parse_request(r#"{"c":"nope"}"#), Request::Unknown));
-    }
-
-    #[test]
-    fn a_malformed_escape_never_panics() {
-        // A bad escape only empties that one field; "c" alone decides the variant.
-        assert!(matches!(parse_request(r#"{"c":"list","path":"/tmp/a"#), Request::List { .. }));
-        assert!(matches!(parse_request(r#"{"c":"list","path":"\u00"#), Request::List { .. }));
-        assert!(matches!(parse_request(r#"{"c":"list","path":"\ud800","first":1}"#), Request::List { .. }));
-        assert!(matches!(parse_request(r#"{"c":"list","path":"trailing\"#), Request::List { .. }));
-        assert!(matches!(parse_request(r#"{"c":"window","start":-5,"count":10}"#), Request::Window { .. }));
-        assert!(matches!(parse_request(r#"{"c":"sort","by":"name","desc":truthy}"#), Request::Sort { .. }));
-    }
-
-    #[test]
-    fn a_list_request_without_first_defaults_to_zero() {
-        match parse_request(r#"{"c":"list","path":"/tmp"}"#) {
-            Request::List { first, .. } => assert_eq!(first, 0),
-            _ => panic!("expected List"),
+        match parse_request(r#"{"c":"listtrash","first":80,"hidden":true}"#) {
+            Request::ListTrash { first, hidden } => {
+                assert_eq!(first, 80);
+                assert!(hidden);
+            }
+            _ => panic!("expected ListTrash"),
         }
+        match parse_request(r#"{"c":"trashrestore","rows":[4,9]}"#) {
+            Request::TrashRestore { paths, rows } => {
+                assert!(paths.is_empty());
+                assert_eq!(rows, vec![4, 9]);
+            }
+            _ => panic!("expected TrashRestore"),
+        }
+        match parse_request(r#"{"c":"trashdelete","paths":["/a"],"rows":[]}"#) {
+            Request::TrashDelete { paths, rows } => {
+                assert_eq!(paths, vec!["/a".to_string()]);
+                assert!(rows.is_empty());
+            }
+            _ => panic!("expected TrashDelete"),
+        }
+        assert!(matches!(parse_request(r#"{"c":"trashempty"}"#), Request::TrashEmpty));
     }
 
     #[test]
-    fn a_list_request_carries_its_hidden_flag() {
-        match parse_request(r#"{"c":"list","path":"/tmp","first":0,"hidden":true}"#) {
-            Request::List { hidden, .. } => assert!(hidden),
-            _ => panic!("expected List"),
+    fn a_paths_request_carries_its_rows() {
+        match parse_request(r#"{"c":"paths","rows":[4,9]}"#) {
+            Request::Paths { rows } => assert_eq!(rows, vec![4, 9]),
+            _ => panic!("expected Paths"),
         }
-        // Missing and explicitly false both mean dotfiles stay out of the scan.
-        match parse_request(r#"{"c":"list","path":"/tmp","first":0}"#) {
-            Request::List { hidden, .. } => assert!(!hidden),
-            _ => panic!("expected List"),
-        }
-        match parse_request(r#"{"c":"list","path":"/tmp","first":0,"hidden":false}"#) {
-            Request::List { hidden, .. } => assert!(!hidden),
-            _ => panic!("expected List"),
-        }
-    }
-
-    #[test]
-    fn emits_a_listed_line() {
-        let s = listed_line(100000, 26.4, 2.5, 56);
-        assert_eq!(s, r#"{"t":"listed","n":100000,"read":26.400,"sort":2.500,"v":56}"#);
     }
 
     #[test]
@@ -345,55 +266,47 @@ mod tests {
     }
 
     #[test]
-    fn emits_a_thumbed_line_for_a_generated_row_and_for_a_failed_one() {
-        assert_eq!(
-            thumbed_line(2, "/home/gm/.cache/thumbnails/large/b98fa408.png", 75.8234),
-            r#"{"t":"thumbed","row":2,"file":"/home/gm/.cache/thumbnails/large/b98fa408.png","ms":75.823}"#
-        );
-        // The empty file is the whole failure form on this wire, so a client never waits forever.
-        assert_eq!(thumbed_line(0, "", 0.0), r#"{"t":"thumbed","row":0,"file":"","ms":0.000}"#);
+    fn junk_is_unknown_rather_than_a_panic() {
+        assert!(matches!(parse_request(""), Request::Unknown));
+        assert!(matches!(parse_request("not json at all"), Request::Unknown));
+        assert!(matches!(parse_request("{"), Request::Unknown));
+        assert!(matches!(parse_request(r#"{"c":"nope"}"#), Request::Unknown));
     }
 
     #[test]
-    fn emits_a_dirsized_line_complete_and_partial() {
-        assert_eq!(
-            dirsized_line(4, 1048576, false, 12.5),
-            r#"{"t":"dirsized","row":4,"bytes":1048576,"partial":false,"ms":12.500}"#
-        );
-        // partial:true is a floor, not a wrong exact number; the cell renders it with a leading ">".
-        assert_eq!(
-            dirsized_line(9, 200, true, 2000.0),
-            r#"{"t":"dirsized","row":9,"bytes":200,"partial":true,"ms":2000.000}"#
-        );
+    fn a_malformed_escape_never_panics() {
+        // A bad escape only empties that one field; "c" alone decides the variant.
+        assert!(matches!(parse_request(r#"{"c":"list","path":"/tmp/a"#), Request::List { .. }));
+        assert!(matches!(parse_request(r#"{"c":"list","path":"\u00"#), Request::List { .. }));
+        assert!(matches!(parse_request(r#"{"c":"list","path":"\ud800","first":1}"#), Request::List { .. }));
+        assert!(matches!(parse_request(r#"{"c":"list","path":"trailing\"#), Request::List { .. }));
+        assert!(matches!(parse_request(r#"{"c":"window","start":-5,"count":10}"#), Request::Window { .. }));
+        assert!(matches!(parse_request(r#"{"c":"sort","by":"name","desc":truthy}"#), Request::Sort { .. }));
     }
 
     #[test]
-    fn a_thumbed_path_is_escaped_like_every_other_string() {
-        let s = thumbed_line(7, "/tmp/say \"hi\"\nand\ttab.png", 1.0);
-        assert_eq!(s.lines().count(), 1);
-        assert!(s.contains(r#""file":"/tmp/say \"hi\"\nand\ttab.png""#));
+    fn a_list_request_without_first_defaults_to_zero() {
+        match parse_request(r#"{"c":"list","path":"/tmp"}"#) {
+            Request::List { first, .. } => assert_eq!(first, 0),
+            _ => panic!("expected List"),
+        }
     }
 
     #[test]
-    fn emits_an_error_line_naming_operation_and_path() {
-        let e = FleaError {
-            where_: "scan".to_string(),
-            path: "/root".to_string(),
-            msg: "permission denied".to_string(),
-        };
-        assert_eq!(
-            error_line(&e),
-            r#"{"t":"error","where":"scan","path":"/root","msg":"permission denied"}"#
-        );
-        // The mode rides on the same line, after msg, so an old reader keeps parsing what it knows.
-        assert_eq!(
-            error_line_with_mode(&e, 0o40750),
-            r#"{"t":"error","where":"scan","path":"/root","msg":"permission denied","mode":16872}"#
-        );
-        // Zero is "I could not stat it either", and that draws no mode string, so it sends no field.
-        assert_eq!(
-            error_line_with_mode(&e, 0),
-            r#"{"t":"error","where":"scan","path":"/root","msg":"permission denied"}"#
-        );
+    fn a_list_request_carries_its_hidden_flag() {
+        match parse_request(r#"{"c":"list","path":"/tmp","first":0,"hidden":true}"#) {
+            Request::List { hidden, .. } => assert!(hidden),
+            _ => panic!("expected List"),
+        }
+        // Missing and explicitly false both mean dotfiles stay out of the scan.
+        match parse_request(r#"{"c":"list","path":"/tmp","first":0}"#) {
+            Request::List { hidden, .. } => assert!(!hidden),
+            _ => panic!("expected List"),
+        }
+        match parse_request(r#"{"c":"list","path":"/tmp","first":0,"hidden":false}"#) {
+            Request::List { hidden, .. } => assert!(!hidden),
+            _ => panic!("expected List"),
+        }
     }
+
 }

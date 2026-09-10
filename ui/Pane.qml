@@ -30,8 +30,11 @@ FocusScope {
     property bool showHidden: false
     // Issue 27's state-file key: with it on a cursor step past an end comes round; ui/js/Focus.js step is the only reader.
     readonly property bool wrapAtEnds: ViewState.state.wrapAtEnds === true
-    // When the first d of the dd pair landed; ui/js/Focus.js reads it and Nav's reset clears it.
+    // When the first press of each destructive pair landed; Focus.js reads them, Nav clears them:
+    // trashArmedAt the dd pair, deleteArmedAt its trash-view twin, emptyArmedAt the empty pair.
     property double trashArmedAt: 0
+    property double deleteArmedAt: 0
+    property double emptyArmedAt: 0
     // "" off, "typing" while the query line has the keyboard, "results" once a walk was asked for; ui/js/Search.js owns every transition.
     property string searchMode: ""
     // Where the search was started from, which a home-wide walk leaves behind; see ui/js/Search.js.
@@ -84,7 +87,7 @@ FocusScope {
     property var kindNames: []
     // The listing rows the filter leaves standing, null when none is up: a view position goes in and
     // a listing row comes out, which is what every row-indexed cache and the selection still hold.
-    readonly property var shown: Filter.shown(root.rows, root.held, root.filterQuery)
+    readonly property var shown: Filter.shown(root.rows, root.held, root.filterQuery, Nav.isTrash(root.path))
     readonly property int shownTotal: root.shown === null ? root.total : root.shown.length
 
     readonly property int minBuffer: 50
@@ -137,7 +140,7 @@ FocusScope {
     property var history: []
     property var tabs: null
     readonly property bool canGoBack: root.history.length > 0
-    readonly property bool canGoUp: root.path.length > 1
+    readonly property bool canGoUp: root.path.length > 1 && !Nav.isTrash(root.path)
 
     // The filesystem line the status bar draws, refreshed once per directory rather than per row.
     property string fsName: ""
@@ -354,6 +357,7 @@ FocusScope {
     Flea.ContextMenu {
         id: menu
         showHidden: root.showHidden
+        inTrash: Nav.isTrash(root.path)
         taildropPeers: (root.cursorRow && !root.cursorRow.d) ? wire.taildrop.peers : []
         archiveFormats: root.backend.archiveFormats
         canConvert: root.backend.canConvert
@@ -364,7 +368,7 @@ FocusScope {
         rowInDropbox: root.path === root.home + "/Dropbox" || root.path.indexOf(root.home + "/Dropbox/") === 0
         onChosen: function (action) {
             if (action.indexOf("taildrop:") === 0) { root.sendTaildrop(action.substring("taildrop:".length)); return }
-            if (action === "copypath") { wire.opener.copyText(root.path + "/" + root.cursorRow.n); return }
+            if (action === "copypath") { wire.opener.copyText(Nav.rowPath(root, root.cursorRow)); return }
             if (action.indexOf("col:") === 0) { ViewState.toggleColumn(action.substring("col:".length)); return }
             root.act(action)
         }

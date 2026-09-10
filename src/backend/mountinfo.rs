@@ -27,6 +27,22 @@ pub(crate) fn mount_type_in(path: &Path, body: &str) -> Option<String> {
     best.map(|(_, kind)| kind)
 }
 
+// Every mount point the body names, in file order with octal escapes decoded: the caller
+// that walks top-directory trashes needs the ladder, not one rung of it. Malformed lines are
+// skipped the way mount_type_in skips them, so junk never becomes a trash root.
+pub(crate) fn mount_points_in(body: &str) -> Vec<PathBuf> {
+    body.lines().filter_map(mount_point).collect()
+}
+
+fn mount_point(line: &str) -> Option<PathBuf> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let split = fields.iter().position(|field| *field == "-")?;
+    if fields.len() <= split + 1 || fields.len() < 5 {
+        return None;
+    }
+    Some(PathBuf::from(OsString::from_vec(unescape(fields[4]))))
+}
+
 fn unescape(field: &str) -> Vec<u8> {
     let bytes = field.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -84,6 +100,18 @@ mod tests {
     #[test]
     fn malformed_mountinfo_is_ignored() {
         assert_eq!(mount_type_in(Path::new("/home/pi"), "junk\n"), None);
+        assert!(mount_points_in("junk\n").is_empty());
+    }
+
+    #[test]
+    fn mount_points_come_back_in_order_with_escapes_decoded() {
+        let info = "1 0 8:1 / / rw - ext4 /dev/a rw\n\
+                    2 1 0:9 / /home/pi/My\\040Drive rw - fuse.rclone remote: rw\n\
+                    junk\n";
+        assert_eq!(
+            mount_points_in(info),
+            vec![PathBuf::from("/"), PathBuf::from("/home/pi/My Drive")]
+        );
     }
 
     // The kernel escapes only \040, \011, \012 and \134, but this is a parser at a trust boundary.

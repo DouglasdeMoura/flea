@@ -8,6 +8,7 @@ import "js/Search.js" as Search
 import "js/Tabs.js" as Tabs
 import "js/Thumbs.js" as Thumbs
 import "js/Transfer.js" as Transfer
+import "js/Trash.js" as Trash
 
 // Every reply from outside the window lands here: the backend's, and those of the three foreign
 // programs the pane runs (the opener, the Dropbox share link, Taildrop). Split out of ui/Pane.qml
@@ -247,6 +248,20 @@ Item {
         function onTrashed(ok, failed) {
             pane.sticky("")
             pane.message(Ops.trashed(ok, failed), ok === 0)
+            pane.clearSelection()
+            pane.refresh("")
+        }
+
+        // The trash browser's three arrive on one signal, named by the wire's own t: a restore
+        // moves entries out of the trash, a permanent delete removes them, and an empty removes
+        // all of them. All three re-read the trash listing, and none of them is undoable, so no
+        // sentence here carries the undo hint.
+        function onTrashOp(op, ok, failed) {
+            var line = op === "trashdeleted" ? Trash.trashDeleted(ok, failed)
+                     : op === "trashemptied" ? Trash.trashEmptied(ok, failed)
+                     : Trash.restored(ok, failed)
+            pane.sticky("")
+            pane.message(line, ok === 0)
             pane.clearSelection()
             pane.refresh("")
         }

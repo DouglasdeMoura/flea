@@ -1,6 +1,7 @@
 import QtQuick
 import "." as Flea
 import "js/DirSizes.js" as DirSizes
+import "js/Trash.js" as Trash
 import "js/Tap.js" as Tap
 import "js/Thumbs.js" as Thumbs
 
@@ -39,6 +40,7 @@ GridView {
         width: root.cellWidth
         height: root.cellHeight
         row: root.pane.rowFor(index)
+        inTrash: Trash.isTrash(root.pane.path)
         cursor: index === root.pane.cursorIndex
         hovered: hover.hovered
         selected: root.pane.isSelected(index)

@@ -4,9 +4,26 @@
 .import "Filter.js" as Filter
 .import "Kinds.js" as Kinds
 .import "Thumbs.js" as Thumbs
+.import "Trash.js" as Trash
 
 // Where the pane has been and how it gets back, taking ui/Pane.qml's root the way Search.js and
 // Ops.js do: the pane holds the state, this holds what the state does.
+
+// Whether a path names the trash location; the token itself lives in ui/js/Trash.js, which owns
+// everything trash-shaped, and this stays the route callers already read.
+function isTrash(path) {
+    return Trash.isTrash(path)
+}
+
+// A trash row's own path. Rows of a trash listing are named by their path under the trash with
+// the base "/", so the row's path is that name and never a join onto the token; the picker's
+// rowPath answers its Recent rows the same way, see ui/js/Picker.js.
+function rowPath(pane, row) {
+    if (isTrash(pane.path)) {
+        return "/" + row.n
+    }
+    return pane.join(pane.path, row.n)
+}
 
 // Every ordinary navigation remembers where it came from. Deliberately no forward stack: the canvas
 // draws one arrow, not two.
@@ -76,6 +93,8 @@ function openWithoutHistory(pane, newPath) {
     pane.dirSizeState = DirSizes.empty()
     pane.cursorIndex = 0
     pane.trashArmedAt = 0
+    pane.deleteArmedAt = 0
+    pane.emptyArmedAt = 0
     // The row the editor sat on belongs to the listing being replaced, so the rename goes with it:
     // leaving the index set opened an empty editor over whatever file arrived at that row instead.
     pane.renamingIndex = -1
@@ -86,7 +105,13 @@ function openWithoutHistory(pane, newPath) {
     pane.lockedMode = 0
     pane.clearSelection()
     pane.listArea.primeSettle()
-    pane.backend.list(newPath, pane.windowSize, pane.showHidden)
+    // The trash is a location the backend builds rather than a directory it scans, so it gets
+    // the trash listing and not the directory one; every refresh below re-enters through here.
+    if (isTrash(newPath)) {
+        pane.backend.listTrash(pane.windowSize, pane.showHidden)
+    } else {
+        pane.backend.list(newPath, pane.windowSize, pane.showHidden)
+    }
     // One statfs per directory, not per row: the bar's right half only changes when the pane moves.
     pane.backend.askFsInfo()
 }
@@ -171,7 +196,7 @@ function applyPendingSelect(pane) {
     var target = pane.pendingSelect
     pane.pendingSelect = ""
     for (var i = 0; i < pane.rows.length; i++) {
-        if (pane.join(pane.path, pane.rows[i].n) === target) {
+        if (rowPath(pane, pane.rows[i]) === target) {
             var index = pane.held + i
             pane.setCursor(index)
             pane.selection.only(index)
@@ -194,8 +219,10 @@ function openCursor(pane, opener) {
         pane.message("That row has not loaded yet.", false)
         return
     }
-    var path = pane.join(pane.path, row.n)
+    var path = rowPath(pane, row)
     if (row.d) {
+        // A trashed directory opens as the ordinary directory it still is on disk; the listing it
+        // lands on is a directory listing, so the origin and deletion columns go with the trash.
         pane.open(path)
         return
     }
@@ -226,6 +253,10 @@ function leafOf(path) {
 // /home/gmx as "~x" and a crumb built on that would carry a click to /home/gm, another directory.
 function crumbs(path, home) {
     var text = String(path)
+    // The trash is one place, not a path, so it draws as one crumb carrying the token back.
+    if (isTrash(text)) {
+        return [{ text: "Trash", path: Trash.TRASH_TOKEN, last: true }]
+    }
     var base = String(home)
     var inHome = base.length > 0 && (text === base || text.indexOf(base + "/") === 0)
     var display = inHome ? "~" + text.substring(base.length) : text
@@ -252,12 +283,13 @@ function crumbs(path, home) {
 }
 
 // Backspace and the chrome's up arrow: the root has no parent, so it is where climbing stops.
+// The trash has none either, and answers the same silence a root climb does.
 function parent(pane) {
     if (pane.listInFlight) {
         pane.message("A directory is already loading.", false)
         return
     }
-    if (pane.path === "/") {
+    if (pane.path === "/" || isTrash(pane.path)) {
         return
     }
     var cut = pane.path.lastIndexOf("/")

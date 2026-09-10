@@ -211,4 +211,15 @@ function run(check) {
           + "scripts Screens screenshot-2026-08-30.png screenrecording-2026-08-21.mp4")
     check("and directories still lead the filtered view after a reverse",
           sortFirst.map(function (i) { return Fixture.reversed()[i].d }).join(","), "true,true,false,false")
+
+    // In the trash the drawn name is the leaf, so the query runs against the leaf and not the
+    // trash path: every row shares the trash prefix, and matching it would match everything.
+    var trashRows = [{ n: "home/gm/.local/share/Trash/files/report.txt" },
+                     { n: "home/gm/.local/share/Trash/files/homework.txt" }]
+    check("a query matching only the trash path matches nothing in the trash",
+          Filter.shown(trashRows, 0, "home/gm", true).join(","), "")
+    check("a query matching the leaf still matches",
+          Filter.shown(trashRows, 0, "report", true).join(","), "0")
+    check("and the flag off keeps the old whole-name matching",
+          Filter.shown(trashRows, 0, "home/gm").join(","), "0,1")
 }

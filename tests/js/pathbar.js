@@ -55,6 +55,16 @@ function run(check) {
           PathBar.resolve("Downloads", HOME, HOME), "/home/gm/Downloads")
     check("a relative line resolves against the pane and not against home",
           PathBar.resolve("src", "/usr", HOME), "/usr/src")
+    // The trash is a location and not a directory: its URI spells the token, a bare name typed
+    // over it is relative to home, and an absolute path still navigates away from it.
+    check("trash:/// opens the trash location",
+          PathBar.resolve("trash:///", HOME, HOME), "flea:trash")
+    check("trash:// without the slash is the same place",
+          PathBar.resolve("trash://", HOME, HOME), "flea:trash")
+    check("a bare name over the trash is relative to home",
+          PathBar.resolve("Downloads", "flea:trash", HOME), "/home/gm/Downloads")
+    check("an absolute path still navigates away from the trash",
+          PathBar.resolve("/tmp", "flea:trash", HOME), "/tmp")
 
     // A tilde with no home published is a name, because expanding it to "" would open the root.
     check("no home leaves a tilde as the name it is",

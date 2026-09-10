@@ -57,7 +57,7 @@ Item {
         root.editing = true
         // The trailing slash is what makes typing a child the natural next keystroke, and the line
         // opens selected, so a name typed straight away replaces it instead of joining onto it.
-        field.text = root.path === "/" ? "/" : root.path + "/"
+        field.text = root.path === "/" ? "/" : (Nav.isTrash(root.path) ? "trash:///" : root.path + "/")
         field.forceActiveFocus()
         field.selectAll()
     }

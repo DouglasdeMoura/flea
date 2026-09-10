@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Icons.js" as Icons
+import "js/Match.js" as Match
 
 // One row of a Miller column: a mark, a name, and the chevron a chosen directory carries. Simpler
 // than a list row on purpose, because a column has no size, date, mode or kind to draw.
@@ -10,6 +11,10 @@ Item {
 
     // {n, d, i} as a peek answers them, or a listing row, which carries the same three fields.
     property var row: null
+    // True while the pane stands on the trash location, where a row's name is its path under the
+    // trash: the leaf is drawn, the way ui/Row.qml draws it.
+    property bool inTrash: false
+    readonly property string displayName: root.row ? (root.inTrash ? Match.base(root.row.n) : root.row.n) : ""
     // The row this column's own cursor is on. Only the active column paints it in the accent.
     property bool cursor: false
     // A member of the pane's selection, which only the column drawing the pane's own listing has.
@@ -62,7 +67,7 @@ Item {
         anchors.right: chevronSlot.left
         anchors.rightMargin: Theme.spacing.gap
         anchors.verticalCenter: parent.verticalCenter
-        text: root.row ? root.row.n : ""
+        text: root.displayName
         color: root.ink
         font.family: Theme.font.family
         font.pixelSize: Theme.font.bodySmall

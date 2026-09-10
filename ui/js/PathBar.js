@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Trash.js" as Trash
+
 // What a typed path line means, and nothing about the field that carries it: ui/ChromeBar.qml owns
 // the field and ui/shell.qml owns the navigation, the same split ui/js/Filter.js keeps with its
 // strip. Every function here is pure, so tests/js/pathbar.js drives the whole of it with no window.
@@ -70,6 +72,12 @@ function unwrap(text) {
 // field checks before it navigates: an empty commit closes the bar and leaves the pane where it is.
 function resolve(text, current, home) {
     var line = String(text).trim()
+    // The trash is a location and not a directory, so its URI spells the token ui/js/Nav.js lists
+    // rather than a path normalize() would mangle into one. trash:// is the same place without its
+    // trailing slash, the way a directory typed without one still names it.
+    if (line === "trash:///" || line === "trash://") {
+        return "flea:trash"
+    }
     var body = unwrap(line)
     // Empty either because nothing was typed or because unwrap refused a URI on another host; both
     // answer "" here, and refused() below is what tells the two apart for the sentence.
@@ -80,8 +88,10 @@ function resolve(text, current, home) {
     if (home.length > 0 && (body === "~" || body.indexOf("~/") === 0)) {
         body = home + body.substring(1)
     } else if (body.charAt(0) !== "/") {
-        // Relative to where the pane is, so "Downloads" and Enter is a directory down.
-        body = current + "/" + body
+        // Relative to where the pane is, so "Downloads" and Enter is a directory down. The trash
+        // is a location and not a directory, so a bare name there is relative to home instead:
+        // the only root a name typed over the trash can sensibly mean.
+        body = (Trash.isTrash(current) ? home : current) + "/" + body
     }
     return normalize(body)
 }

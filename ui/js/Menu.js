@@ -78,6 +78,38 @@ function listingEntries(p) {
     return applyHidden(out, p.hiddenActions)
 }
 
+// The trash's rows, built the same way listingEntries is: Open stays, because a trashed file still
+// opens, and Restore puts the entry back where its info file says it came from. Delete permanently
+// removes it with its info, so it carries the danger mark Move to Trash carries elsewhere.
+// Everything that would orphan an info file or plant an unrestorable entry is gone: no Cut, no
+// Copy, no Paste, no Duplicate, no Rename, no share rows. The empty-trash row lives on the
+// background menu, because it acts on the whole trash and not on the row under the cursor.
+function trashEntries(p) {
+    var out = []
+    out.push({ label: "Open", action: "open", glyph: "folder-open" })
+    out.push({ label: "Restore", action: "restore", glyph: "history" })
+    out.push({ separator: true })
+    // No confirm anywhere behind this row either: the dd pair is the safety, see ui/js/Trash.js.
+    out.push({ label: "Delete permanently", action: "deletePermanent", glyph: "trash", danger: true })
+    out.push({ separator: true })
+    out.push(hiddenRow(p.showHidden))
+    return applyHidden(out, p.hiddenActions)
+}
+
+// The trash's background column, on a right click that landed on no row: Empty trash acts on the
+// whole trash, so it sits here and not on a row menu. Choosing it arms rather than fires, the
+// same pair the dd key arms; see ui/js/Trash.js emptyArm.
+function trashBackgroundEntries(p) {
+    var out = []
+    out.push({ label: "Empty trash", action: "emptyTrash", glyph: "trash", danger: true })
+    out.push({ separator: true })
+    out.push({ label: "Select all", action: "selectAll", glyph: "check" })
+    out.push({ separator: true })
+    out.push({ label: "Sort by", action: "sort", glyph: "sort", submenu: sortEntries() })
+    out.push(hiddenRow(p.showHidden))
+    return applyHidden(out, p.hiddenActions)
+}
+
 // Menus.html's background column, drawn on a right click that landed on no row: the directory's
 // own actions, in the board's order and with its rules. Its New File row is not built, because
 // this release's backend has mkdir and no create-empty-file of any kind, and a row that cannot

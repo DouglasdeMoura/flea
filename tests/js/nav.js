@@ -220,4 +220,38 @@ function run(check) {
     check("a directory still navigates and every other row still goes to the opener",
           entered({ n: "Work", d: true }) + " / " + entered({ n: "notes.txt", i: "text-x-generic", s: 12 }),
           "/home/gm/Work|| / ||/home/gm/notes.txt")
+
+    // The trash is a location and not a directory: no absolute path equals the token, the backend
+    // builds its listing rather than scanning one, and a row's path is its name under the trash.
+    check("no absolute path equals the trash token", Nav.isTrash("/flea:trash"), false)
+    check("and the token names the trash", Nav.isTrash("flea:trash"), true)
+    var joiner = function (base, name) { return base + "/" + name }
+    check("a trash row's path is its name under the trash, never a join onto the token",
+          Nav.rowPath({ path: "flea:trash", join: joiner }, { n: "home/gm/.local/share/Trash/files/a.txt" }),
+          "/home/gm/.local/share/Trash/files/a.txt")
+    check("and a directory row joins as usual",
+          Nav.rowPath({ path: "/home/gm", join: joiner }, { n: "Work" }), "/home/gm/Work")
+    check("the trash draws as one crumb carrying the token back",
+          drawn(Nav.crumbs("flea:trash", "/home/gm")), "Trash")
+    check("and the crumb targets the token",
+          targets(Nav.crumbs("flea:trash", "/home/gm")), "flea:trash")
+    var tparent = pane()
+    tparent.path = "flea:trash"
+    tparent.open = function (target) { tparent.opened = target }
+    Nav.parent(tparent)
+    check("the trash has no parent to climb to", tparent.opened, undefined)
+    var tl = pane()
+    tl.backend.listTrash = function (first, hidden) { tl.sent.push("listtrash") }
+    Nav.openWithoutHistory(tl, "flea:trash")
+    check("opening the token asks for the trash listing, not a directory scan",
+          tl.sent.join(","), "listtrash,fsinfo")
+    check("and the pane stands on the token", tl.path, "flea:trash")
+    var te = pane()
+    te.path = "flea:trash"
+    te.rowFor = function (index) { return { n: "home/gm/.local/share/Trash/files/sub", d: true } }
+    te.join = joiner
+    te.open = function (target) { te.opened = target }
+    Nav.openCursor(te, { open: function (path) {} })
+    check("Enter on a trashed directory navigates into the real subdirectory",
+          te.opened, "/home/gm/.local/share/Trash/files/sub")
 }

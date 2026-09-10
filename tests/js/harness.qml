@@ -36,6 +36,7 @@ import "sort.js" as SortSuite
 import "taildrop.js" as TaildropSuite
 import "textsize.js" as TextSizeSuite
 import "trash.js" as TrashSuite
+import "trashkeys.js" as TrashKeysSuite
 import "tap.js" as TapSuite
 import "tabs.js" as TabsSuite
 import "thumbs.js" as ThumbsSuite
@@ -74,7 +75,7 @@ Item {
             ["search", SearchSuite],
             ["selection", SelectionSuite], ["settings", SettingsSuite],
             ["sort", SortSuite], ["taildrop", TaildropSuite], ["textsize", TextSizeSuite],
-            ["trash", TrashSuite], ["tap", TapSuite], ["tabs", TabsSuite],
+            ["trash", TrashSuite], ["trashkeys", TrashKeysSuite], ["tap", TapSuite], ["tabs", TabsSuite],
             ["thumbs", ThumbsSuite], ["uistate", UiStateSuite],
             ["watch", WatchSuite]
         ]

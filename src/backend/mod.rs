@@ -51,6 +51,11 @@ pub mod opsreq;
 mod mountinfo;
 mod renamecompat;
 pub mod trash;
+pub mod trashfs;
+pub mod trashinfo;
+pub mod trashlist;
+pub mod trashreq;
+pub mod responses;
 pub mod undo;
 // The open listing's directory, watched so an outside change reaches the client; see docs/protocol.md "changed".
 pub mod watch;

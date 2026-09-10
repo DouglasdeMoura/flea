@@ -7,7 +7,8 @@ use crate::backend::archivereq::{formats_line, start_archive, start_convert};
 use crate::backend::convert;
 use crate::backend::peek::peek_line;
 use crate::backend::metareq::spawn as spawn_meta;
-use crate::backend::opsdispatch::{cancel_transfer, do_mkdir, do_rename, do_undo, report_op, resolve_rows, start_duplicate, start_trash, start_transfer, Ops};
+use crate::backend::opsdispatch::{cancel_transfer, do_mkdir, do_rename, do_undo, report_op, resolve_rows, start_duplicate, start_transfer, Ops};
+use crate::backend::trashreq::{start_trash, start_trash_delete, start_trash_empty, start_trash_restore};
 use crate::backend::opsreq::OpMsg;
 use crate::backend::mime::Db;
 use crate::backend::dirsizereq::{queue_dirsizes, walk_one_dirsize};
@@ -15,7 +16,8 @@ use crate::backend::events::{spawn_forwarder, spawn_op_forwarder, spawn_reader, 
 use crate::backend::fsinfo::{fsinfo_line, read as read_fsinfo};
 use crate::backend::fsinfo::dev_of;
 use crate::backend::listpaths;
-use crate::backend::proto::{error_line, error_line_with_mode, listed_line, parse_request, paths_line, thumbed_line, Request};
+use crate::backend::proto::{parse_request, Request};
+use crate::backend::responses::{error_line, error_line_with_mode, listed_line, paths_line, thumbed_line};
 use crate::backend::rows::rows_line;
 use crate::backend::sandbox;
 use crate::backend::scan::{mode_of, scan};
@@ -28,6 +30,7 @@ use crate::backend::thumbcache::{default_root, Cache};
 use crate::backend::thumbreq::{cancel_row, forget_one, report_done, thumb_rows};
 use crate::backend::thumbs::{Done, Pool};
 use crate::backend::thumbwrite::sweep_own_temps;
+use crate::backend::trashlist;
 use crate::backend::watch::{changed_line, Watch};
 use crate::backend::thumbspec::Thumbnailers;
 use crate::error::FleaError;
@@ -76,6 +79,8 @@ pub fn run() -> i32 {
         dirsize_queue: Vec::new(),
         search: None,
         search_reported: Instant::now(),
+        // Empty until a listtrash fills it; every other fresh listing clears it back.
+        trash_extra: HashMap::new(),
     };
 
     let (tx, rx) = channel::<Event>();
@@ -170,6 +175,9 @@ fn handle_line(
                     // base and listing only move together, so a failed list cannot mix them.
                     st.base = PathBuf::from(&path);
                     st.listing = l;
+                    // A directory listing carries no trash rows; the map from a trash left open
+                    // before it must not leak onto these rows.
+                    st.trash_extra.clear();
                     watch.commit();
                     forget_rows(st, pool);
                     // Said once per listing, because a folder nobody can watch goes stale in silence.
@@ -195,6 +203,12 @@ fn handle_line(
             watch.stop();
             listpaths::answer(out, st, pool, tb, &paths, first)
         }
+        // The freedesktop trash as one listing: a path set across trash roots, so the same rule
+        // stops the watch rather than following the home trash alone.
+        Request::ListTrash { first, hidden } => {
+            watch.stop();
+            trashlist::answer(out, st, pool, tb, first, hidden)
+        }
         Request::Window { start, count } => {
             write_window(out, st, start, count, tb);
             out.flush().ok();
@@ -203,8 +217,18 @@ fn handle_line(
             if finish_search(out, st, true) {
                 forget_rows(st, pool);
             }
+            // The token is not a directory, so a search from the trash walks the home trash instead.
+            let path = match trashlist::search_scope(&path) {
+                Ok(p) => p,
+                Err(e) => {
+                    writeln!(out, "{}", error_line(&e)).ok();
+                    out.flush().ok();
+                    return Control::Continue;
+                }
+            };
             st.base = PathBuf::from(&path);
             st.listing = Listing::new();
+            st.trash_extra.clear();
             // A walk's matches are not a directory either, so nothing is watched until list asks again.
             watch.stop();
             forget_rows(st, pool);
@@ -267,10 +291,10 @@ fn handle_line(
             start_transfer(out, ops, &op, named, &dest)
         }
         Request::TransferCancel { id } => cancel_transfer(ops, id),
-        Request::Trash { paths, rows } => {
-            let named = resolve_rows(paths, &rows, &st.base, &st.listing);
-            start_trash(out, ops, named)
-        }
+        Request::Trash { paths, rows } => start_trash(out, ops, paths, rows, &st.base, &st.listing),
+        Request::TrashRestore { paths, rows } => start_trash_restore(out, ops, paths, rows, &st.base, &st.listing),
+        Request::TrashDelete { paths, rows } => start_trash_delete(out, ops, paths, rows, &st.base, &st.listing),
+        Request::TrashEmpty => start_trash_empty(out, ops),
         Request::Rename { path, to } => do_rename(out, ops, &path, &to),
         Request::MkDir { path, name } => do_mkdir(out, ops, &path, &name),
         Request::Duplicate { path } => start_duplicate(out, ops, &path),
@@ -366,6 +390,6 @@ pub fn write_window(out: &mut impl Write, st: &State, start: usize, count: usize
     let (metas, ms) = stat_range(&st.base, &st.listing, start, count);
     let start = start.min(st.listing.len());
     let mut kinds = tb.kinds.borrow_mut();
-    let line = rows_line(&st.listing, &metas, start, ms, &tb.mime, &tb.icons, &tb.aliases, &tb.thumbs, &mut kinds);
+    let line = rows_line(&st.listing, &metas, start, ms, &tb.mime, &tb.icons, &tb.aliases, &tb.thumbs, &mut kinds, &st.trash_extra);
     writeln!(out, "{}", line).ok();
 }

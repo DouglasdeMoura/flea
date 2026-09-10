@@ -101,6 +101,7 @@ function runMenu(check) {
 
     runBackground(check)
     runHidden(check, full)
+    runTrash(check)
 
     // ui/Header.qml's own rows, on a right click over the column titles. Four toggles, flipping
     // labels, each answering "col:<key>"; Name is absent because it never hides.
@@ -223,4 +224,18 @@ function runHidden(check, full) {
           Menu.applyHidden([{ action: "a", label: "A" }, { separator: true },
                             { action: "b", label: "B" }, { separator: true },
                             { action: "c", label: "C" }], ["b"]).length, 3)
+}
+
+function runTrash(check) {
+    var rows = Menu.trashEntries({ showHidden: false, hiddenActions: [] })
+    check("the trash row menu opens, restores and deletes",
+          labels(rows), "Open|Restore|-|Delete permanently|-|Show hidden files")
+    check("nothing there orphans an info file or plants an unrestorable entry",
+          rows.map(function (r) { return r.action || "-" }).join("|"),
+          "open|restore|-|deletePermanent|-|toggleHidden")
+    var back = Menu.trashBackgroundEntries({ showHidden: false, hiddenActions: [] })
+    check("the trash background menu empties, selects and sorts",
+          labels(back), "Empty trash|-|Select all|-|Sort by|Show hidden files")
+    check("emptying arms rather than firing, so the menu owns the pair",
+          back[0].action, "emptyTrash")
 }

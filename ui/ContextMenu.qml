@@ -32,6 +32,10 @@ Item {
     // False on a listing's empty space, where Menus.html's background column is what opens instead.
     // openBackground() is its only writer and openAt() puts it back, because one instance serves both.
     property bool hasRow: true
+    // True while the pane stands on the trash location, where the rows are trashed entries and not
+    // files: ui/js/Menu.js builds the trash rows instead of the listing's. Bound off the pane the
+    // way showHidden is, because the menu owns no listing logic itself.
+    property bool inTrash: false
 
     // The rail's own rows when ui/Sidebar.qml raised this menu, empty when the listing did. One
     // instance serves both: a second one in this tree takes the keyboard from the list, see AGENTS.md.
@@ -81,6 +85,8 @@ Item {
     // The construction lives in ui/js/Menu.js now, so the rows are unit-testable without a window:
     // listingEntries(p) builds the listing's rows from the pane's state, headerEntries() the column
     // titles' own rows on a right click (see ui/Header.qml), and this file only routes between them.
+    // In the trash the rows are trashed entries, so both the row menu and the background column come
+    // from the trash builders instead.
     function buildEntries() {
         // Which release a rail row offers is the rail's knowledge, not the listing's, so the rail
         // hands its rows in already built; see ui/js/Mounts.js "railMenu".
@@ -88,6 +94,11 @@ Item {
             return root.railEntries
         if (root.forHeader)
             return Menu.headerEntries(ViewState.hiddenCols, root.showHidden)
+        if (root.inTrash) {
+            if (!root.hasRow)
+                return Menu.trashBackgroundEntries({ showHidden: root.showHidden, hiddenActions: ViewState.menuHidden })
+            return Menu.trashEntries({ showHidden: root.showHidden, hiddenActions: ViewState.menuHidden })
+        }
         return Menu.listingEntries({
             showHidden: root.showHidden,
             hasRow: root.hasRow,

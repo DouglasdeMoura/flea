@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Tap.js" as Tap
+import "js/Trash.js" as Trash
 
 // One Miller column: a scrolling list of ColumnRows over either a peeked directory or the pane's
 // own listing window. It owns no state; the area above it decides which row is which.
@@ -66,6 +67,9 @@ Item {
             // A shrunk listing subscripts out of range under a delegate not yet released, and QML
             // hands that back as undefined; every row reader in the tree tests against a real null.
             row: root.rows[index] !== undefined ? root.rows[index] : null
+            // Only the pane's own listing column ever stands on the trash; ancestor and neighbour
+            // columns draw peeks and plain names, so a null pane reads as not-trash.
+            inTrash: root.pane !== null && Trash.isTrash(root.pane.path)
             cursor: root.selectedIndex >= 0 && root.offset + index === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(root.offset + index)

@@ -444,6 +444,13 @@ action = "rename"
 char = "z"
 action = "undo"
 
+# u restores the cursor row, but only in the trash: anywhere else there is nothing to restore and
+# the action says so rather than reaching for the backend. r stays rename, because rename is what
+# every other listing offers and the trash refuses it with its own sentence instead.
+[[text]]
+char = "u"
+action = "restore"
+
 # The TUI board draws "s cycles, r reverses", but r is rename in both front ends and the canvas's
 # own Operations sheet draws it that way, so the reverse key is S: the capital-is-the-variant shape
 # g/G, j/J and J/K already use. s steps only through the orders the backend can really produce,
@@ -601,6 +608,11 @@ label = "trash"
 keys = "z ^z"
 action = "undo"
 label = "undo"
+
+[[sheet]]
+keys = "u"
+action = "restore"
+label = "restore from trash"
 
 [[sheet]]
 keys = "^N"

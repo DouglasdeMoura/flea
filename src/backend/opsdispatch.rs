@@ -1,12 +1,16 @@
-// Dispatch for the five write operations: one runs at a time, because the status bar has one sticky slot for it.
+// Dispatch for the write operations that claim the one-at-a-time slot: transfer, trash,
+// duplicate, and the trash browser's restore, permanent delete and empty. Archive and convert
+// number themselves without taking it and run alongside by design, so the cap was never one
+// write of any kind, only one holder of the status bar's single transient slot.
 use crate::backend::ops;
 use crate::backend::opsreq::{
-    duplicated_line, made_line, op_err, renamed_line, run_duplicate, run_transfer, run_trash, trashed_line,
+    duplicated_line, made_line, op_err, renamed_line, run_duplicate, run_transfer,
     transferdone_line, transferitem_line, transferprogress_line, transferstarted_line, undone_line, usable_dest,
     OpMsg,
 };
+use crate::backend::trashreq::{restored_line, trashed_line, trashemptied_line, trashdeleted_line};
 use crate::backend::listing::Listing;
-use crate::backend::proto::error_line;
+use crate::backend::responses::error_line;
 use crate::backend::undo::{Entry, Journal};
 use std::io::Write;
 use std::path::Path;
@@ -39,7 +43,8 @@ impl Ops {
     }
 
     // A fresh flag per operation, so a cancel can never reach the operation after the one it was aimed at.
-    fn claim(&mut self) -> (usize, Arc<AtomicBool>) {
+    // pub(crate) because the trash starters live in trashreq.rs and claim the same slot.
+    pub(crate) fn claim(&mut self) -> (usize, Arc<AtomicBool>) {
         let id = self.next_id;
         self.next_id += 1;
         self.running = Some(id);
@@ -49,7 +54,8 @@ impl Ops {
 }
 
 // The status bar shows one operation, so a second one is refused as data rather than queued invisibly behind the first.
-fn busy(out: &mut impl Write, where_: &str) -> bool {
+// pub(crate) because the trash starters in trashreq.rs refuse on the same slot.
+pub(crate) fn busy(out: &mut impl Write, where_: &str) -> bool {
     let e = op_err(where_, "", "an operation is already running");
     writeln!(out, "{}", error_line(&e)).ok();
     out.flush().ok();
@@ -96,16 +102,6 @@ pub(crate) fn cancel_transfer(ops: &Ops, id: usize) {
     if ops.running == Some(id) {
         ops.cancel.store(true, Ordering::Relaxed);
     }
-}
-
-pub(crate) fn start_trash(out: &mut impl Write, ops: &mut Ops, paths: Vec<String>) {
-    if ops.running.is_some() {
-        busy(out, "trash");
-        return;
-    }
-    ops.claim();
-    let tx = ops.tx.clone();
-    thread::spawn(move || run_trash(paths, tx));
 }
 
 pub(crate) fn start_duplicate(out: &mut impl Write, ops: &mut Ops, path: &str) {
@@ -174,6 +170,19 @@ pub(crate) fn report_op(out: &mut impl Write, ops: &mut Ops, msg: OpMsg) {
             ops.running = None;
             writeln!(out, "{}", trashed_line(ok, failed)).ok();
         }
+        // Restore, permanent delete and empty journal nothing; see run_trash_restore.
+        OpMsg::Restored { ok, failed } => {
+            ops.running = None;
+            writeln!(out, "{}", restored_line(ok, failed)).ok();
+        }
+        OpMsg::TrashDeleted { ok, failed } => {
+            ops.running = None;
+            writeln!(out, "{}", trashdeleted_line(ok, failed)).ok();
+        }
+        OpMsg::TrashEmptied { ok, failed } => {
+            ops.running = None;
+            writeln!(out, "{}", trashemptied_line(ok, failed)).ok();
+        }
         // Meta never claims the operation slot, so it does not clear it either.
         OpMsg::Meta { line } => {
             writeln!(out, "{}", line).ok();
@@ -195,6 +204,7 @@ pub(crate) fn report_op(out: &mut impl Write, ops: &mut Ops, msg: OpMsg) {
 mod tests {
     use super::*;
     use crate::backend::testdir::TestDir;
+    use crate::backend::trashreq::start_trash;
     use crate::backend::undo::Step;
     use std::sync::mpsc::channel;
 
@@ -310,7 +320,8 @@ mod tests {
         let mut o = ops();
         o.claim();
         let mut buf = out();
-        start_trash(&mut buf, &mut o, vec![d.file("a.txt", "a").to_string_lossy().to_string()]);
+        let l = Listing::new();
+        start_trash(&mut buf, &mut o, vec![d.file("a.txt", "a").to_string_lossy().to_string()], vec![], Path::new("/"), &l);
         assert!(text(&buf).contains("an operation is already running"));
         assert!(d.join("a.txt").exists(), "the refused operation touched nothing");
     }

@@ -1,6 +1,7 @@
 .pragma library
 
 .import "../../ui/js/Filter.js" as Filter
+.import "../../ui/js/Trash.js" as Trash
 
 // The filter narrows the listing already on screen, so every check here is pure or takes a stub
 // pane: one that needed a live listing would be checking the wrong feature.
@@ -69,7 +70,7 @@ function pane(query, held) {
     }
     // The two ui/Pane.qml computes as bindings, recomputed here so a stub can never go stale.
     p.refresh = function () {
-        p.shown = Filter.shown(p.rows, p.held, p.filterQuery)
+        p.shown = Filter.shown(p.rows, p.held, p.filterQuery, Trash.isTrash(p.path))
         p.shownTotal = p.shown === null ? p.total : p.shown.length
     }
     p.refresh()

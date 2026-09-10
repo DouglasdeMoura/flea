@@ -130,6 +130,7 @@ function lookup(key, text, modifiers) {
     case "d": return "trashArm"
     case "r": return "rename"
     case "z": return "undo"
+    case "u": return "restore"
     case "s": return "sortNext"
     case "S": return "sortReverse"
     case ".": return "toggleHidden"
@@ -179,6 +180,7 @@ var HINTS = {
     "pathBar": ":",
     "preview": "space",
     "rename": "r",
+    "restore": "u",
     "reveal": "o",
     "search": "f",
     "seekBack": "left",
@@ -220,6 +222,7 @@ var SHEET = [
     { keys: "r", action: "rename", label: "rename" },
     { keys: "dd", action: "trashArm", label: "trash" },
     { keys: "z ^z", action: "undo", label: "undo" },
+    { keys: "u", action: "restore", label: "restore from trash" },
     { keys: "^N", action: "newFolder", label: "new folder" },
     { keys: "v", action: "toggleSelect", label: "select" },
     { keys: "s", action: "sortNext", label: "sort column" },

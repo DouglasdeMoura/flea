@@ -4,12 +4,13 @@ use crate::backend::kind::Kinds;
 use crate::backend::meta::stat_range;
 use crate::backend::mime::Db;
 use crate::backend::fsinfo::dev_of;
-use crate::backend::proto::listed_line;
+use crate::backend::responses::listed_line;
 use crate::backend::rows::rows_line;
 use crate::backend::scan::scan;
 use crate::backend::sort::sort_by_name;
 use crate::backend::thumbspec::Thumbnailers;
 use crate::error::{from_io, FleaError};
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -52,7 +53,7 @@ fn write_to_tmp(path: &str, first: usize, dest: &Path, tmp: &Path) -> Result<(),
     let (mime, icons, aliases) = (Db::load(), Names::load(), Aliases::load());
     let thumbs = Thumbnailers::load(&aliases);
     let mut kinds = Kinds::new();
-    writeln!(out, "{}", rows_line(&listing, &metas, 0, ms, &mime, &icons, &aliases, &thumbs, &mut kinds))
+    writeln!(out, "{}", rows_line(&listing, &metas, 0, ms, &mime, &icons, &aliases, &thumbs, &mut kinds, &HashMap::new()))
         .map_err(|e| from_io("prewarm", &tmp.display().to_string(), &e))?;
     out.flush()
         .map_err(|e| from_io("prewarm", &tmp.display().to_string(), &e))?;

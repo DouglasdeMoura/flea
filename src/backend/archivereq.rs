@@ -8,7 +8,7 @@ use crate::backend::opsreq::{op_err, OpMsg};
 use crate::json::escape;
 use std::path::PathBuf;
 use crate::backend::opsdispatch::Ops;
-use crate::backend::proto::error_line;
+use crate::backend::responses::error_line;
 use std::io::Write;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;

@@ -48,6 +48,9 @@ function run(check) {
     // pair instead, because a single d sat among the letters a name is typed with; see issue 7.
     check("d arms the trash pair", Keymap.lookup(Qt.Key_D, "d", none), "trashArm")
     check("Delete still trashes on one press", Keymap.lookup(Qt.Key_Delete, "", none), "trash")
+    // u restores, but only in the trash: the key dispatches the action and ui/js/TrashKeys.js owns
+    // the location, so the table stays location-free and the refusal lives beside the behaviour.
+    check("u restores", Keymap.lookup(Qt.Key_U, "u", none), "restore")
     check("ctrl a selects all", Keymap.lookup(Qt.Key_A, "a", ctrl), "selectAll")
     check("shift J extends down", Keymap.lookup(Qt.Key_J, "J", shift), "extendDown")
     check("shift K extends up", Keymap.lookup(Qt.Key_K, "K", shift), "extendUp")
@@ -142,7 +145,7 @@ function run(check) {
           Keymap.SHEET.map(sheetAction).join("|"),
           Keymap.SHEET.map(function (row) { return row.action }).join("|"))
     check("the sheet is not empty, so the check above has a denominator",
-          Keymap.SHEET.length, 29)
+          Keymap.SHEET.length, 30)
     // A chord shares the row of the key it doubles, so every caret token must resolve to that row's
     // own action, or the sheet advertises a chord bound to something else.
     check("every chord the sheet draws is bound to the action of its own row",

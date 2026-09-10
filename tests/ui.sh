@@ -5056,6 +5056,133 @@ EOS
     sandbox_remove "$fixture_home"
 }
 
+# The trash browser: a hand-built fixture trash under a redirected XDG_DATA_HOME, so no daemon is
+# involved and no real trash is listed, restored or emptied at any point. The window opens the
+# token flea:trash three ways (path bar, rail row, direct launch), lists entries with their
+# originals and deletions, restores with u, deletes permanently with the dd pair and empties
+# through the background menu's own pair, and refuses rename, search-walk and restore elsewhere.
+# What it controls for: the listing is a path set with base slash, so every assertion that would
+# pass on a directory listing with short names (rowAt, the menu, the messages) is paired with one
+# that only the trash shape satisfies (the full-path row, the leaf display, the origin, the date).
+case_trash() {
+    local dir="$fixture_root/trash"
+    sandbox_scratch "$dir"
+    mkdir -p "$dir/data/Trash/files/sub" "$dir/data/Trash/info" "$dir/orig"
+    printf 'restore me' > "$dir/data/Trash/files/victim.txt"
+    printf '[Trash Info]\nPath=%s/victim.txt\nDeletionDate=2025-08-26T21:38:03\n' "$dir/orig" > "$dir/data/Trash/info/victim.txt.trashinfo"
+    printf '[Trash Info]\nPath=%s/sub\nDeletionDate=2025-08-26T21:38:04\n' "$dir/orig" > "$dir/data/Trash/info/sub.trashinfo"
+    printf 'orphan bytes' > "$dir/data/Trash/files/orphan.txt"
+    printf 'stays' > "$dir/orig/stays.txt"
+    # The date cell is only drawn when the column is shown, so the operator's own hidden set must
+    # not decide this case; the trash menu needs no seed, because none of its action ids can ever
+    # appear in a stored hidden set the shipped panel wrote.
+    seed_ui_state "$dir/state" '{"columns":["name","mode","size","date","kind"]}'
+
+    local saved_data_home="${XDG_DATA_HOME:-}"
+    export XDG_DATA_HOME="$dir/data"
+    launch "$dir/orig"
+    export XDG_DATA_HOME="$saved_data_home"
+    wait_listing 1
+
+    # The path bar's trash URI spells the token, the way gio and Dolphin spell it.
+    key : >/dev/null
+    settle
+    [[ "$(ipc pathBarOpen)" == "true" ]] || fail "trash: : did not open the path bar"
+    key "trash:///" >/dev/null
+    key -k Return >/dev/null
+    wait_path "flea:trash"
+    wait_listing 3
+    [[ "$(ipc path)" == "flea:trash" ]] || fail "trash: the pane is at $(ipc path), not the token"
+
+    # A trash row is its path under the trash with the base slash, dirs first like every listing.
+    [[ "$(ipc rowAt 0)" == "${dir#/}/data/Trash/files/sub|dir|"* ]] \
+        || fail "trash: row 0 is $(ipc rowAt 0), not the trashed directory under the trash"
+    [[ "$(ipc rowAt 2)" == "${dir#/}/data/Trash/files/victim.txt|file|"* ]] \
+        || fail "trash: row 2 is $(ipc rowAt 2), not the trashed file under the trash"
+    # ...but the row draws the leaf, with the original as its location and the deletion as its date.
+    [[ "$(ipc rowDisplayName 0)" == "sub" ]] || fail "trash: row 0 draws $(ipc rowDisplayName 0), not the leaf"
+    [[ "$(ipc rowDisplayName 2)" == "victim.txt" ]] || fail "trash: row 2 draws $(ipc rowDisplayName 2), not the leaf"
+    [[ "$(ipc rowLocation 2)" == "$dir/orig/victim.txt" ]] \
+        || fail "trash: row 2 locates $(ipc rowLocation 2), not the original"
+    [[ "$(ipc rowLocation 1)" == "" ]] \
+        || fail "trash: the info-less orphan locates $(ipc rowLocation 1), nowhere"
+    [[ "$(ipc rowDateText 2)" == "26 Aug 2025" ]] \
+        || fail "trash: row 2 dates $(ipc rowDateText 2), not the deletion"
+
+    # The row menu opens, restores and deletes permanently, and nothing that would orphan an info file.
+    key G >/dev/null
+    settle
+    key m >/dev/null
+    settle
+    [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "trash: m opened no menu over the victim row"
+    [[ "$(ipc contextMenuEntries)" == "Open|Restore|-|Delete permanently|-|Show hidden files" ]] \
+        || fail "trash: the row menu is $(ipc contextMenuEntries)"
+    [[ "$(ipc contextMenuGlyphs)" == "folder-open|history|trash" ]] \
+        || fail "trash: the row menu draws $(ipc contextMenuGlyphs)"
+    key -k Escape >/dev/null
+    settle
+
+    # u restores the cursor row to its original, and the listing re-reads without it.
+    key u >/dev/null
+    wait_message "Restored 1 item"
+    [[ "$(cat "$dir/orig/victim.txt" 2>/dev/null)" == "restore me" ]] \
+        || fail "trash: u did not put the victim back with its bytes"
+    [[ "$(ipc total)" == "2" ]] || fail "trash: the restored row is still listed, total is $(ipc total)"
+
+    # Rename is refused with the way back named, because it would orphan the info file.
+    key r >/dev/null
+    wait_message "Renaming is not available in the trash. Restore the item first."
+
+    # The dd pair deletes permanently instead of trashing, and Delete would go on one press.
+    key d >/dev/null
+    wait_message "Press d again to delete permanently. This cannot be undone."
+    [[ "$(ipc total)" == "2" ]] || fail "trash: the first d deleted, total is $(ipc total)"
+    key d >/dev/null
+    wait_message "Deleted 1 item permanently"
+    [[ "$(ipc total)" == "1" ]] || fail "trash: the pair deleted nothing, total is $(ipc total)"
+    [[ -e "$dir/data/Trash/files/sub" ]] && fail "trash: the trashed directory survived the pair"
+
+    # The background menu empties through its own pair: the first choose arms, the second fires.
+    click_background
+    settle
+    [[ "$(ipc contextMenuEntries)" == "Empty trash|-|Select all|-|Sort by|Show hidden files" ]] \
+        || fail "trash: the background menu is $(ipc contextMenuEntries)"
+    menu_seek "Empty trash"
+    key -k Return >/dev/null
+    wait_message "Press again to empty the trash. This cannot be undone."
+    [[ "$(ipc total)" == "1" ]] || fail "trash: arming the empty emptied, total is $(ipc total)"
+    click_background
+    settle
+    menu_seek "Empty trash"
+    key -k Return >/dev/null
+    wait_message "Emptied 1 item from the trash"
+    [[ "$(ipc total)" == "0" ]] || fail "trash: the empty left $(ipc total) rows standing"
+
+    # Back in a directory, u has nothing to restore and says so instead of reaching for the backend.
+    key : >/dev/null
+    settle
+    key "$dir/orig" >/dev/null
+    key -k Return >/dev/null
+    wait_path "$dir/orig"
+    key u >/dev/null
+    wait_message "There is nothing to restore here."
+
+    # The rail's own door: the trash row stands last among the favourites and opens the token.
+    wait_rail 2
+    click_rail_row $(("$(ipc networkStartIndex)" - 1)) left
+    wait_path "flea:trash"
+    [[ "$(ipc total)" == "0" ]] || fail "trash: the rail opened a trash with $(ipc total) rows, not the emptied one"
+
+    # A launch straight onto the token opens the trash, the way --select opens a parent.
+    launch "flea:trash"
+    wait_path "flea:trash"
+    [[ "$(ipc total)" == "0" ]] || fail "trash: a direct launch lists $(ipc total) rows on an empty trash"
+
+    printf 'TRASH pathbar=ok rows=ok menu=ok restore=ok rename-refused=ok pair=ok empty=ok u-elsewhere=ok rail=ok launch=ok\n'
+    kill_flea
+    sandbox_remove "$dir"
+}
+
 # Task 19: F2 renames a Network rail entry in place; "NAS" is bookmark-only, "isos" is mount-only.
 case_rename() {
     local dir="$fixture_root/rename"
@@ -6018,7 +6145,7 @@ cache_snapshot
 trap cleanup EXIT
 
 declare -a wanted=("$@")
-[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
+[[ ${#wanted[@]} -eq 0 ]] && wanted=(cursor terminal open rows click menu background hidden selection watch select colour lifted icons thumbs hashcache stale nosweep oem header overflow focus preview network netmark networkauth networktimeout gvfs sharebrowser unmount eject trash rename renamelife taildrop grid columns operations tabs openterminal renderer settings hangshare)
 
 : > "$run_log"
 : > "$flea_log"

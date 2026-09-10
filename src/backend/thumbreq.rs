@@ -1,4 +1,4 @@
-use crate::backend::proto::thumbed_line;
+use crate::backend::responses::thumbed_line;
 use crate::backend::run::since;
 use crate::backend::state::{State, Tables};
 use crate::backend::thumbcache::{Cache, Hit};

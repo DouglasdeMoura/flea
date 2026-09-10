@@ -17,11 +17,14 @@ Item {
     signal searching(int total, int scanned, real ms)
     signal searched(int total, int scanned, real ms, bool cancelled)
     // The write operations, see docs/protocol.md; every one of them is reversible with undo.
+    // The trash browser's three journal nothing, because a restore would orphan a .trashinfo and
+    // the other two destroy; one signal carries all three, named by the wire's own t.
     signal transferStarted(int id, int n, bool moving)
     signal transferProgress(int id, int index, string name, real bytes, real total)
     signal transferItem(int id, int index, string name, bool ok, string err)
     signal transferDone(int id, int ok, int failed, int skipped, bool cancelled)
     signal trashed(int ok, int failed)
+    signal trashOp(string op, int ok, int failed)
     signal renamed(bool ok, string path)
     signal made(bool ok, string path)
     signal duplicated(bool ok, string path)
@@ -100,6 +103,14 @@ Item {
         root.send({ c: "listpaths", paths: paths, first: first })
     }
 
+    // The trash as one listing; the sort mark goes back to name ascending, see docs/protocol.md "listtrash".
+    function listTrash(first, hidden) {
+        root.listRequests += 1
+        root.sortBy = "name"
+        root.sortDesc = false
+        root.send({ c: "listtrash", first: first, hidden: hidden })
+    }
+
     function window(start, count) {
         root.send({ c: "window", start: start, count: count })
     }
@@ -137,6 +148,16 @@ Item {
         }
         root.send({ c: "trash", rows: rows })
     }
+
+    function sendTrashRows(c, rows) {
+        if (rows.length === 0) {
+            return
+        }
+        root.send({ c: c, rows: rows })
+    }
+    function trashRestore(rows) { sendTrashRows("trashrestore", rows) }
+    function trashDelete(rows) { sendTrashRows("trashdelete", rows) }
+    function trashEmpty() { root.send({ c: "trashempty" }) }
 
     function rename(path, to) {
         root.send({ c: "rename", path: path, to: to })
@@ -252,6 +273,7 @@ Item {
     // Sample input: {"t":"transferitem","id":12,"index":1,"name":"photos","ok":false,"err":"permission denied"}
     // Sample input: {"t":"transferdone","id":12,"ok":1,"failed":1,"skipped":0,"cancelled":false}
     // Sample input: {"t":"trashed","ok":1,"failed":0}
+    // Sample input: {"t":"restored","ok":1,"failed":0}
     // Sample input: {"t":"made","ok":true,"path":"/home/gm/Pictures/New Folder"}
     // Sample input: {"t":"undone","op":"move","ok":true}
     function receive(line) {
@@ -291,6 +313,8 @@ Item {
             root.transferDone(message.id, message.ok, message.failed, message.skipped, message.cancelled)
         } else if (message.t === "trashed") {
             root.trashed(message.ok, message.failed)
+        } else if (message.t === "restored" || message.t === "trashdeleted" || message.t === "trashemptied") {
+            root.trashOp(message.t, message.ok, message.failed)
         } else if (message.t === "renamed") {
             root.renamed(message.ok, message.path)
         } else if (message.t === "made") {

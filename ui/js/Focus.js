@@ -9,6 +9,7 @@
 .import "Search.js" as Search
 .import "Sort.js" as Sort
 .import "Trash.js" as Trash
+.import "TrashKeys.js" as TrashKeys
 .import "Tabs.js" as Tabs
 
 var LIST = "list"
@@ -68,6 +69,10 @@ function lookup(event, root) {
 // Lifted from Pane.qml's Keys.onPressed: the map holds the keys, this holds the behaviour.
 // Takes the Pane root because every case is a method call or a property read on it.
 function act(action, root) {
+    // The trash owns its actions before the switch below sees them; see ui/js/TrashKeys.js.
+    if (TrashKeys.act(action, root)) {
+        return
+    }
     switch (action) {
     // One row in the list, one row of tiles in the grid: a grid that stepped linearly on Down would
     // move the cursor sideways, which is not what the key looks like it does.
@@ -110,6 +115,9 @@ function act(action, root) {
     case "cut": Ops.clip(root, true); return
     case "paste": Ops.paste(root); return
     case "undo": Ops.undo(root); return
+    // u restores in the trash through TrashKeys above; anywhere else there is nothing to restore,
+    // and the action says so rather than reaching for the backend.
+    case "restore": root.message("There is nothing to restore here.", false); return
     case "rename": Ops.startRename(root); return
     // m. Mounts.raiseMenu says why a favourite has no menu; here the pane says whether a row was
     // under the cursor at all, and an empty or fully filtered listing gets the sentence, not silence.
@@ -224,10 +232,14 @@ function handleKey(event, root, sidebar) {
         return Filter.typeKey(event, root)
     }
     var action = lookup(event, root)
-    // Anything that is not the second d of the pair disarms it, so an arm never outlives the key
-    // after it; ui/js/Trash.js re-stamps on its own, which is why it reads the stamp before writing.
+    // Anything that is not the second press of a pair disarms every arm, so an arm never outlives
+    // the key after it; ui/js/Trash.js re-stamps on its own, which is why it reads the stamp before
+    // writing. All three stamps clear together because an arm is one gesture, and the delete arm is
+    // reached through the trashArm action itself, so the one exemption covers both pairs.
     if (action !== "trashArm") {
         root.trashArmedAt = 0
+        root.deleteArmedAt = 0
+        root.emptyArmedAt = 0
     }
     if (root.preview.active) {
         PreviewKeys.act(action, root)

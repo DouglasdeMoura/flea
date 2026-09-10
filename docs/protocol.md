@@ -69,6 +69,31 @@ so a symlink to a directory is listed as a file and a symlink to nothing is stil
 There is no cancel and no streaming: the build is one `lstat` per path inside the read loop, and the
 one caller sends a few hundred at most.
 
+### listtrash
+
+`{"c":"listtrash","first":<uint>,"hidden":<bool>}`
+
+Example: `{"c":"listtrash","first":80,"hidden":false}`
+
+Lists the freedesktop trash as one listing: the home trash (`$XDG_DATA_HOME/Trash`, or
+`~/.local/share/Trash` when the session set no data home) beside one top-directory trash
+(`.Trash-$uid`) per mount, and answers a `listed` line followed immediately by a `rows` line
+covering rows `0..first`, exactly as `list` does. The listing's base is `/` and each entry is its
+absolute path under the trash with the leading slash removed, so `window`, `thumb`, `paths` and
+every other per-row facility keep working with no special case anywhere; that is the same shape a
+`search` listing takes, for the same reason. The listing is sorted by name with directories first,
+because a trash the user opens is a listing and not a history; the picker's Recent keeps its own
+order through `listpaths` instead.
+
+The enumeration walks each trash's `files/` directory and reads the `.trashinfo` beside each
+entry, never the other way round: an info file with no entry is metadata about nothing and is
+dropped, while an entry with no info still lists, carrying neither `o` nor `x` below. `hidden`
+follows `list`'s rule exactly. A missing `files/` directory is an empty trash, not an error.
+
+A set of paths across trash roots is not a directory, so nothing is watched: `listpaths`'s own
+rule, for the same reason. A trash emptied by another application re-lists on navigation and on
+Flea's own trash operations, which re-read it themselves.
+
 ### window
 
 `{"c":"window","start":<uint>,"count":<uint>}`
@@ -144,6 +169,11 @@ counted or descended, so a `.git` costs one `readdir` entry and nothing more.
 `path` is whatever the client asks for, and the backend walks exactly that and nothing else:
 a client searching a whole home directory sends home as the `path`, and one searching a mount
 sends the mount. The backend has no notion of home and no scope of its own.
+
+The one exception is the trash token: a search rooted at `flea:trash` walks the home trash's
+`files/` instead, because a path set across trash roots is not a directory and cannot be walked
+as one. Top-directory trashes are not walked. A trash with no home behind it answers an `error`
+line rather than an empty walk.
 
 **Results are ranked, and the rank is what makes a subsequence match usable.** A subsequence
 over a hundred thousand entries matches far too much to read, so every match carries a score
@@ -366,9 +396,13 @@ Example: `{"c":"trash","rows":[4,9]}`
 `rows` is the same alternative to `paths` that `transfer` documents above, resolved the same way.
 
 Moves each path to the freedesktop trash by running `gio trash`, and answers one `trashed` line.
-**Nothing about the freedesktop trash specification is implemented in this codebase**, only an argv and
+The trashing half implements nothing of the freedesktop specification itself, only an argv and
 a result: `gio` already handles the same-filesystem-move-versus-copy question, the `.trashinfo`
 metadata, and the per-mount `.Trash-$uid` fallback for a volume with no home-relative trash.
+The reading half does: `listtrash` enumerates the home trash beside every top-directory trash
+itself and parses each `.trashinfo`, because neither `gio trash --list` (which names no deletion
+date) nor its daemon-side listing (which no redirected `$XDG_DATA_HOME` reaches) answers what a
+trash browser has to draw.
 
 Which paths actually went is read off the filesystem afterwards rather than from `gio`'s exit status,
 which covers the whole batch and cannot attribute a failure to one path.
@@ -380,6 +414,46 @@ the URI later is ambiguous. The backend therefore reads `gio trash --list` immed
 the call and keeps the entries that are new, which is what makes the operation reversible.
 
 There is no confirmation step anywhere in this request, because the undo journal is the safety.
+
+### trashrestore
+
+`{"c":"trashrestore","paths":["<string>",...],"rows":[<uint>,...]}`
+
+Example: `{"c":"trashrestore","rows":[4,9]}`
+
+`rows` is the same alternative to `paths` that `transfer` documents, resolved the same way: each
+index names the trash entry at that row of the current listing.
+
+Puts each named trash entry back where its `.trashinfo` says it came from, and answers one
+`restored` line. An entry with no info file, an original that cannot be parsed, a destination
+that already exists, and a path that is not a trash entry at all are each counted in `failed`,
+and the entry stays in the trash; a missing parent directory is recreated, which is what `gio
+trash --restore` does. The restore runs at the filesystem level rather than through `gio`,
+because `gio`'s own restore is daemon-side: it cannot see a trash `$XDG_DATA_HOME` redirects,
+so a `gio`-based restore is untestable in a sandbox and refuses there.
+
+Nothing is journalled: undoing a restore by rename would recreate the `files/` entry without its
+info, and re-trashing is a new operation rather than a reversal.
+
+### trashdelete
+
+`{"c":"trashdelete","paths":["<string>",...],"rows":[<uint>,...]}`
+
+Example: `{"c":"trashdelete","rows":[4,9]}`
+
+Deletes each named trash entry permanently, with the info file beside it, and answers one
+`trashdeleted` line. A symlink is removed as a link and never followed; a directory goes whole;
+an entry already gone counts as done, because the end state is what was asked for. Only a
+`files/` entry is ever deleted: anything else is counted in `failed` and nothing is touched.
+Nothing is journalled.
+
+### trashempty
+
+`{"c":"trashempty"}`
+
+Empties every trash the enumeration behind `listtrash` sees, home and top-directory alike, by
+deleting each entry the way `trashdelete` does, and answers one `trashemptied` line. Nothing is
+journalled.
 
 ### rename
 
@@ -537,7 +611,7 @@ where a move was meant is an annoyance and moving where a copy was meant loses t
 
 ### rows
 
-`{"t":"rows","start":<uint>,"rows":[{"n":<string>,"d":<bool>,"s":<uint>,"m":<int>,"p":<uint>,"i":<string>,"t":<bool>,"k":<uint>[,"l":<string>][,"v":<uint>]},...],"kinds":[<string>,...],"ms":<float>}`
+`{"t":"rows","start":<uint>,"rows":[{"n":<string>,"d":<bool>,"s":<uint>,"m":<int>,"p":<uint>,"i":<string>,"t":<bool>,"k":<uint>[,"l":<string>][,"v":<uint>][,"o":<string>][,"x":<string>]},...],"kinds":[<string>,...],"ms":<float>}`
 
 Example:
 `{"t":"rows","start":0,"rows":[{"n":"say \"hi\".txt","d":false,"s":12,"m":1787790423,"p":33188,"i":"text-x-generic","t":false,"k":0},{"n":"photos","d":true,"s":4096,"m":1787790424,"p":16877,"i":"folder","t":false,"k":1,"v":56}],"kinds":["Plain text document","Folder"],"ms":1.250}`
@@ -573,6 +647,14 @@ the rows being dragged against the `v` of the directory being dropped on: equal 
 the drag moves, different means two and it copies, which is what Finder does. A directory whose stat
 failed reports `p` 0 and `v` 0 with it. `ms` is the phase-2 stat time for this window, formatted to three
 decimal places. Sent after `list` and after `window`.
+
+**`o` is where a trash row came from, and `x` is when it was deleted, and only a trash row
+carries either.** `o` is the `.trashinfo` `Path`, `x` its `DeletionDate` verbatim
+(`YYYY-MM-DDThh:mm:ss` local time, no zone), so the backend stays timezone-free and the client
+formats it as local time. An entry with no info file carries neither field, and a row from any
+other listing carries nothing: the map behind them is empty everywhere else, so those rows
+serialise byte-identically with or without the lookup. The client draws the leaf of `n` for the
+name, `o` for the location, and `x` for the date; see `listtrash`.
 
 A row whose stat failed sends `s`, `m` and `p` all 0, and `p` is what says so: 0 is outside
 `st_mode`'s domain, because a real one always carries its file-type bits. So `p` 0 needs no flag
@@ -839,6 +921,33 @@ Counts only. Unlike `transferitem` there is no per-path error text, because tras
 the batch and its exit status cannot attribute a failure to a single path; a path that is still on disk
 afterwards is counted in `failed`.
 
+### restored
+
+`{"t":"restored","ok":<uint>,"failed":<uint>}`
+
+Example: `{"t":"restored","ok":1,"failed":0}`
+
+Counts only, like `trashed`: each entry went back to its original or stayed in the trash, and the
+refresh afterwards shows which. Nothing is journalled, so no `undo` reverses this line.
+
+### trashdeleted
+
+`{"t":"trashdeleted","ok":<uint>,"failed":<uint>}`
+
+Example: `{"t":"trashdeleted","ok":1,"failed":0}`
+
+Counts only, like `trashed`: each entry is gone with its info file or still standing. Nothing is
+journalled.
+
+### trashemptied
+
+`{"t":"trashemptied","ok":<uint>,"failed":<uint>}`
+
+Example: `{"t":"trashemptied","ok":2,"failed":0}`
+
+Counts only, like `trashed`: every trash the enumeration sees was emptied of this many entries.
+Nothing is journalled.
+
 ### renamed
 
 `{"t":"renamed","ok":<bool>,"path":"<string>"}`
@@ -991,6 +1100,10 @@ as it did before.
   cannot be matched to the requested directory, so production ignores `FLEA_PREWARM`.
   Add a path or correlation field and prove a first-paint win before re-enabling a
   reader.
+- A trash listing sorts by name, size and mtime only: the deletion date is display-only,
+  so a client cannot ask for deletion order. Nautilus sorts its trash by deleted date, and
+  closing that gap is a fourth sort key valid in trash listings, with its own refusal
+  contract beside the three `sort.rs` already names.
 - The pool is built when the backend starts, not when the first `thumb` arrives. That
   costs every backend process about 1.2 ms of startup and about 0.5 MB of PSS for a
   subsystem a client may never use; see AGENTS.md "Thumbnail requests".

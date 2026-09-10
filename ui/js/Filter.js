@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Match.js" as Match
+.import "Trash.js" as Trash
 
 // The filter narrows the listing already on screen: no walk, no round trip, and every row it keeps
 // is one the backend has already sent. ui/js/Search.js is its bigger sibling, which walks the
@@ -15,14 +16,16 @@
 // is no filter at all. Only the rows the pane holds can be tested, so the answer is a subsequence
 // of the held window; scope() below is what says so when the window is not the whole listing.
 // It is a subsequence and never a re-ranking, which is what keeps directories ahead of files.
-function shown(rows, held, query) {
+function shown(rows, held, query, inTrash) {
     if (query.length === 0) {
         return null
     }
     var out = []
     for (var i = 0; i < rows.length; i++) {
-        // The same run ui/js/Match.js paints in the name, so a row can never match without showing why.
-        if (Match.run(rows[i].n, query).start >= 0) {
+        // The same run ui/js/Match.js paints in the name, so a row can never match without showing
+        // why: in the trash the drawn name is the leaf, so the leaf is what the query runs against.
+        var name = inTrash === true ? Match.base(rows[i].n) : rows[i].n
+        if (Match.run(name, query).start >= 0) {
             out.push(held + i)
         }
     }
@@ -156,7 +159,7 @@ function close(pane) {
 // to lose the rows that just dropped out before anything can act on rows nobody can see. The next
 // match list is computed rather than read back off the pane's binding, so the order is not a guess.
 function apply(pane, query) {
-    var next = shown(pane.rows, pane.held, query)
+    var next = shown(pane.rows, pane.held, query, Trash.isTrash(pane.path))
     prune(pane, next)
     pane.filterQuery = query
     // A cursor the filter just hid takes the first row still standing, so it is never off screen.

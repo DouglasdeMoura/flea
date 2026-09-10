@@ -9,13 +9,23 @@
 function pane() {
     var p = {
         trashArmedAt: 0,
+        deleteArmedAt: 0,
+        emptyArmedAt: 0,
         cursorIndex: 3,
         trashedIdx: [],
+        restoredIdx: [],
+        deletedIdx: [],
+        emptied: 0,
         said: "",
         selectedIndices: function () { return [] }
     }
     p.message = function (text, isError) { p.said = text }
-    p.backend = { trash: function (idx) { p.trashedIdx = idx } }
+    p.backend = {
+        trash: function (idx) { p.trashedIdx = idx },
+        trashRestore: function (idx) { p.restoredIdx = idx },
+        trashDelete: function (idx) { p.deletedIdx = idx },
+        trashEmpty: function () { p.emptied += 1 }
+    }
     return p
 }
 
@@ -51,4 +61,39 @@ function run(check) {
     picked.trashArmedAt = Date.now()
     Trash.arm(picked)
     check("the pair trashes the selection when there is one", picked.trashedIdx.join(","), "1,4")
+
+    // The trash browser's own three: restore and permanent delete name rows, empty names none.
+    var r = pane()
+    Trash.restore(r)
+    check("restore names the cursor row", r.restoredIdx.join(","), "3")
+    var del = pane()
+    Trash.deletePermanent(del)
+    check("permanent delete names the cursor row", del.deletedIdx.join(","), "3")
+    var e = pane()
+    Trash.emptyTrash(e)
+    check("empty reaches the backend", e.emptied, 1)
+
+    // d in the trash pairs the way d pairs outside it, but fires the permanent route instead.
+    var dp = pane()
+    Trash.deleteArm(dp)
+    check("the first d in the trash deletes nothing and arms", dp.deletedIdx.length, 0)
+    check("and the sentence calls the deletion permanent", dp.said,
+          "Press d again to delete permanently. This cannot be undone.")
+    Trash.deleteArm(dp)
+    check("the second d deletes the cursor row", dp.deletedIdx.join(","), "3")
+
+    // Emptying arms the same way, because it destroys every entry at once and nothing puts them back.
+    var ep = pane()
+    Trash.emptyArm(ep)
+    check("the first empty arms rather than firing", ep.emptied, 0)
+    Trash.emptyArm(ep)
+    check("the second empties", ep.emptied, 1)
+
+    // The replies draw counts with no undo hint, because the journal records nothing for them.
+    check("a restore says what came back", Trash.restored(2, 0), "Restored 2 items")
+    check("a failed restore says what stayed", Trash.restored(0, 1),
+          "That item could not be restored; it stays in the trash.")
+    check("a permanent delete says so", Trash.trashDeleted(1, 0), "Deleted 1 item permanently")
+    check("an empty trash says so", Trash.trashEmptied(3, 0), "Emptied 3 items from the trash")
+    check("emptying an empty trash says that instead", Trash.trashEmptied(0, 0), "The trash is already empty.")
 }

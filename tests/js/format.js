@@ -40,6 +40,17 @@ function run(check) {
     check("this year omits the year",
           Format.date(new Date(2026, 6, 28, 0, 27).getTime() / 1000, currentYearNow), "28 Jul, 00:27")
 
+    // The trash's DeletionDate rides the row raw, because the backend stays timezone-free; the
+    // client reads a zoneless stamp as local time, which is what the .trashinfo means. Built from
+    // local constructors like the wall-clock expectations above, so every test zone agrees.
+    var deleted = new Date(2026, 7, 26, 21, 38, 3)
+    check("a deletion stamp formats like the mtime it names",
+          Format.dateIso("2026-08-26T21:38:03", currentYearNow),
+          Format.date(deleted.getTime() / 1000, currentYearNow))
+    check("a stamp no clock can read answers empty, and the row keeps the file's mtime",
+          Format.dateIso("not-a-date", currentYearNow), "")
+    check("an empty stamp is empty", Format.dateIso("", currentYearNow), "")
+
     // The send picker's own column: SendPicker.html draws 11:32, 10:18, 21 Aug and 15 Aug, and the
     // window's Format.date above is untouched. Fixed instants throughout, never Date.now().
     check("today is the clock alone",

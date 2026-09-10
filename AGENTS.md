@@ -1007,7 +1007,17 @@ this coverage needed no new entry there.
 - `backend/child.rs` runs one argv under a deadline and says whether it succeeded, failed or
   never started, which is the whole of what decides a `fail/` marker, see "Thumbnail pool".
 - `backend/thumbs.rs` the bounded, cancellable thumbnail pool, see "Thumbnail pool".
-- `backend/proto.rs` the wire types, the request dispatch and the one-line responses.
+- `backend/proto.rs` the wire types and the request dispatch; the one-line responses moved to
+  `responses.rs` when the trash browser's requests put this file over the hard cap.
+- `backend/responses.rs` the one-line responses, moved out of `proto.rs` whole.
+- `backend/trash.rs` gio trash-in and the undo journal's gio restore.
+- `backend/trashfs.rs` filesystem restore, permanent delete and empty: gio's daemon cannot
+  see a trash XDG_DATA_HOME redirects, so those three verbs cannot go through it.
+- `backend/trashinfo.rs` parses one `.trashinfo` file: the original path and the deletion date.
+- `backend/trashlist.rs` enumerates the home trash beside every top-directory trash and answers
+  `listtrash` the way `listpaths.rs` answers its own listing.
+- `backend/trashreq.rs` the trash operations' request layer: their lines, runners and slot
+  starters, moved out of `opsreq.rs` and `opsdispatch.rs` whole at their caps.
 - `backend/rows.rs` serialises one window of rows and its per-response Kind dictionary.
 - `backend/thumbreq.rs` the thumbnail request policy: cache lookup, queueing, cancel and
   result reporting, see "Thumbnail requests".
@@ -1065,7 +1075,11 @@ this coverage needed no new entry there.
 - `ui/js/Tabs.js` is the directory-tab snapshots and the t/w/1-9 policy, and imports no QML. A
   snapshot carries a cursor and a selection only across a switch that re-lists nothing, because an
   index names a row and a re-read can put a different file behind the same number.
-- `ui/js/Trash.js` is the dd pair's arm-and-fire policy, split out of `Focus.js` at its cap.
+- `ui/js/Trash.js` is the trash, client-side: the dd pair's arm-and-fire policy it started as,
+  split out of `Focus.js` at its cap, plus the trash browser's own three operations and the
+  sentences their replies draw.
+- `ui/js/TrashKeys.js` is what keys and menu rows mean in the trash, split out of `Focus.js` at
+  its cap the way `Trash.js` was: one entry point answering whether the trash owns the action.
 - `ui/js/TextSize.js` is the Display section's text size: the seven stops the SettingsScale board
   documents, 9, 10, 11, 12, 14, 16 and 20 px, the two modes it names, and the sentence a chord
   announces. `ui/ViewState.qml` stores `display.textSize` as `{"mode":"system"}` or `{"mode":N}`,
@@ -1957,7 +1971,7 @@ waits for its consumer.
   `keys.toml` (the `[digits]` range included, which binds nine keys no `action =` line names), every
   entry in `ui/ContextMenu.qml`, every artboard in the design canvas, every sidebar entry kind, and
   every SUPER chord in Omarchy's own `bindings/clipboard.lua`. A derivation that comes back empty is
-  a hard failure, because an empty checklist passes. The 18 requests are **driven live** through the
+  a hard failure, because an empty checklist passes. The requests are **driven live** through the
   real backend, each in a directory of its own because rename, trash and duplicate mutate, and they
   need no display. Keys, menu entries and the Omarchy chords need a real window, so `--drive` opens
   one and presses everything in a single pass: this box has one Hyprland session and several lanes
@@ -3394,7 +3408,8 @@ here only as the control that proves this box reads `GLIBC_TUNABLES` at all.
 
 ## Write operations and the undo journal
 
-Seven requests write: `transfer`, `transfercancel`, `trash`, `rename`, `duplicate`, `mkdir` and `undo`.
+Ten requests write: `transfer`, `transfercancel`, `trash`, `trashrestore`, `trashdelete`,
+`trashempty`, `rename`, `duplicate`, `mkdir` and `undo`.
 `docs/protocol.md` carries the wire; this is the part a reader of the code needs that the wire does not
 say.
 
@@ -3402,9 +3417,13 @@ say.
 names a row of the current listing, because a viewport is a fact about the listing. A write outlives the
 listing it started from: a copy of a large tree is still running when the user navigates away, and a row
 index would name a different file by then. So the write requests take absolute paths and the backend
-never consults the listing to serve one.
+never consults the listing to serve one. The trash browser's three are the exception that proves the
+rule's reason rather than its letter: they take the same two forms `trash` does, explicit paths winning
+and a rows form resolved against the listing at request time, because a selection can be wider than the
+window the client holds; see `resolve_rows`.
 
-**One of `transfer`, `trash` or `duplicate` runs at a time.** `opsdispatch.rs` holds `Ops::running`, and a second `transfer`,
+**One of `transfer`, `trash`, `duplicate`, `trashrestore`, `trashdelete` or `trashempty` runs at a
+time.** `opsdispatch.rs` holds `Ops::running`, and a second `transfer`,
 `trash` or `duplicate` while one is live answers an `error` line rather than queueing. The reason is the
 surface, not the backend: the operations design gives transfers the status bar's single transient slot,
 so a second concurrent operation would have nowhere to report itself. `rename` and `mkdir` are exempt because
@@ -3519,6 +3538,65 @@ reverse had reported. Its sandbox is under `FLEA_FIXTURE_ROOT` and not `/tmp`, b
 refuses `/tmp` and `/var/tmp` with "Trashing on system internal mounts is not supported"; `/home` is the
 only mount on this box a trash round trip can be exercised on. Hard rule 9's guard is in the script
 itself, and the Rust tests use `TestDir`.
+
+## Trash browser
+
+The trash as a location the window opens, in the shape Nautilus and Dolphin draw it: what was
+deleted, where it came from, when, and the way back. The location is named by the token
+`flea:trash`, which no absolute path can equal, so it rides the same path field every listing
+carries; Parent refuses in it and Back works out of it, the picker's `flea:recent` token contract
+carried over to the browser. The rail closes the PLACES group with a Trash row, the path bar
+accepts `trash:///`, and a launch straight onto the token opens the trash.
+
+**The backend enumerates the freedesktop trash itself.** `backend/trashlist.rs` reads the home
+trash (`$XDG_DATA_HOME/Trash`) beside one top-directory trash (`.Trash-$uid`) per mount, walks
+each `files/` directory and parses the `.trashinfo` beside each entry (`backend/trashinfo.rs`).
+`listtrash` answers the same `listed` plus first-`rows` pair `list` does, with the base `/` and
+each row named by its absolute path under the trash, which is the `listpaths` shape verbatim:
+every per-row facility (`window`, `thumb`, open, preview, dirsize) keeps working path-based with
+no special case. Rows carry two extra fields only trash listings have, the original (`o`) and
+the raw `DeletionDate` (`x`); the date stays a string because the spec means local time and the
+backend stays timezone-free with zero dependencies, and the client formats it with `new Date()`.
+A set of paths across trash roots is not a directory, so nothing is watched: `listpaths`'s own
+rule, and the listing re-reads on navigation and on Flea's own trash operations.
+
+**The three verbs journal nothing, and that is the design rather than an omission.**
+`trashrestore` puts each entry back where its info file says it came from (an existing
+destination refuses with the entry staying, a missing parent is recreated: both are `gio`'s own
+semantics, measured rather than assumed), `trashdelete` removes the entry with its info, and
+`trashempty` deletes every enumerated entry the same way. Undoing a restore by rename would
+recreate the `files/` entry without its info, and re-trashing is a new operation rather than a
+reversal, so the entry the journal would have pushed is never built; `tests/ops.sh` pins the
+empty journal beside the three operations. All three run at the filesystem level rather than
+through `gio`, because `gio`'s restore, list and empty are daemon-side: they cannot see a trash
+`$XDG_DATA_HOME` redirects, so a `gio`-based verb is untestable in a sandbox and refuses there.
+The undo journal's own `gio trash --restore` path is untouched: it works in production on URIs
+captured at trash time, which is a different mechanism with its own tests.
+Only EEXIST is worded as already-there: every other restore refusal keeps the IO sentence, so a
+blocked parent does not read as a collision. The info file is removed only after the `files/`
+entry is gone, so a half-deleted directory still has somewhere to restore from.
+
+**The keys reroute by location, and the refusals name the way back.** `ui/js/TrashKeys.js` owns
+every meaning a key or menu row has in the trash, called before `Focus.js`'s own switch so the
+trash view reroutes and every other listing falls through untouched. `u` restores (GM's ruling;
+`r` stays rename everywhere else), `Delete` and the `d` pair delete permanently, and emptying
+arms through the background menu's pair. Rename, new folder, duplicate, cut, paste, search-walk
+and drag in either direction are all refused, each with the sentence that says why: every one of
+them would orphan an info file, plant an unrestorable entry, or join paths onto the token. Copy
+stays allowed, because it leaves the entry standing. The menu is rebuilt for the location --
+Open, Restore, Delete permanently on a row; Empty trash, Select all, Sort by on the background --
+and the row draws the leaf for its name, the original for its location and the deletion for its
+date, with no new column: the date cell prefers `x` and the location slot the search shape
+already draws. The filter matches the leaf, for the same reason it matches what the row draws.
+
+**Testing it is three layers.** The Rust tests plant fixture trashes under `TestDir` and never
+touch the operator's real one; `tests/protocol.sh` redirects `XDG_DATA_HOME` suite-globally and
+asserts the `listtrash` contract off a hand-built trash with no daemon involved; `tests/ops.sh`
+redirects it per-scenario and drives restore, permanent delete and empty through the real binary;
+`tests/ui.sh trash` drives the rail row, the path bar, the menu, the keys and the refusals through
+the real window. `gio`'s own round trip (trash through the daemon, restore through the daemon)
+is proved by hand and not pinned, because the daemon answers the operator's real trash and no
+sandbox reaches it.
 
 ## Deliberate corners
 
