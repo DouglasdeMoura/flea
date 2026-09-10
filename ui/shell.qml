@@ -205,6 +205,7 @@ ShellRoot {
                 settingsPanel: settingsPanel
                 statusBar: bar
                 onMessage: function (text, isError) { bar.say(text, isError) }
+                onForgetMessage: function (text) { bar.forget(text) }
                 onOperationResult: function (headline, detail, isError) { bar.say(headline, isError, detail) }
                 // A running operation's line, which stands until the operation replaces it; see ui/StatusBar.qml.
                 onSticky: function (text) { bar.setActivity(primaryPane, text, primaryPane.transfer) }

@@ -64,6 +64,7 @@ Item {
     signal networkOpened(string path, var origin)
     signal addRequested()
     signal message(string text, bool isError)
+    signal forgetMessage(string text)
     // Bubbled straight from NetworkMounts; shell.qml opens ui/ShareBrowser.qml on this.
     signal sharesListed(string baseUri, string baseLabel, var names, var origin)
     signal networkRetryRequested(string uri, string label, string password, string reason, bool failedConnect, var origin)
@@ -117,6 +118,7 @@ Item {
         id: devices
         onOpened: function (path) { root.opened(path) }
         onMessage: function (text, isError) { root.message(text, isError) }
+        onForgetMessage: function (text) { root.forgetMessage(text) }
     }
 
     NetworkMounts {

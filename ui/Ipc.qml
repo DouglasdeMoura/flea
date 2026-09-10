@@ -194,9 +194,9 @@ QtObject {
                          : {id: row.id, label: row.label, icon: row.icon, isDefault: row.default === true}
                 }),
                 rect: root.fleaWindow.rectOf(dialog.cardItem),
-                listRect: root.fleaWindow.rectOf(dialog.listItem),
+                listRect: root.fleaWindow.rectOf(dialog.applicationsItem),
                 rowRect: root.fleaWindow.rectOf(dialog.applicationItem(dialog.cursor)),
-                controls: [root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.listItem),
+                controls: [root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.applicationsItem),
                     root.controlState("Always", dialog.alwaysItem), root.controlState("Cancel", dialog.closeItem),
                     Object.assign(root.controlState("Open", dialog.submitItem), {enabled: dialog.canSubmit})]})
         }

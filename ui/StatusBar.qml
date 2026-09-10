@@ -68,6 +68,13 @@ Item {
         root.syncNoticeTimer()
     }
 
+    // A surface replacing its own standing verdict names the one it is replacing. say("") dismisses
+    // the head of the queue, which is somebody else's error whenever more than one is waiting.
+    function forget(text) {
+        if (!text) return
+        root.errors = root.errors.filter(function (entry) { return entry.text !== text })
+    }
+
     function dismiss() {
         if (root.errors.length) root.errors = root.errors.slice(1)
         else root.notice = ""

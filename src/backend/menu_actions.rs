@@ -289,11 +289,19 @@ impl Snapshot {
                 let app = menu_registry::resolve(&field_str(line, "application").unwrap_or_default(), cancel)?;
                 item.current()?;
                 registry.launch(&app.path, &item.path, cancel)?;
-                // OpenWith.html rule 1: the dialog is the one place a default is written. It is written
-                // after the launch, so an entry that cannot open anything is never left as the default.
+                // OpenWith.html rule 1: the dialog is the one place a default is written, and it is
+                // written after the launch so a launcher that refuses outright leaves nothing behind.
+                // The file is already open by this point, so a failure here says only what failed.
                 if field_bool(line, "always") {
                     let mime = menu_registry::content_type(registry, &item.path, cancel)?;
-                    menu_registry::set_default(registry, &mime, &app.id, cancel)?;
+                    // A directory and an unresolvable link both type as inode/*, and making an editor
+                    // the desktop's default folder handler is not what ticking this box asks for.
+                    if mime.starts_with("inode/") {
+                        return Err(format!("Opened it, but {} has no file type to set a default for.", item.path.display()));
+                    }
+                    if let Err(error) = menu_registry::set_default(registry, &mime, &app.id, cancel) {
+                        return Err(format!("Opened it, but the default was not saved: {}", error));
+                    }
                 }
                 Ok(format!(r#""path":"{}""#, escape(&item.path.to_string_lossy())))
             }

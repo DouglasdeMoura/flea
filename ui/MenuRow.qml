@@ -173,12 +173,14 @@ Item {
         anchors.rightMargin: root.isSubmenu ? Theme.spacing.gap : 0
         anchors.verticalCenter: parent.verticalCenter
         text: root.hint
-        // Permissions.html leaves its refusal span wrappable; keep the label whole within the fixed menu width.
-        width: root.entry.hint !== undefined
+        // Permissions.html alone leaves its refusal span wrappable, and it asks for that by name. The
+        // constraint subtracts the label's unelided width, so a short caption beside a long label
+        // collapsed to nothing: the flyout's own "default" is the caption that has to survive.
+        width: root.entry.hintWrap === true
                ? Math.max(0, Math.min(implicitWidth, root.width - 2 * Theme.spacing.rowPaddingX
                                      - root.slotSize - 2 * Theme.spacing.gap - label.implicitWidth))
                : implicitWidth
-        wrapMode: root.entry.hint !== undefined ? Text.WordWrap : Text.NoWrap
+        wrapMode: root.entry.hintWrap === true ? Text.WordWrap : Text.NoWrap
         horizontalAlignment: Text.AlignRight
         // An unavailable row retains its reason while its label takes the muted role.
         color: root.available ? root.labelColor : Theme.color.foreground

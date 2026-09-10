@@ -13,6 +13,9 @@ Item {
 
     signal opened(string path)
     signal message(string text, bool isError)
+    // The verdict this surface last posted, so a newer one replaces it and nothing else.
+    signal forgetMessage(string text)
+    property string _lastVerdict: ""
 
     // lsblk costs 5 ms on this box where gio mount -l costs 513 ms, so the rail's own five second
     // rhythm carries this too rather than earning a slower clock of its own.
@@ -193,7 +196,8 @@ Item {
         // The newest verdict about this device is the true one, so it replaces the last one rather
         // than queueing behind it: a refusal is an error and stands until dismissed, and without
         // this the operator ejected the stick and went on reading "still mounted".
-        root.message("", false)
+        root.forgetMessage(root._lastVerdict)
+        root._lastVerdict = s.text
         root.message(s.text, s.isError)
     }
 

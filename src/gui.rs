@@ -48,7 +48,8 @@ fn qs_command(target: PathBuf) -> Command {
     let mut cmd = Command::new("qs");
     cmd.arg("-p").arg(target);
     // An explicit choice is the operator's, the same rule FLEA_UI and QSG_RHI_BACKEND follow here.
-    if std::env::var_os("FLEA_BIN").is_none_or(|value| value.is_empty()) {
+    // map_or, not is_none_or: that method landed in 1.82 and Cargo.toml declares a 1.77 floor.
+    if std::env::var_os("FLEA_BIN").map_or(true, |value| value.is_empty()) {
         if let Ok(binary) = std::env::current_exe() {
             cmd.env("FLEA_BIN", binary);
         }

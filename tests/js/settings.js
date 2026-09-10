@@ -174,9 +174,11 @@ function runRows(check) {
                .map(function (r) { return r.id }).join(","),
           "cut,copy,paste,duplicate,rename,trash,delete,openwith,openTerminal,moveto,copyto,properties,permissions,copypath,compress,extract,convert,taildrop,dropbox,sharelink,keyHints")
     // The one check that is not a menu action: it says how every row is drawn, not whether it is.
-    check("the hints row defaults on as the menu boards specify",
+    // GM's ruling of 2026-09-10 turns it off by default, with the rail's own detail rows, and
+    // src/uischema.rs stores that default, so an absent preference reads off and not on.
+    check("the hints row defaults off, as GM ruled over the boards",
           find(menus, "keyHints").label + "|" + find(menus, "keyHints").on,
-          "Show keyboard hints|true")
+          "Show keyboard hints|false")
     check("and it reads the value it is given",
           find(Settings.rows("menus", { hidden: [], keyHints: true }), "keyHints").on, true)
     check("an explicitly disabled hints preference stays off",

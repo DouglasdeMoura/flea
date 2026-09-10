@@ -6,15 +6,16 @@
 function rows(handlers, installed, kind, query) {
     var needle = String(query || "").trim().toLowerCase()
     var out = []
+    var seat = 0
     var registered = matching(handlers, needle)
     if (registered.length) {
         out.push({ eyebrow: "Registered for " + kind, rule: false })
-        for (var i = 0; i < registered.length; i++) out.push(seated(registered[i], out))
+        for (var i = 0; i < registered.length; i++) out.push(seated(registered[i], seat++))
     }
     var every = matching(installed, needle)
     if (every.length) {
         out.push({ eyebrow: "All applications", rule: registered.length > 0 })
-        for (var j = 0; j < every.length; j++) out.push(seated(every[j], out))
+        for (var j = 0; j < every.length; j++) out.push(seated(every[j], seat++))
     }
     return out
 }
@@ -29,9 +30,9 @@ function matching(apps, needle) {
 
 // A copy carrying the cursor seat it holds, so the drawn row never counts the list to find its own.
 // A registered application is drawn twice, once per group, and the two copies take different seats.
-function seated(app, sofar) {
-    return { id: app.id, label: app.label, icon: app.icon, default: app.default === true,
-             at: applications(sofar).length }
+// The seat is carried, not recounted: counting made this quadratic over a hundred-application box.
+function seated(app, seat) {
+    return { id: app.id, label: app.label, icon: app.icon, default: app.default === true, at: seat }
 }
 
 // The rows the cursor can land on, in the order they are drawn; an eyebrow is a caption it steps over.

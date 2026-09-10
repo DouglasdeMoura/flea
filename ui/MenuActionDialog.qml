@@ -51,8 +51,13 @@ FocusScope {
         else closeFocus.forceActiveFocus()
         if (busy) requested({c: "menuaction", op: operation === "deletePermanently" ? "prepareDelete" : "properties", id: requestId})
     }
+    // Two dialogs share the one request id, so this one answers only for the ops it asked for:
+    // routing an Open with reply in here closed a Properties card that had just opened over it.
+    readonly property var ownedOps: ["properties", "prepareDelete", "refreshDelete", "checkDelete",
+                                     "delete", "validate", "newFile", ""]
     function receive(message) {
         if ((!opened && !deletionActive) || message.id !== requestId || message.op === "close") return
+        if (root.ownedOps.indexOf(message.op === undefined ? "" : message.op) < 0) return
         if (deletionActive && message.op !== "delete") return
         busy = false
         committing = false

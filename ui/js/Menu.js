@@ -155,7 +155,8 @@ function permissionsEntry(mode, count) {
     var single = count === 1
     var allowed = single && (kind === 0o100000 || kind === 0o040000)
     return { label: "Permissions", action: "permissions", glyph: "lock", disabled: !allowed,
-             hint: !single ? "Unavailable" : kind === 0o120000 ? "Symlink target not changed" : allowed ? "" : "Unavailable" }
+             hint: !single ? "Unavailable" : kind === 0o120000 ? "Symlink target not changed" : allowed ? "" : "Unavailable",
+             hintWrap: true }
 }
 
 

@@ -86,6 +86,10 @@ Loader {
         activationUsed = false
         identity = pane.menuSelectionIdentity
         folder = pane.path
+        // The registry belongs to the row that was snapshotted. Carrying the last row's answer over
+        // offered one file's applications for another, and kept the self-hide rule from ever firing.
+        openWithApps = []
+        openWithLoaded = false
         pane.backend.send({c: "menuaction", op: "snapshot", id: requestId, rows: Ops.targetIndices(pane), cursor: pane.cursorIndex})
     }
     function open(action, menuId) {
@@ -307,6 +311,12 @@ Loader {
             root.survivorFolder = root.folder
             root.pane.refresh()
         }
-        function onClosed() { root.ready = false; root.identity = "" }
+        function onClosed() {
+            root.ready = false
+            root.identity = ""
+            // The close op kills the launcher this id was waiting on, so its error is the cancellation
+            // the operator asked for and not something to raise at them.
+            root.launchingId = 0
+        }
     }
 }

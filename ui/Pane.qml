@@ -90,6 +90,7 @@ FocusScope {
 
     signal opened(string path)
     signal message(string text, bool isError)
+    signal forgetMessage(string text)
     signal operationResult(string headline, string detail, bool isError)
     // The status bar's sticky slot, which unlike message does not time out; empty clears it.
     signal sticky(string text)
@@ -389,6 +390,7 @@ FocusScope {
             onNetworkOpened: function(path, origin) { if (origin) origin.open(path) }
             onTrashRequested: root.railPane.trash.open()
             onMessage: function(text, isError) { root.railPane.message(text, isError) }
+            onForgetMessage: function(text) { root.railPane.forgetMessage(text) }
             menu: root.railPane.contextMenu()
             onRenameFinished: root.railPane.listArea.forceActiveFocus()
         }

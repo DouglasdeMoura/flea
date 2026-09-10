@@ -128,6 +128,8 @@ impl OwnedChild {
         Ok(owned)
     }
 
+    // One Registry runs one child at a time: MenuActions drives a single worker thread and every
+    // query and launch goes through it, so the slot this reads is always this child's own.
     fn wait(mut self) -> Result<ExitStatus, String> {
         let descriptor = self.registry.running.lock().unwrap().as_ref().unwrap().pidfd.as_raw_fd();
         wait_exit(descriptor)?;
@@ -195,14 +197,18 @@ pub(crate) struct Application { pub id: String, pub label: String, pub path: Pat
 pub(crate) struct Catalogue { pub mime: String, pub kind: String,
                               pub handlers: Vec<Application>, pub installed: Vec<Application> }
 
-pub(crate) fn catalogue(registry: &Registry, path: &Path, cancel: &Cancellation) -> Result<Catalogue, String> {
+pub(crate) fn catalogue(registry: &Registry, path: &Path, whole: bool, cancel: &Cancellation) -> Result<Catalogue, String> {
     let mime = content_type(registry, path, cancel)?;
-    Ok(Catalogue { kind: describe(&mime, cancel)?, handlers: handlers(registry, &mime, cancel)?,
-                   installed: installed(registry, cancel)?, mime })
+    // The flyout draws the registry alone, and it is asked for on every row menu that opens. Walking
+    // every applications directory for a dialog nobody opened cost that menu a scan it never drew.
+    let installed = if whole { installed(registry, cancel)? } else { Vec::new() };
+    Ok(Catalogue { kind: describe(&mime, cancel)?, handlers: handlers(registry, &mime, cancel)?, installed, mime })
 }
 
 pub(crate) fn content_type(registry: &Registry, path: &Path, cancel: &Cancellation) -> Result<String, String> {
-    let info = registry.query(&["info".as_ref(), "--nofollow-symlinks".as_ref(), "--attributes=standard::content-type".as_ref(), path.as_os_str()], cancel)?;
+    // Symlinks are followed here, unlike the listing's own lookup: Open with acts on the file the
+    // user opens, and typing the link instead reports inode/symlink, which nothing can open.
+    let info = registry.query(&["info".as_ref(), "--attributes=standard::content-type".as_ref(), path.as_os_str()], cancel)?;
     // Sample GIO info attribute: "  standard::content-type: text/plain".
     info.lines().find_map(|line| line.trim().strip_prefix("standard::content-type: "))
         .filter(|m| !m.is_empty()).map(str::to_string)
@@ -275,8 +281,10 @@ fn data_roots() -> Vec<PathBuf> {
 }
 
 // The same roots and the same shape AppLibrary.qml's own scan walks: every apps/ and devices/ icon
-// under the XDG icon directories, plus /usr/share/pixmaps' own top level. An SVG beats a PNG of the
-// same name and an earlier root beats a later one, which is that scan's "first hit per name" rule.
+// under the XDG icon directories, plus /usr/share/pixmaps' own top level. That scan runs an SVG pass
+// over every root before its PNG pass, so a scalable icon in any root beats a raster one in an
+// earlier root, and within a pass the filesystem's own order decides. Both are copied deliberately:
+// this index exists to answer the way the Omarchy menu answers, not to improve on it.
 fn icon_index(cancel: &Cancellation) -> Result<HashMap<String, PathBuf>, String> {
     let mut svg: HashMap<String, PathBuf> = HashMap::new();
     let mut png: HashMap<String, PathBuf> = HashMap::new();
@@ -321,11 +329,15 @@ fn index_icon(path: &Path, svg: &mut HashMap<String, PathBuf>, png: &mut HashMap
     target.entry(name).or_insert_with(|| path.to_path_buf());
 }
 
+// The icon's own directory, not any ancestor: /opt/apps/share/icons/.../mimetypes matched "apps"
+// through its prefix and let a whole non-application category win names in the index.
 fn in_group(path: &Path, group: &str) -> bool {
-    path.parent().map(|dir| dir.components().any(|part| part.as_os_str() == group)).unwrap_or(false)
+    path.parent().and_then(Path::file_name).map(|dir| dir == group).unwrap_or(false)
 }
 
-// OpenWith.html's ALL APPLICATIONS group: every entry a desktop menu would show, alphabetical.
+// OpenWith.html's ALL APPLICATIONS group, alphabetical: every entry that declares itself an
+// application, is not hidden, and names a command. OnlyShowIn, NotShowIn and TryExec are not read,
+// so an entry another desktop scopes to itself is listed here.
 fn installed(registry: &Registry, cancel: &Cancellation) -> Result<Vec<Application>, String> {
     let mut apps: Vec<Application> = Vec::new();
     for root in data_roots() {
@@ -344,10 +356,11 @@ fn installed(registry: &Registry, cancel: &Cancellation) -> Result<Vec<Applicati
                 let id = id.to_string_lossy().replace('/', "-");
                 // The first root that names an id owns it, the way the desktop resolves one itself.
                 if apps.iter().any(|a| a.id == id) { continue; }
-                if let Some(mut app) = launchable(&id, &path)? {
-                    app.icon = registry.icon(&app.icon, cancel)?;
-                    apps.push(app);
-                }
+                // A dangling symlink or an unreadable entry is skipped, not fatal: one of them in
+                // any applications directory used to take Open with away from every file on the box.
+                let Ok(Some(mut app)) = launchable(&id, &path) else { continue; };
+                app.icon = registry.icon(&app.icon, cancel)?;
+                apps.push(app);
             }
         }
     }
@@ -418,9 +431,12 @@ fn desktop_key(path: &Path, key: &str) -> Result<Option<String>, String> {
     let text = std::str::from_utf8(&bytes).map_err(|_| format!("Application {} is not valid UTF-8.", path.display()))?;
     let mut entry = false;
     for line in text.lines() {
+        // Trimmed: a file written with CRLF or a trailing space is still a desktop file, and an
+        // exact compare dropped it from the list with no diagnostic at all.
+        let line = line.trim_end();
         if line.starts_with('[') { entry = line == "[Desktop Entry]"; }
         if entry {
-            if let Some(name) = line.strip_prefix(key) { return Ok(Some(name.replace("\\s", " ").replace("\\n", " "))); }
+            if let Some(name) = line.strip_prefix(key) { return Ok(Some(name.trim().replace("\\s", " ").replace("\\n", " "))); }
         }
     }
     Ok(None)

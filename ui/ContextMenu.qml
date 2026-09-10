@@ -88,8 +88,13 @@ Item {
             return ""
         var mark = Menu.submenuGlyph(root.entries[root.openSubmenuRow].action)
         var out = []
-        for (var i = 0; i < root.submenuEntries.length; i++)
-            out.push(mark)
+        for (var i = 0; i < root.submenuEntries.length; i++) {
+            // What the row draws, not what the flyout defaults to: an Open with row carries its own
+            // glyph or an application icon, and reporting the default made a check measure nothing.
+            var row = root.submenuEntries[i]
+            out.push(row.separator === true ? "" : row.icon ? "icon"
+                   : row.glyph !== undefined ? row.glyph : mark)
+        }
         return out.join("|")
     }
 

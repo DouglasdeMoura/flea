@@ -75,6 +75,9 @@ Item {
         // The enclosing ListView is a focus scope and remembers this field as its focused child, so
         // giving up what begin() took is what lets the scope itself take the keys again.
         field.focus = false
+        // Escape and focus loss both refuse to abandon an in-flight rename; a row scrolled out of the
+        // cache buffer or a view switch is the same case, and it was throwing the draft away.
+        if (root.pending) return
         root.abandoned()
     }
 

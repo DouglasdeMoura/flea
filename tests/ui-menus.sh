@@ -291,7 +291,8 @@ menus_open_with() {
     menus_open_with_dialog
     menus_expect menuDialogState '.opened and (.busy | not) and any(.applications[]; .id == "flea-menu-fixture.desktop")' "Open With queries the real fixture registry"
     state=$(ipc menuDialogState)
-    target=$(jq -r '.applications | to_entries[] | select(.value.id == "flea-menu-fixture.desktop") | .key' <<< "$state")
+    # The card draws a registered application twice, once per group, so the first seat is the target.
+    target=$(jq -r '[.applications | to_entries[] | select(.value.id == "flea-menu-fixture.desktop")][0].key' <<< "$state")
     count=$(jq -r '.applications | length' <<< "$state")
     for ((step = 0; step <= count; step++)); do
         cursor=$(ipc menuDialogState | jq -r .cursor)

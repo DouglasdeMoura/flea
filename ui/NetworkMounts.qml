@@ -185,7 +185,6 @@ Item {
     NetworkPlaces {
         id: places
         entries: root.entries
-        bookmarksText: root.bookmarksText
         onMessage: function (text, isError) { root.message(text, isError) }
         onWrote: root.renamed()
     }
@@ -261,6 +260,16 @@ Item {
         root._passwords = next
     }
 
+    // forgetPassword, not forget: forget(uri) below is the bookmark writer, and one name for both
+    // would have made a refused connect delete the saved place.
+    function forgetPassword(uri) {
+        var key = Mounts.normalize(uri)
+        if (root._passwords[key] === undefined) return
+        var next = Object.assign({}, root._passwords)
+        delete next[key]
+        root._passwords = next
+    }
+
     function saveLocation(uri, label, password, requestId, origin) {
         return root.openShare(uri, false, label, password.length > 0, { id: requestId, password: password, origin: origin })
     }
@@ -331,11 +340,13 @@ Item {
         root._pendingPassword = ""
         root.result = "failed"
         root.message(reason, true)
-        // The secret the operator just typed stays in process memory so Retry opens populated: a
-        // connect failure is what Retry exists for, and 0.1.6 carried it back through the reopen.
-        // Only the helper's own refusals reach here; a rejected password clears it below.
-        var attempted = password || root._requestPassword
-        if (attempted.length > 0) root.remember(root._pendingUri, attempted)
+        // A credential is kept only where finishRequest keeps it, on the connect the server accepted.
+        // Keeping one the server refused made every later click on that location replay it with no
+        // prompt, which is how a domain account locks itself out.
+        root.forgetPassword(root._pendingUri)
+        // The secret the operator just typed still rides back to Retry, so the reopened dialog is
+        // populated exactly as 0.1.6 populated it. A call site that passes "" means it has none.
+        var attempted = password === undefined ? root._requestPassword : password
         if (!root.finishRequest(false, reason))
             root.retryRequested(root._pendingUri, root._pendingLabel, attempted, reason, true, root._pendingOrigin)
     }

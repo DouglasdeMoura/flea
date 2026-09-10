@@ -72,6 +72,9 @@ Item {
         root.statusText = known && failed !== true ? root.unacknowledgedReason : (reason || "")
         root.retrying = true
         root.failedConnect = known && failed !== true ? true : failed === true
+        // Showing it is what acknowledges it. Left standing it answered the next genuine credential
+        // prompt for the same location with a connect failure from minutes earlier.
+        if (known) { root.unacknowledgedUri = ""; root.unacknowledgedReason = "" }
         root.mountedUri = ""
         root.saveNewPlace = false
         root.saveCommitted = false

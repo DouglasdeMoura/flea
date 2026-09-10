@@ -232,7 +232,7 @@ function menuRows(hidden, keyHints) {
     }
     out.push({ kind: "group", label: "Shortcuts" })
     out.push({ kind: "check", id: "keyHints", label: "Show keyboard hints", glyph: "keyboard",
-               on: keyHints !== false })
+               on: keyHints === true })
     out.push({ kind: "hint", label: "Draws each row's key beside it, and the next move under an "
                                     + "empty folder. Every key stays bound either way." })
     out.push({ kind: "group", label: "Always shown" })

@@ -68,7 +68,10 @@ QtObject {
     // The Menus section's "Show keyboard hints" row, `keyHints` in src/uischema.rs. It draws the key
     // beside every menu row and the tip under an empty directory, and it binds no key of its own:
     // every chord answers whether this is on or off.
-    readonly property bool keyHints: root.state.keyHints !== false
+    // === true, not !== false: an absent key is off, which is what src/uischema.rs stores and what
+    // driveSize and trashCount beside it already read. The other way round drew hints from a state
+    // file that never named them.
+    readonly property bool keyHints: root.state.keyHints === true
 
     // The Keys section's four-value chooser over the one generated key table, falling back to its
     // first value, Default, which is what SettingsKeys.html says a missing or unknown name means.

@@ -11,7 +11,6 @@ Item {
     property bool opened: false
     readonly property string action: "openWith"
     property int requestId: 0
-    property string folder: ""
     property Item focusHolder: null
     property bool busy: false
     property bool committing: false
@@ -25,6 +24,9 @@ Item {
     property int cursor: 0
     // 0 search, 1 list, 2 always box, 3 Cancel, 4 Open: rule 8's own cycle, and it wraps.
     property int focusPart: 1
+    // Where any row last saw the pointer. Without it a row that scrolls under a resting pointer
+    // reports a move and drags the keyboard cursor back to itself, see ui/MenuRow.qml's HoverHandler.
+    property point pointerGlobal: Qt.point(-1, -1)
 
     signal requested(var message)
     signal closed()
@@ -44,8 +46,7 @@ Item {
     readonly property var fieldItem: field
     readonly property var applicationsItem: list
     readonly property var alwaysItem: alwaysBox
-    readonly property var listItem: list
-    function applicationItem(index) { return rowItems.itemAt(OpenWith.rowOf(root.rows, index)) }
+    function applicationItem(index) { return list.itemAtIndex(OpenWith.rowOf(root.rows, index)) }
 
     // Rule 5: seven applications before the list scrolls. Measured once from the whole catalogue, so
     // rule 6's "keeps its height" holds for every search the user types into it, not only the empty one.
@@ -58,9 +59,9 @@ Item {
     visible: root.opened
     z: 2
 
+    // The shared signature the Loader calls both cards with; this one reads the item off the reply.
     function open(operation, id, sourceFolder, holder) {
         root.requestId = id
-        root.folder = sourceFolder
         root.focusHolder = holder
         root.path = ""
         root.kind = ""
@@ -69,6 +70,8 @@ Item {
         root.installed = []
         root.always = false
         root.cursor = 0
+        root.pointerGlobal = Qt.point(-1, -1)
+        root.listHeight = root.viewportRows * Theme.rowHeight
         root.errorText = ""
         root.committing = false
         root.busy = true
@@ -132,7 +135,8 @@ Item {
         root.focusPart = 1
         root.cursor = Math.max(0, Math.min(count - 1, root.cursor + delta))
         list.forceActiveFocus()
-        list.reveal(root.applicationItem(root.cursor))
+        // By index, not by item: a ListView has no item for a row it has not realized yet.
+        list.positionViewAtIndex(OpenWith.rowOf(root.rows, root.cursor), ListView.Contain)
     }
 
     function stepFocus(back) {
@@ -169,7 +173,9 @@ Item {
         id: card
         anchors.centerIn: parent
         width: Math.max(0, Math.min(Math.round(Theme.space(480) * Theme.dialogWidthRatio), root.width - 2 * root.clampMargin))
-        height: Math.max(0, Math.min(body.implicitHeight + 2 * Theme.spacing.rowPaddingX, root.height - 2 * root.clampMargin))
+        // Clamped to the window; the body scrolls whatever the clamp cut, so a short screen cannot
+        // put Cancel and Open past the bottom edge with no way to reach them.
+        height: Math.max(0, Math.min(body.wanted + 2 * Theme.spacing.rowPaddingX, root.height - 2 * root.clampMargin))
         color: Theme.color.surface
         border.width: Theme.spacing.hairline
         border.color: Theme.color.muted
@@ -184,12 +190,14 @@ Item {
             onWheel: function (wheel) { wheel.accepted = true }
         }
 
-        Column {
+        Flea.CardScroll {
             id: body
             anchors.fill: parent
             anchors.topMargin: Theme.spacing.rowPaddingX
             anchors.bottomMargin: Theme.spacing.rowPaddingX
-            clip: true
+
+        Column {
+            width: parent.width
 
             Text {
                 id: title
@@ -197,7 +205,8 @@ Item {
                 leftPadding: Theme.spacing.rowPaddingX
                 rightPadding: Theme.spacing.rowPaddingX
                 bottomPadding: Theme.spacing.gap
-                text: "Open " + root.name + " with"
+                // The registry names the item, so the title says only what it knows until it lands.
+                text: root.name.length > 0 ? "Open " + root.name + " with" : "Open with"
                 color: Theme.color.foreground
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.body
@@ -300,80 +309,68 @@ Item {
                 width: parent.width
                 height: root.listHeight
 
-                Flickable {
+                // A ListView, not a Repeater: a box holds well over a hundred applications and the
+                // model is a fresh array on every keystroke, so a Repeater rebuilt every delegate,
+                // each one a MenuRow with its own Shape, for every character typed.
+                ListView {
                     id: list
                     anchors.fill: parent
                     clip: true
-                    contentWidth: width
-                    contentHeight: rowsColumn.height
+                    model: root.rows
+                    reuseItems: true
                     boundsBehavior: Flickable.StopAtBounds
                     activeFocusOnTab: false
                     Keys.forwardTo: [keys]
 
-                    function reveal(item) {
-                        if (!item || list.contentHeight <= list.height) return
-                        var top = item.y
-                        var bottom = top + item.height
-                        if (top < list.contentY) list.contentY = Math.max(0, top)
-                        else if (bottom > list.contentY + list.height)
-                            list.contentY = Math.min(list.contentHeight - list.height, bottom - list.height)
-                    }
-
-                    Column {
-                        id: rowsColumn
+                    delegate: Item {
+                        id: row
+                        required property var modelData
+                        required property int index
+                        readonly property bool isEyebrow: row.modelData.eyebrow !== undefined
+                        // The cursor counts applications only, so an eyebrow never takes it.
+                        readonly property int appIndex: row.isEyebrow ? -1 : row.modelData.at
                         width: list.width
+                        height: row.isEyebrow ? root.eyebrowHeight : menuRow.height
 
-                        Repeater {
-                            id: rowItems
-                            model: root.rows
+                        Rectangle {
+                            anchors.top: parent.top
+                            width: parent.width
+                            height: Theme.spacing.hairline
+                            visible: row.isEyebrow && row.modelData.rule === true
+                            color: Theme.color.muted
+                            opacity: 0.4
+                        }
 
-                            delegate: Item {
-                                id: row
-                                required property var modelData
-                                required property int index
-                                readonly property bool isEyebrow: row.modelData.eyebrow !== undefined
-                                // The cursor counts applications only, so an eyebrow never takes it.
-                                readonly property int appIndex: row.isEyebrow ? -1 : row.modelData.at
-                                width: rowsColumn.width
-                                height: row.isEyebrow ? root.eyebrowHeight : menuRow.height
+                        Text {
+                            id: eyebrow
+                            visible: row.isEyebrow
+                            anchors.left: parent.left
+                            anchors.leftMargin: Theme.spacing.rowPaddingX
+                            anchors.bottom: parent.bottom
+                            text: row.isEyebrow ? row.modelData.eyebrow : ""
+                            color: Theme.color.muted
+                            font.family: Theme.font.family
+                            font.pixelSize: Theme.font.caption
+                            font.bold: true
+                            font.capitalization: Font.AllUppercase
+                            font.letterSpacing: Theme.font.caption * 0.14
+                            textFormat: Text.PlainText
+                        }
 
-                                Rectangle {
-                                    anchors.top: parent.top
-                                    width: parent.width
-                                    height: Theme.spacing.hairline
-                                    visible: row.isEyebrow && row.modelData.rule === true
-                                    color: Theme.color.muted
-                                    opacity: 0.4
-                                }
-
-                                Text {
-                                    id: eyebrow
-                                    visible: row.isEyebrow
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: Theme.spacing.rowPaddingX
-                                    anchors.bottom: parent.bottom
-                                    text: row.isEyebrow ? row.modelData.eyebrow : ""
-                                    color: Theme.color.muted
-                                    font.family: Theme.font.family
-                                    font.pixelSize: Theme.font.caption
-                                    font.bold: true
-                                    font.capitalization: Font.AllUppercase
-                                    font.letterSpacing: Theme.font.caption * 0.14
-                                    textFormat: Text.PlainText
-                                }
-
-                                Flea.MenuRow {
-                                    id: menuRow
-                                    visible: !row.isEyebrow
-                                    width: parent.width
-                                    entry: row.isEyebrow ? ({}) : ({ label: row.modelData.label, action: "",
-                                        icon: row.modelData.icon, glyph: "app-window",
-                                        hint: row.modelData.default === true ? "default" : "" })
-                                    current: !row.isEyebrow && root.cursor === row.appIndex
-                                    onPointerMoved: if (!row.isEyebrow) { root.focusPart = 1; root.cursor = row.appIndex }
-                                    onActivated: if (!row.isEyebrow) { root.cursor = row.appIndex; root.commit() }
-                                }
-                            }
+                        Flea.MenuRow {
+                            id: menuRow
+                            visible: !row.isEyebrow
+                            width: parent.width
+                            entry: row.isEyebrow ? ({}) : ({ label: row.modelData.label, action: "",
+                                icon: row.modelData.icon, glyph: "app-window",
+                                hint: row.modelData.default === true ? "default" : "" })
+                            current: !row.isEyebrow && root.cursor === row.appIndex
+                            lastPointerGlobal: root.pointerGlobal
+                            onPointerSeen: function (at) { root.pointerGlobal = at }
+                            // The cursor follows the pointer, the focus does not: a pointer crossing
+                            // this list on its way to Cancel used to make Enter open a row instead.
+                            onPointerMoved: if (!row.isEyebrow) root.cursor = row.appIndex
+                            onActivated: if (!row.isEyebrow) { root.focusPart = 1; root.cursor = row.appIndex; root.commit() }
                         }
                     }
                 }
@@ -455,7 +452,8 @@ Item {
                     anchors.right: parent.right
                     anchors.rightMargin: Theme.spacing.rowPaddingX
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "Always use this application for " + root.kind + " files"
+                    text: root.kind.length > 0 ? "Always use this application for " + root.kind + " files"
+                                               : "Always use this application for this file type"
                     color: Theme.color.foreground
                     font.family: Theme.font.family
                     font.pixelSize: Theme.font.body
@@ -476,7 +474,9 @@ Item {
                 leftPadding: Theme.spacing.rowPaddingX + box.width + Theme.spacing.gap
                 rightPadding: Theme.spacing.rowPaddingX
                 bottomPadding: Theme.spacing.gap
-                text: "Writes one line to your mimeapps.list. Undo does not reverse it; change it here again."
+                // The board says "one line"; gio writes a default and an association stanza, so the
+                // caption names what it does rather than a count it cannot keep. GM ruled, 2026-09-10.
+                text: "Writes your default for this type to mimeapps.list. Undo does not reverse it; change it here again."
                 color: Theme.color.muted
                 font.family: Theme.font.family
                 font.pixelSize: Theme.font.caption
@@ -531,6 +531,7 @@ Item {
                 }
             }
         }
+        }
     }
 
     Item {
@@ -546,12 +547,25 @@ Item {
                 return
             }
             if (root.busy) return
-            var quiet = field.text.length === 0
+            // j and k move only while the search line is both empty and unfocused: from the field
+            // they are the first letters of kate, krita and joplin, and stealing them lost the query.
+            var quiet = field.text.length === 0 && root.focusPart !== 0
             if (event.key === Qt.Key_Down || (quiet && event.key === Qt.Key_J)) { root.moveCursor(1); return }
             if (event.key === Qt.Key_Up || (quiet && event.key === Qt.Key_K)) { root.moveCursor(-1); return }
             if (event.key === Qt.Key_PageDown) { root.moveCursor(root.viewportRows); return }
             if (event.key === Qt.Key_PageUp) { root.moveCursor(-root.viewportRows); return }
-            if (event.key === Qt.Key_Space && quiet) { root.always = !root.always; return }
+            // Backspace edits the search from anywhere, the mirror of typing reaching it from anywhere.
+            if (event.key === Qt.Key_Backspace && !field.activeFocus) {
+                if (field.text.length > 0) { root.focusPart = 0; field.forceActiveFocus(); field.remove(field.length - 1, field.length) }
+                return
+            }
+            if (event.key === Qt.Key_Space) {
+                // Space answers the control that holds focus; only from the list, the box itself or an
+                // empty search line is it rule 7's toggle rather than a character.
+                if (root.focusPart === 3) { root.close(); return }
+                if (root.focusPart === 4) { root.commit(); return }
+                if (root.focusPart !== 0 || field.text.length === 0) { root.always = !root.always; return }
+            }
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 if (root.focusPart === 3) root.close()
                 else if (root.focusPart === 2) root.always = !root.always
