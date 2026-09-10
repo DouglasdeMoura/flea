@@ -17,6 +17,7 @@ import "icons.js" as IconsSuite
 import "keymap.js" as KeymapSuite
 import "match.js" as MatchSuite
 import "menu.js" as MenuSuite
+import "openwith.js" as OpenWithSuite
 import "mounts.js" as MountsSuite
 import "nav.js" as NavSuite
 import "network.js" as NetworkSuite
@@ -71,7 +72,7 @@ Item {
             ["format", FormatSuite], ["icons", IconsSuite],
             ["keymap", KeymapSuite], ["match", MatchSuite], ["menu", MenuSuite],
             ["mounts", MountsSuite], ["nav", NavSuite], ["network", NetworkSuite],
-            ["ops", OpsSuite],
+            ["openwith", OpenWithSuite], ["ops", OpsSuite],
             ["palette", PaletteSuite], ["pathbar", PathBarSuite], ["places", PlacesSuite],
             ["picker", PickerSuite],
             ["previewkeys", PreviewKeysSuite],
