@@ -141,7 +141,7 @@ Item {
             }
             pane.listingState = total === 0 ? "empty" : "ready"
             pane.stateMessage = total === 0
-                    ? "This directory is empty; add a file to see it here."
+                    ? (Nav.isTrash(pane.path) ? "The trash is empty." : "This directory is empty; add a file to see it here.")
                     : ""
             pane.opened(pane.path)
         }

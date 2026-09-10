@@ -28,11 +28,14 @@ fi
 
 shell_hint=$(sed -n '/hint: pane.searchMode === "results"/,/^[[:space:]]*}/p' "$shell_file")
 shell_hint=$(printf '%s' "$shell_hint" | tr -s '[:space:]' ' ')
-expected_hint='hint: pane.searchMode === "results" ? "Press Escape to clear." : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""'
+expected_hint='hint: pane.searchMode === "results" ? "Press Escape to clear." : Nav.isTrash(pane.path) ? "" : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""'
 case "$shell_hint" in
     *"$expected_hint"*) ;;
-    *) fail 'shell hint must show Escape for search results and the tip only behind the setting' ;;
+    *) fail 'shell hint must show Escape for search results, nothing in the trash, and the tip only behind the setting' ;;
 esac
+if ! grep -Fq 'The trash is empty' "$shell_file"; then
+    fail 'an empty trash must say so rather than advertise a new folder'
+fi
 
 column_empty=$(sed -n '/id: emptyTile/,/^[[:space:]]*}/p' "$column_file")
 [ -n "$column_empty" ] || fail 'ColumnPane emptyTile is missing'
@@ -40,4 +43,4 @@ if printf '%s\n' "$column_empty" | grep -Eq '^[[:space:]]*hint:'; then
     fail 'ColumnPane emptyTile must not bind a hint'
 fi
 
-printf 'empty-state: search hint always, new-folder tip gated, column hint absent\n'
+printf 'empty-state: search hint always, trash empty silent, new-folder tip gated, column hint absent\n'

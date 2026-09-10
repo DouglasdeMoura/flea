@@ -52,7 +52,7 @@ Item {
 
         FleaMark {
             id: heroMark
-            visible: root.caption.length === 0
+            visible: root.mark.length === 0
             anchors.horizontalCenter: parent.horizontalCenter
             // The brand moment, which States.dc.html draws at 48; four row heights was 148.
             width: Theme.heroMarkSize
@@ -60,7 +60,7 @@ Item {
         }
 
         Glyph {
-            visible: root.caption.length > 0
+            visible: root.mark.length > 0
             anchors.horizontalCenter: parent.horizontalCenter
             // A search that found nothing is a failure to find, not an arrival: Search.dc.html draws 40.
             maxSize: Theme.stateMarkSize

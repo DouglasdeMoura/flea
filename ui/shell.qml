@@ -151,12 +151,16 @@ ShellRoot {
                 height: pane.listSlot.height
                 visible: pane.listingState === "empty"
                 // The design's no-match answer: the search mark over the query it could not find.
-                caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery : ""
-                mark: "search"
+                // An empty trash is a statement, not a create: Nautilus and Dolphin refuse mkdir
+                // there, and so does this window, so the new-folder tip never draws over it.
+                caption: pane.searchMode === "results" ? "Nothing matches " + pane.searchQuery
+                    : Nav.isTrash(pane.path) ? "The trash is empty" : ""
+                mark: pane.searchMode === "results" ? "search" : ""
                 // A search that found nothing keeps its own way out, because that sentence is the
                 // state's answer and not an advertisement. The empty directory's next move is a
                 // shortcut, so it draws only with the Menus section's hints row on.
                 hint: pane.searchMode === "results" ? "Press Escape to clear."
+                    : Nav.isTrash(pane.path) ? ""
                     : ViewState.keyHints ? "Press Ctrl+Shift+N for a new folder." : ""
             }
 
