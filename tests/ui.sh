@@ -155,6 +155,9 @@ flea_process_owned() {
     [[ -O "$process" ]] || return 1
     environment=$(tr '\0' '\n' 2>/dev/null < "$process/environ") || {
         [[ -d "$process" ]] || return 2
+        # A process that has exited but is not reaped yet keeps its /proc entry with an unreadable
+        # environ. Sample /proc/PID/stat: "347 (gio) Z 1 347 ...", so the state follows the ")".
+        [[ "$(sed 's/.*) //' "$process/stat" 2>/dev/null | cut -d' ' -f1)" == Z ]] && return 2
         return 3
     }
     grep -Fx "FLEA_TEST_RUN_ROOT=$run_root" <<< "$environment" >/dev/null
