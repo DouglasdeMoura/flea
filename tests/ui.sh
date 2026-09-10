@@ -1217,10 +1217,8 @@ case_open() {
 
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
-    flea_bin="$dir/bin/flea"
     launch "$dir"
     export PATH="$saved_path"
-    flea_bin="$real_bin"
     # Measured row order: bin, subdir, broken, linkdir, linkfile, opened.log, sample.zip, target.txt.
     wait_listing 8
 
@@ -1351,8 +1349,10 @@ case_openterminal() {
     seed_ui_state "$fixture_root/openterminal-state" "{\"menu\":{\"hidden\":$terminal_shown}}"
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
+    flea_bin="$dir/bin/flea"
     launch "$dir"
     export PATH="$saved_path"
+    flea_bin="$real_bin"
     # bin, opened.log, ran.log, target.txt.
     wait_listing 4
 
