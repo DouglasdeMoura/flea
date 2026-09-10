@@ -7,7 +7,9 @@ function run(check) {
     var pane = {cursorIndex: 2, path: "/fixture", rowFor: function() { return {n: "source", d: false} },
         join: function(base, name) { return base + "/" + name }, message: function(text, failed) { messages.push([text, failed]) }}
     Ops.sendTaildrop(pane, sender, "peer", "/captured/source")
-    check("a refused Taildrop dispatch reports its cause", JSON.stringify(messages), JSON.stringify([["Peer went offline", true]]))
+    // The reason is a shared token both front ends read; the bar names its subject, as the TUI does.
+    check("a refused Taildrop dispatch names the subject and its cause", JSON.stringify(messages),
+          JSON.stringify([["Taildrop \u00b7 Peer went offline", true]]))
     messages = []
     sender.send = function(id, paths) { sent.push([id, paths]); return true }
     Ops.sendTaildrop(pane, sender, "peer", "/captured/source")
