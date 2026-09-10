@@ -5081,7 +5081,6 @@ case_trash() {
     local saved_data_home="${XDG_DATA_HOME:-}"
     export XDG_DATA_HOME="$dir/data"
     launch "$dir/orig"
-    export XDG_DATA_HOME="$saved_data_home"
     wait_listing 1
 
     # The path bar's trash URI spells the token, the way gio and Dolphin spell it.
@@ -5180,6 +5179,7 @@ case_trash() {
 
     printf 'TRASH pathbar=ok rows=ok menu=ok restore=ok rename-refused=ok pair=ok empty=ok u-elsewhere=ok rail=ok launch=ok\n'
     kill_flea
+    export XDG_DATA_HOME="$saved_data_home"
     sandbox_remove "$dir"
 }
 
