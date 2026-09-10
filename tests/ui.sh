@@ -1949,7 +1949,7 @@ case_background() {
 
     # New folder, the only background row that writes on its own, so the directory is the proof.
     [[ ! -e "$dir/dest/New Folder" ]] || fail "background: New Folder existed before the row ran"
-    menu_click "New folder"
+    menu_click "New Folder"
     settle
     printf 'BACKGROUND newfolder made=%s message=%q\n' \
         "$([[ -d "$dir/dest/New Folder" ]] && echo yes || echo no)" "$(ipc lastMessage)"
