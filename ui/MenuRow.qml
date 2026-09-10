@@ -190,9 +190,11 @@ Item {
             var position = root.mapToGlobal(pointer.point.position)
             pointer.armed = true
             pointer.restingAt = position
-            var known = root.lastPointerGlobal
+            // Read the coordinates out before reporting the new one: the shared property is live, so
+            // holding it would compare the new position against itself and lose the move.
+            var knownX = root.lastPointerGlobal.x, knownY = root.lastPointerGlobal.y
             root.pointerSeen(position)
-            if (known.x < 0 || position.x !== known.x || position.y !== known.y)
+            if (knownX < 0 || position.x !== knownX || position.y !== knownY)
                 root.pointerMoved()
         }
         onPointChanged: {
@@ -200,11 +202,11 @@ Item {
                 return
             var position = root.mapToGlobal(pointer.point.position)
             if (!pointer.armed) {
-                var first = root.lastPointerGlobal
+                var firstX = root.lastPointerGlobal.x, firstY = root.lastPointerGlobal.y
                 pointer.armed = true
                 pointer.restingAt = position
                 root.pointerSeen(position)
-                if (first.x < 0 || position.x !== first.x || position.y !== first.y)
+                if (firstX < 0 || position.x !== firstX || position.y !== firstY)
                     root.pointerMoved()
                 return
             }
