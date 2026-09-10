@@ -190,6 +190,10 @@ Item {
         ejectVerdictTimeout.stop()
         var s = Eject.sentence(verdict, root._ejectLabel, others)
         root._ejectDevice = ""
+        // The newest verdict about this device is the true one, so it replaces the last one rather
+        // than queueing behind it: a refusal is an error and stands until dismissed, and without
+        // this the operator ejected the stick and went on reading "still mounted".
+        root.message("", false)
         root.message(s.text, s.isError)
     }
 
