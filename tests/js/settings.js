@@ -137,9 +137,9 @@ function runRows(check) {
           Settings.rows("display", displayState(TextSize.follow(), 13))[2].index, 3)
     check("the hint names every stop the override can take",
           display[3].label.indexOf("9, 10, 11, 12, 14, 16, 20 px") >= 0, true)
-    check("the monitor scale is drawn as the compositor reports it", display[5].value, "1x")
+    check("the monitor scale is drawn read-only, as the compositor reports it", display[5].value, "Read-only 1x")
     check("a fractional one keeps its fraction",
-          Settings.rows("display", displayState(TextSize.follow(), 14, 1.25))[5].value, "1.25x")
+          Settings.rows("display", displayState(TextSize.follow(), 14, 1.25))[5].value, "Read-only 1.25x")
     check("and an unanswered query says so rather than claiming 1x",
           Settings.rows("display", displayState(TextSize.follow(), 14, 0))[5].value, "not reported")
     check("its hint is the board's own sentence, so no reader expects a control",

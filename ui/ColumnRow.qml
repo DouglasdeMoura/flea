@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Icons.js" as Icons
+import "js/Format.js" as Format
 import "js/Match.js" as Match
 
 // One row of a Miller column: a mark, a name, and the chevron a chosen directory carries. Simpler
@@ -15,6 +16,12 @@ Item {
     // trash: the leaf is drawn, the way ui/Row.qml draws it.
     property bool inTrash: false
     readonly property string displayName: root.row ? (root.inTrash ? Match.base(root.row.n) : root.row.n) : ""
+    // The pane's thumbnail path for this row, empty for a peek's row: only the listing's own column asks for any.
+    property string thumb: ""
+    // A path is not a thumbnail: a cache file evicted between the answer and the decode leaves the mark to the glyph.
+    readonly property bool thumbDrawn: root.thumb.length > 0 && thumbImage.status !== Image.Error
+    readonly property alias iconStatus: thumbImage.status
+    readonly property Item thumbItem: thumbImage
     // The row this column's own cursor is on. Only the active column paints it in the accent.
     property bool cursor: false
     // A member of the pane's selection, which only the column drawing the pane's own listing has.
@@ -53,8 +60,23 @@ Item {
         width: Theme.iconSize
         height: Theme.iconSize
 
+        // Sized on purpose, the same decode arm as ui/Row.qml: the cache PNG is capped at the icon's own size.
+        Image {
+            id: thumbImage
+            anchors.fill: parent
+            visible: root.thumbDrawn
+            sourceSize.width: Theme.iconSize
+            sourceSize.height: Theme.iconSize
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            // No cache by URL: a regenerated thumbnail keeps its path, and a cached decode would keep the old pixels.
+            cache: false
+            source: root.thumb.length > 0 ? Format.fileUri(root.thumb) : ""
+        }
+
         Flea.Glyph {
             anchors.fill: parent
+            visible: !root.thumbDrawn
             name: root.row ? Icons.glyphForRow(root.row.i, root.row.p) : "file"
             color: root.cursor ? Theme.color.accent : Theme.color.muted
         }
@@ -70,7 +92,7 @@ Item {
         text: root.displayName
         color: root.ink
         font.family: Theme.font.family
-        font.pixelSize: Theme.font.bodySmall
+        font.pixelSize: Theme.font.body
         textFormat: Text.PlainText
         elide: Text.ElideRight
     }
