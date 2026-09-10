@@ -414,6 +414,45 @@ action = "tabNew"
 char = "w"
 action = "tabClose"
 
+# 1 to 9 select a tab directly, the same nine the TUI answers to. ui/js/Tabs.js has always
+# implemented tab1 to tab9 and said "No tab N." for a tab that is not open; nothing bound them.
+[[text]]
+char = "1"
+action = "tab1"
+
+[[text]]
+char = "2"
+action = "tab2"
+
+[[text]]
+char = "3"
+action = "tab3"
+
+[[text]]
+char = "4"
+action = "tab4"
+
+[[text]]
+char = "5"
+action = "tab5"
+
+[[text]]
+char = "6"
+action = "tab6"
+
+[[text]]
+char = "7"
+action = "tab7"
+
+[[text]]
+char = "8"
+action = "tab8"
+
+[[text]]
+char = "9"
+action = "tab9"
+
+
 [[text]]
 char = "y"
 action = "copy"
