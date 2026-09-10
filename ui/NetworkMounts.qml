@@ -340,11 +340,7 @@ Item {
         root._pendingPassword = ""
         root.result = "failed"
         root.message(reason, true)
-        // A credential is kept only where finishRequest keeps it, on the connect the server accepted.
-        // Keeping one the server refused made every later click on that location replay it with no
-        // prompt, which is how a domain account locks itself out.
-        root.forgetPassword(root._pendingUri)
-        // The secret the operator just typed still rides back to Retry, so the reopened dialog is
+        // The secret the operator just typed rides back to Retry, so the reopened dialog is
         // populated exactly as 0.1.6 populated it. A call site that passes "" means it has none.
         var attempted = password === undefined ? root._requestPassword : password
         if (!root.finishRequest(false, reason))
@@ -459,7 +455,14 @@ Item {
                 root.runInfo(root._pendingUri)
                 return
             }
-            root.failMount(Errors.connectFailure(exitCode, root._pendingUri), root.passwordFor(root._pendingUri))
+            var attempted = root.passwordFor(root._pendingUri)
+            // Only the server's own refusal invalidates the secret, and keeping one it refused made
+            // every later click on that location replay it with no prompt, which locks an account
+            // out. A helper that could not start (126, 127) and a host that never answered (124) say
+            // nothing about the password, so those keep it and Retry opens populated.
+            if (exitCode !== 124 && exitCode !== 126 && exitCode !== 127)
+                root.forgetPassword(root._pendingUri)
+            root.failMount(Errors.connectFailure(exitCode, root._pendingUri), attempted)
         }
     }
 

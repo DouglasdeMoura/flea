@@ -7718,10 +7718,16 @@ case_views() {
         # space there actually is. A lazy view's item reports a local origin, and the hero placed on
         # it once drew over the sidebar, still inside a wide slot.
         read -r sx sy sw sh <<< "$(ipc listAreaRect)"
+        # The columns view draws three fixed slots and the pane's own listing is the middle one, so
+        # the hero sits over that column alone: every view then puts the animation in the same place.
         local ex=$sx ew=$sw
-        [[ "$mode" == "columns" ]] && { ex=$((sx + sw / 3)); ew=$((sw - sw / 3)); }
+        [[ "$mode" == "columns" ]] && { ex=$((sx + sw / 3)); ew=$((sw / 3)); }
         rect_is "$(ipc emptyStateRect)" "$ex" "$sy" "$ew" "$sh" 1 \
             || fail "$mode: the hero's box is $(ipc emptyStateRect), not the slot $ex $sy $ew $sh"
+        read -r mx my mw mh <<< "$(ipc emptyMarkRect)"
+        local want_centre=$((ex + ew / 2)) mark_centre=$((mx + mw / 2))
+        (( mark_centre >= want_centre - 2 && mark_centre <= want_centre + 2 )) \
+            || fail "$mode: the hero's mark centres at $mark_centre, not $want_centre"
         key -k Backspace >/dev/null
         sleep 1
         key -k Backspace >/dev/null

@@ -36,12 +36,12 @@ openwith_clear_search() {
 }
 
 case_openwithdesign() (
-    local box listing config data state name frame flyout mime_before openwith_flyout_rows=0
+    local menu_box listing config data state name frame flyout mime_before openwith_flyout_rows=0
     local -a numbers
     sandbox_require "$fixture_root"
-    box=$(mktemp -d "$fixture_root/openwith-design.XXXXXXXX") || fail 'openwith: owned fixture creation failed'
-    printf 'native Open with fixture\n' > "$box/.flea-test-sandbox"
-    listing="$box/listing"; config="$box/config"; data="$box/data"; state="$box/state"
+    menu_box=$(mktemp -d "$fixture_root/openwith-design.XXXXXXXX") || fail 'openwith: owned fixture creation failed'
+    printf 'native Open with fixture\n' > "$menu_box/.flea-test-sandbox"
+    listing="$menu_box/listing"; config="$menu_box/config"; data="$menu_box/data"; state="$menu_box/state"
     for name in "$listing" "$config" "$data" "$data/applications"; do
         menus_guard "$name"
         mkdir -p "$name" || fail 'openwith: fixture directory creation failed'
