@@ -46,6 +46,8 @@ Item {
 
     function open() {
         if (root.opened || root.busy) return
+        root.unacknowledgedUri = ""
+        root.unacknowledgedReason = ""
         root.statusText = ""
         root.retrying = false
         root.failedConnect = false
@@ -56,12 +58,20 @@ Item {
         root.present()
     }
 
+    // The reason a mount actually failed with, kept across a close so reopening the same location
+    // cannot answer for it. 0.1.6 never completed a missing-credential request, so its dialog kept
+    // the real cause; here the row is reopened for the same uri a second later and the generic
+    // "Enter the password" prompt was landing on top of "authentication helper is unavailable".
+    property string unacknowledgedUri: ""
+    property string unacknowledgedReason: ""
+
     function openLocation(uri, label, password, reason, failed) {
         if (root.opened || root.busy) return
         form.load(root.valuesFor(uri, label, password))
-        root.statusText = reason || ""
+        var known = root.unacknowledgedUri === Mounts.normalize(uri) && root.unacknowledgedReason.length > 0
+        root.statusText = known && failed !== true ? root.unacknowledgedReason : (reason || "")
         root.retrying = true
-        root.failedConnect = failed === true
+        root.failedConnect = known && failed !== true ? true : failed === true
         root.mountedUri = ""
         root.saveNewPlace = false
         root.saveCommitted = false
@@ -104,6 +114,8 @@ Item {
         }
         root.pendingUri = Mounts.normalize(form.uri)
         root.pendingLabel = form.labelText()
+        root.unacknowledgedUri = ""
+        root.unacknowledgedReason = ""
         root.statusText = ""
         root.requestId = "network-" + (++root.requestSerial)
         if (root.mountedUri === root.pendingUri) { root.saveFavourite(); return }
@@ -131,6 +143,10 @@ Item {
     function saveFailed(message) {
         root.saving = false
         root.statusText = message
+        if (message.indexOf("Connect failed:") === 0) {
+            root.unacknowledgedUri = Mounts.normalize(root.pendingUri)
+            root.unacknowledgedReason = message
+        }
         root.retrying = true
         root.failedConnect = message.indexOf("Connect failed:") === 0
         form.focusHost()
