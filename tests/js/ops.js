@@ -251,7 +251,8 @@ function run(check) {
     check("r in the grid opens the same editor", gridded.renamingIndex, 2)
     var columned = renamePane(2, -1, [], "columns")
     Ops.startRename(columned)
-    check("r in the active column opens the same editor", columned.renamingIndex, 2)
+    check("r in the columns view says where rename works", columned.renamingIndex + "|" + columned.said,
+          "-1|Rename needs the list or grid view.")
     var renamed = []
     var committing = renamePane(0, 3, renamed)
     Ops.commitRename(committing, "g3")

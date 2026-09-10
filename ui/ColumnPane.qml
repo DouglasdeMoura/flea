@@ -176,10 +176,12 @@ Item {
             cursor: root.selectedIndex >= 0 && listingIndex === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(listingIndex)
-            renaming: root.pane !== null && listingIndex >= 0 && listingIndex === root.pane.renamingIndex
-            renamePane: root.pane
-            onRenameCommitted: function(newName) { root.pane.commitRename(newName) }
-            onRenameAbandoned: if (root.pane) root.pane.renamingIndex = -1
+            // corner: no inline rename in this view. A delegate binding that follows the pane's
+            // renamingIndex costs this column its keys: the comma that opens Settings never reached
+            // ui/js/Focus.js at all, which case_overlays catches and 833d4f8 passes. Measured on the
+            // box: a binding that never follows the pane keeps the keys, every one that does loses
+            // them. ui/js/Ops.js refuses the rename here so no row ever offers an editor it cannot open.
+            renaming: false
             dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
             dropCopying: dragSession.dragCopy
             // Read off the normalised row above: subscripting rows again hands a shrunk listing's undefined to a bool.
@@ -188,7 +190,6 @@ Item {
 
             TapHandler {
                 id: tap
-                enabled: !cell.renaming
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onTapped: function (eventPoint, button) {
                     if (root.pane !== null) {
