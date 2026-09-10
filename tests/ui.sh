@@ -7679,8 +7679,10 @@ case_views() {
             settle
             [[ "$(ipc cursor)|$(ipc path)" == "$before" ]] || fail "columns: select all moved the cursor or the path, $before to $(ipc cursor)|$(ipc path)"
             [[ "$(ipc previewColumnState)" == "multi" && "$(ipc columnPlayerLoaded)" == "false" ]] || fail "columns: a multi-selection left the player $(ipc columnPlayerLoaded) in state $(ipc previewColumnState)"
+            printf 'VIEWS_DIAG before focus=%s sel=%s state=%s\n' "$(ipc focusView)" "$(ipc selectionCount)" "$(ipc previewColumnState)"
             key -k Escape >/dev/null
             settle
+            printf 'VIEWS_DIAG after focus=%s sel=%s state=%s\n' "$(ipc focusView)" "$(ipc selectionCount)" "$(ipc previewColumnState)"
             [[ "$(ipc previewColumnState)" == "video" && "$(ipc columnPlayerLoaded)" == "false" ]] || fail "columns: back on the video with $(ipc columnPlayerLoaded) player, state $(ipc previewColumnState)"
             omarchy-drive click "$((wx + cx))" "$((wy + cy))" left >/dev/null
             sleep 1
