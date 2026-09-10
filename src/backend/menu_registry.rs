@@ -167,7 +167,8 @@ fn wait_exit(fd: i32) -> Result<(), String> {
     }
 }
 
-pub(crate) struct Application { pub id: String, pub label: String, pub path: PathBuf }
+pub(crate) struct Application { pub id: String, pub label: String, pub path: PathBuf,
+                               pub icon: String, pub default: bool }
 
 pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellation) -> Result<Vec<Application>, String> {
     let info = registry.query(&["info".as_ref(), "--nofollow-symlinks".as_ref(), "--attributes=standard::content-type".as_ref(), path.as_os_str()], cancel)?;
@@ -175,7 +176,17 @@ pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellati
     let mime = info.lines().find_map(|line| line.trim().strip_prefix("standard::content-type: "))
         .filter(|m| !m.is_empty()).ok_or("GIO did not report the selected item's content type.")?;
     let output = registry.query(&["mime".as_ref(), mime.as_ref()], cancel)?;
-    let mut apps = Vec::new();
+    // Sample GIO mime output: the default is named on its own line before the indented registry.
+    // "Default application for \u{201c}text/plain\u{201d}: org.gnome.TextEditor.desktop".
+    let default = output
+        .lines()
+        .find(|line| line.starts_with("Default application"))
+        .and_then(|line| line.rsplit(':').next())
+        .map(str::trim)
+        .filter(|id| id.ends_with(".desktop"))
+        .unwrap_or_default()
+        .to_string();
+    let mut apps: Vec<Application> = Vec::new();
     // Sample GIO mime registry row: "\torg.gnome.TextEditor.desktop".
     for line in output.lines().filter(|line| line.starts_with('\t') || line.starts_with("  ")) {
         cancelled(cancel)?;
@@ -183,8 +194,15 @@ pub(crate) fn applications(registry: &Registry, path: &Path, cancel: &Cancellati
         if !id.ends_with(".desktop") || id.contains('/') || id.contains('\0') || apps.iter().any(|a: &Application| a.id == id) { continue; }
         if let Some(path) = desktop_file(id, cancel)? {
             let label = desktop_label(&path)?.unwrap_or_else(|| id.trim_end_matches(".desktop").into());
-            apps.push(Application { id: id.into(), label, path });
+            let icon = desktop_key(&path, "Icon=")?.unwrap_or_default();
+            let is_default = id == default;
+            apps.push(Application { id: id.into(), label, path, icon, default: is_default });
         }
+    }
+    // OpenWith.html: the desktop's current default is first, and the registry order follows it.
+    if let Some(at) = apps.iter().position(|a| a.default) {
+        let head = apps.remove(at);
+        apps.insert(0, head);
     }
     Ok(apps)
 }
@@ -218,8 +236,11 @@ fn desktop_file(id: &str, cancel: &Cancellation) -> Result<Option<PathBuf>, Stri
     Ok(None)
 }
 
-// Sample Desktop Entry: "[Desktop Entry]\nName=Text Editor\nExec=editor %U"; GIO alone interprets Exec.
-fn desktop_label(path: &Path) -> Result<Option<String>, String> {
+fn desktop_label(path: &Path) -> Result<Option<String>, String> { desktop_key(path, "Name=") }
+
+// Sample Desktop Entry: "[Desktop Entry]\nName=Text Editor\nIcon=accessories-text-editor\nExec=editor %U";
+// GIO alone interprets Exec. Only the [Desktop Entry] group is read, so an action group cannot answer.
+fn desktop_key(path: &Path, key: &str) -> Result<Option<String>, String> {
     let file = super::regfile::open_if_regular(path, 0).map_err(|e| format!("Could not read application {}: {}.", path.display(), e))?;
     let mut bytes = Vec::new();
     file.take(MAX_REGISTRY_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("Could not read application {}: {}.", path.display(), e))?;
@@ -229,7 +250,7 @@ fn desktop_label(path: &Path) -> Result<Option<String>, String> {
     for line in text.lines() {
         if line.starts_with('[') { entry = line == "[Desktop Entry]"; }
         if entry {
-            if let Some(name) = line.strip_prefix("Name=") { return Ok(Some(name.replace("\\s", " ").replace("\\n", " "))); }
+            if let Some(name) = line.strip_prefix(key) { return Ok(Some(name.replace("\\s", " ").replace("\\n", " "))); }
         }
     }
     Ok(None)

@@ -281,7 +281,9 @@ impl Snapshot {
             }
             "applications" => {
                 let apps = menu_registry::applications(registry, &item.path, cancel)?;
-                let entries: Vec<String> = apps.iter().map(|a| format!(r#"{{"id":"{}","label":"{}"}}"#, escape(&a.id), escape(&a.label))).collect();
+                let entries: Vec<String> = apps.iter().map(|a| format!(
+                    r#"{{"id":"{}","label":"{}","icon":"{}","default":{}}}"#,
+                    escape(&a.id), escape(&a.label), escape(&a.icon), a.default)).collect();
                 Ok(format!(r#""applications":[{}]"#, entries.join(",")))
             }
             "openWith" => {
