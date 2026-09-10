@@ -80,7 +80,9 @@ Item {
         root.opened = true
         list.contentY = 0
         list.forceActiveFocus()
-        root.requested({c: "menuaction", op: "applications", id: id})
+        // installed: the whole catalogue, which only this card draws. The flyout asks without it,
+        // so a right-click does not pay for a walk of every applications directory on the box.
+        root.requested({c: "menuaction", op: "applications", id: id, installed: true})
     }
 
     function close() {
