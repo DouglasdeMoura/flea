@@ -200,9 +200,12 @@ Item {
                 return
             var position = root.mapToGlobal(pointer.point.position)
             if (!pointer.armed) {
+                var first = root.lastPointerGlobal
                 pointer.armed = true
                 pointer.restingAt = position
                 root.pointerSeen(position)
+                if (first.x < 0 || position.x !== first.x || position.y !== first.y)
+                    root.pointerMoved()
                 return
             }
             var moved = position.x !== pointer.restingAt.x || position.y !== pointer.restingAt.y
