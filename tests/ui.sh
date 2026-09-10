@@ -4767,6 +4767,7 @@ EOS
     key -k Tab >/dev/null
     key g >/dev/null
     settle
+    printf 'NETWORKAUTH_DIAG rail=%s net=%s\n' "$(ipc railEntries | jq -c 'map({label,kind,group})')" "$(ipc networkEntries | tr '\n' ',')"
     rail_seek data
     key -k Return >/dev/null
     wait_network_result mounted
