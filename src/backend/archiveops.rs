@@ -27,7 +27,7 @@ pub fn compress(
         Some(a) => a,
         None => return Err(op_err("archive", format, "this box offers no tool for that format")),
     };
-    run_boxed(inner, parent, &work.dir)?;
+    run_boxed("archive", inner, parent, &work.dir)?;
     if staged.symlink_metadata().is_err() {
         return Err(op_err("archive", format, "the archive tool wrote nothing"));
     }
@@ -53,7 +53,7 @@ pub fn extract(formats: &Formats, archive: &Path, dest: &Path) -> Result<bool, F
     };
     // Measured on this box: bsdtar exits 1 on a .. member and de-fangs an absolute one, printing
     // "Removing leading '/'" and extracting it relative. Neither escapes the staging directory.
-    run_boxed(inner, archive, &work.dir)?;
+    run_boxed("archive", inner, archive, &work.dir)?;
     // compress and convert stat a path Flea never creates, so their existence check is a real test.
     // This one creates its own staging directory, so the same shape always passes. Two archives
     // legally extract to nothing: an empty one, and one whose only member is the archive root, which
@@ -97,7 +97,7 @@ pub fn convert_one(input: &Path, dest: &Path, strip: bool) -> Result<(), FleaErr
     let work = Work::new(parent, "cvt")?;
     let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let staged = work.dir.join(&name);
-    run_boxed(convert::argv(input, &staged, strip), input, &work.dir)?;
+    run_boxed("convert", convert::argv(input, &staged, strip), input, &work.dir)?;
     if staged.symlink_metadata().is_err() {
         return Err(op_err("convert", &name, "the converter wrote nothing"));
     }
@@ -267,7 +267,7 @@ mod tests {
         let staged = work.dir.join("out");
         std::fs::create_dir(&staged).expect("staged");
         // Through prlimit and bwrap, exactly as a real listing tool runs.
-        run_boxed(vec!["/usr/bin/true".to_string()], &archive, &work.dir)
+        run_boxed("archive", vec!["/usr/bin/true".to_string()], &archive, &work.dir)
             .expect("/usr/bin/true exits 0");
         assert!(is_empty_dir(&staged), "and it wrote nothing, which is the whole point of it");
         // The predicate extract applies to those two facts.
@@ -290,13 +290,13 @@ mod tests {
             let work2 = Work::new(d.path(), "ext").expect("work");
             let staged2 = work2.dir.join("out");
             std::fs::create_dir(&staged2).expect("staged");
-            run_boxed(vec!["/usr/bin/true".to_string()], &dirs, &work2.dir).expect("exits 0");
+            run_boxed("archive", vec!["/usr/bin/true".to_string()], &dirs, &work2.dir).expect("exits 0");
             assert!(is_empty_dir(&staged2) && archive_produced_count(&formats, &dirs).unwrap_or(0) > 0,
                     "so a tool that wrote nothing for it is a failure, not a verified success");
         }
 
         // The other arm, for completeness: a tool that exits non-zero is refused before the check.
-        assert!(run_boxed(vec!["/usr/bin/false".to_string()], &archive, &work.dir).is_err(),
+        assert!(run_boxed("archive", vec!["/usr/bin/false".to_string()], &archive, &work.dir).is_err(),
                 "run_boxed reads the status, so the non-zero arm never reaches the predicate");
     }
 

@@ -251,10 +251,10 @@ function run(check) {
     var gridded = renamePane(2, -1, [], "grid")
     Ops.startRename(gridded)
     check("r in the grid opens the same editor", gridded.renamingIndex, 2)
+    // The columns view draws the editor over its active column, see ui/ColumnPane.qml's own corner.
     var columned = renamePane(2, -1, [], "columns")
     Ops.startRename(columned)
-    check("r in the columns view says where rename works", columned.renamingIndex + "|" + columned.said,
-          "-1|Rename needs the list or grid view.")
+    check("r in the columns view opens the same editor", columned.renamingIndex + "|" + columned.said, "2|")
     var renamed = []
     var committing = renamePane(0, 3, renamed)
     Ops.commitRename(committing, "g3")
