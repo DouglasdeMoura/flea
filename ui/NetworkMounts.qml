@@ -336,13 +336,18 @@ Item {
         mountTimeout.restart()
     }
 
-    function failMount(reason, password) {
+    // refused says the server itself turned the credential down. Only that invalidates it: a helper
+    // that could not start and a host that never answered say nothing about the password, and the
+    // reopened dialog has to be populated from it exactly as 0.1.6 populated it.
+    function failMount(reason, password, refused) {
         root._pendingPassword = ""
         root.result = "failed"
         root.message(reason, true)
-        // The secret the operator just typed rides back to Retry, so the reopened dialog is
-        // populated exactly as 0.1.6 populated it. A call site that passes "" means it has none.
         var attempted = password || root._requestPassword
+        // Keeping a refused secret meant every later click on that location replayed it with no
+        // prompt at all, which is how a domain account locks itself out.
+        if (refused === true) root.forgetPassword(root._pendingUri)
+        else if (attempted.length > 0) root.remember(root._pendingUri, attempted)
         if (!root.finishRequest(false, reason))
             root.retryRequested(root._pendingUri, root._pendingLabel, attempted, reason, true, root._pendingOrigin)
     }
@@ -455,14 +460,11 @@ Item {
                 root.runInfo(root._pendingUri)
                 return
             }
-            var attempted = root.passwordFor(root._pendingUri)
-            // Only the server's own refusal invalidates the secret, and keeping one it refused made
-            // every later click on that location replay it with no prompt, which locks an account
-            // out. A helper that could not start (126, 127) and a host that never answered (124) say
-            // nothing about the password, so those keep it and Retry opens populated.
-            if (exitCode !== 124 && exitCode !== 126 && exitCode !== 127)
-                root.forgetPassword(root._pendingUri)
-            root.failMount(Errors.connectFailure(exitCode, root._pendingUri), attempted)
+            // 124 is a host that never answered and 126/127 a helper that could not start; neither
+            // is the server turning the credential down, so neither invalidates it.
+            var refused = exitCode !== 124 && exitCode !== 126 && exitCode !== 127
+            root.failMount(Errors.connectFailure(exitCode, root._pendingUri),
+                           root.passwordFor(root._pendingUri), refused)
         }
     }
 

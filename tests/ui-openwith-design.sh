@@ -50,6 +50,10 @@ case_openwithdesign() (
     menus_guard "$data/applications/zzflea-openwith.desktop"
     printf '[Desktop Entry]\nType=Application\nName=Zzflea Fixture\nExec=/bin/true %%f\nIcon=text-x-generic\nMimeType=text/plain;\n' \
         > "$data/applications/zzflea-openwith.desktop"
+    # gio resolves the id named below through the desktop database, and an applications directory
+    # with no cache answers for nothing, so the default silently did not take.
+    update-desktop-database "$data/applications" 2>/dev/null \
+        || fail 'openwith: the fixture desktop database could not be built'
     # A default the desktop really reads back, so the board's "default" caption has something to name.
     menus_guard "$config/mimeapps.list"
     printf '[Default Applications]\ntext/plain=zzflea-openwith.desktop\n' > "$config/mimeapps.list"
