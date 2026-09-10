@@ -189,7 +189,9 @@ fn valid_path(path: &str) -> bool {
         return true;
     }
     [
-        "smb://", "sftp://", "ftp://", "dav://", "davs://", "afp://", "nfs://", "file://",
+        // Every scheme ui/js/Protocols.js can build, ftps included: the dialog offers an FTPS chip,
+        // and a location mounted through it could not be saved because this list had only ftp.
+        "smb://", "sftp://", "ftp://", "ftps://", "dav://", "davs://", "afp://", "nfs://", "file://",
     ]
     .iter()
     .any(|scheme| {
