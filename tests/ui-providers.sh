@@ -424,7 +424,7 @@ case_providers() (
         providers_close
     done <<'STATES'
 {"BackendState":"NeedsLogin"}|signed out
-{"BackendState":"Stopped"}|Stopped
+{"BackendState":"Stopped"}|stopped
 {"BackendState":"Running","Self":{"Capabilities":["https://tailscale.com/cap/file-sharing"]},"Peer":{}}|no peers
 {"BackendState":"Running","Self":{},"Peer":{}}|disabled for this account
 malformed|invalid status

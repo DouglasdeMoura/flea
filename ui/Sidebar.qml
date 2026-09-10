@@ -34,7 +34,9 @@ Item {
         id: trashMonitor
         enabled: root.trashActive || root.placesState.showTrash !== false
         onChanged: root.trashChanged()
-        onFailed: function(text) { root.message(text, true) }
+        // A background poll the operator never asked for must not take the status bar: the count is
+        // read for the rail Trash menu even with the badge off, so only a shown count reports it.
+        onFailed: function(text) { if (root.trashActive || root.placesState.trashCount === true) root.message(text, true) }
     }
     readonly property var trashEntries: root.placesState.showTrash === false ? []
         : [{ label: "Trash", path: "trash:///", group: "trash", kind: "trash", glyph: "trash", count: root.trashCount }]
