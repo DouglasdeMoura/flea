@@ -237,7 +237,11 @@ function sendTaildrop(pane, taildrop, peerId, path) {
         return
     }
     if (taildrop.send(peerId, [path]) === false) {
-        pane.message(taildrop.reason || "That Taildrop peer is no longer available.", true)
+        // The reason is one shared token: the menu, both front ends and the probes all read it, and
+        // the TUI draws it as "taildrop · signed out". The bar names the subject the same way rather
+        // than printing a bare fragment beside errors that are sentences.
+        pane.message(taildrop.reason ? "Taildrop · " + taildrop.reason
+                                     : "That Taildrop peer is no longer available.", true)
         return
     }
     // The dispatch is the only result Flea itself ever knows; success or failure is the OEM script's

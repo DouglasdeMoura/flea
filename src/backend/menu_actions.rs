@@ -280,7 +280,7 @@ impl Snapshot {
                     meta.len(), meta.mtime(), meta.mode() & 0o7777, escape(&super::owner::name(meta.uid())), meta.uid(), meta.gid()))
             }
             "applications" => {
-                let found = menu_registry::catalogue(registry, &item.path, cancel)?;
+                let found = menu_registry::catalogue(registry, &item.path, field_bool(line, "installed"), cancel)?;
                 Ok(format!(r#""applications":[{}],"installed":[{}],"mime":"{}","kind":"{}","path":"{}""#,
                     application_entries(&found.handlers), application_entries(&found.installed),
                     escape(&found.mime), escape(&found.kind), escape(&item.path.to_string_lossy())))
