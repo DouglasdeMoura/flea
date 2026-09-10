@@ -164,7 +164,7 @@ case_dropboxroots() (
     providers_call wl-copy '["https://fixture.invalid/share"]' "$clipboard_before"
     # The status bar keeps the search keys in its primary slot on purpose (tests/js/status.js, "a
     # plain notice still yields to the search"), so the confirmation is read where it is emitted.
-    menus_expect lastMessage '. == "Share link copied to the clipboard."' 'ancestor Search dispatches the captured absolute account path'
+    menus_said 'Share link copied to the clipboard.' 'ancestor Search dispatches the captured absolute account path'
     providers_expect '.listFocus and (.pendingActivation | not)' 'Search share-link activation restores its listing focus'
     dropbox_roots_menu Personal-old/b-cursor.txt menu-letter dropbox sharelink
     providers_close

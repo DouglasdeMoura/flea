@@ -42,6 +42,22 @@ menus_error() {
     fail "menus: $label did not report $text: $observed"
 }
 
+# The message a pane emitted, polled directly: lastMessage answers a bare string, so it is compared
+# rather than filtered, and the status bar's own slot is a separate question (see menus_message).
+menus_said() {
+    local text="$1" label="$2" observed deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        observed=$(ipc lastMessage) || fail "menus: message observer failed"
+        if [[ "$observed" == "$text" ]]; then
+            menus_checks=$((menus_checks + 1))
+            printf 'MENUS_CHECK %s %s said=%q\n' "$menus_checks" "$label" "$observed"
+            return
+        fi
+        sleep 0.05
+    done
+    fail "menus: $label did not say $text: $observed"
+}
+
 menus_message() {
     local text="$1" label="$2" observed deadline=$((SECONDS + 15))
     while (( SECONDS < deadline )); do
