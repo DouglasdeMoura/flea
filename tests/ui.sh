@@ -7050,14 +7050,18 @@ settings_display() {
     key j >/dev/null
     settle
     settings_walk_to_stop 9
+    # Against the smallest stop, not against Omarchy's own size: the stops top out at 20, so a box
+    # whose base-size is already 20 can never grow past itself and the check was unsatisfiable there.
+    local smallest
+    smallest=$(ipc metrics | cut -d' ' -f1)
     local stop
     for stop in 9 10 11 12 14 16 20; do
         settings_walk_to_stop "$stop"
         assert_board_row "$stop"
     done
     after=$(ipc metrics | cut -d' ' -f1)
-    (( after > $(cut -d' ' -f1 <<< "$before") )) \
-        || fail "settings: the largest stop did not grow the type past Omarchy's own size"
+    (( after > smallest )) \
+        || fail "settings: the largest stop did not grow the type past the smallest, $smallest then $after"
     shot settings-text-override
 
     # The way back is one row, and it puts every token where Omarchy had it.

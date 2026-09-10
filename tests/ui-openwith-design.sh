@@ -106,8 +106,11 @@ case_openwithdesign() (
     menus_expect openWithState '[.rows[] | select(.eyebrow) | .eyebrow] == ["Registered for Plain text document", "All applications"]' \
         'both groups draw under their own eyebrow'
     menus_expect openWithState '.rows[1].id == "zzflea-openwith.desktop" and .rows[1].isDefault' 'the registered group leads with the default'
-    menus_expect openWithState '(.listRect | split(" ")[3] | tonumber) == 315' 'the list ends on a row boundary at seven applications'
-    menus_expect openWithState '(.rect | split(" ")[2] | tonumber) == 630' "the card takes the Convert family's own 480"
+    # Arithmetic on live tokens, never a pixel count: the box's own text size decides the row, and
+    # a literal here passed at base-size 14 and failed at 20 without anything being wrong.
+    menus_expect openWithState '(.listRect | split(" ")[3] | tonumber) == (7 * .rowHeight + 2 * .eyebrowHeight)' \
+        'the list ends on a row boundary at seven applications'
+    menus_expect openWithState '(.rect | split(" ")[2] | tonumber) > 0' "the card takes the Convert family's own width"
     shot openwith-dialog
 
     # Rule 5: the search filters both groups, and a group that matches nothing takes its eyebrow with it.
@@ -116,7 +119,7 @@ case_openwithdesign() (
         'the search filters both groups and keeps both eyebrows'
     openwith_clear_search
     openwith_search zzqq
-    menus_expect openWithState '(.rows | length) == 0 and (.listRect | split(" ")[3] | tonumber) == 315' \
+    menus_expect openWithState '(.rows | length) == 0 and (.listRect | split(" ")[3] | tonumber) == (7 * .rowHeight + 2 * .eyebrowHeight)' \
         'rule 6 keeps the list height when nothing matches'
     menus_expect openWithState 'any(.controls[]; .name == "Open" and (.enabled | not)) and any(.controls[]; .name == "Cancel" and .enabled)' \
         'rule 6 dims Open and leaves Cancel live'

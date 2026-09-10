@@ -194,6 +194,7 @@ QtObject {
                          : {id: row.id, label: row.label, icon: row.icon, isDefault: row.default === true}
                 }),
                 rect: root.fleaWindow.rectOf(dialog.cardItem),
+                rowHeight: Theme.rowHeight, eyebrowHeight: dialog.eyebrowHeight,
                 listRect: root.fleaWindow.rectOf(dialog.applicationsItem),
                 rowRect: root.fleaWindow.rectOf(dialog.applicationItem(dialog.cursor)),
                 controls: [root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.applicationsItem),
