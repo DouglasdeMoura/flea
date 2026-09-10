@@ -6,6 +6,10 @@
 openwith_flyout_rows=0
 
 openwith_open_flyout() {
+    # Left first, then right: menus_file_menu opens a row menu the same way, because the right press
+    # lands on a pane that has to hold the focus and the row before it means anything.
+    menus_expect menuState '.opened | not' 'the previous menu is gone'
+    click_row "$(row_index_of "$1")" left
     click_row "$(row_index_of "$1")" right
     menus_expect menuState '.opened and .snapshotReady and .hasRow' 'row menu captures the Open with source'
     menus_seek openWith
