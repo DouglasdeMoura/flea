@@ -5940,12 +5940,16 @@ EOS
     : > "$dir/really"
     click_rail_row "$volume_row" right
     settle
-    printf 'EJECT_DIAG menu=%s entries=%s row=%s\n' "$(ipc contextMenuEntries)" "$(ipc deviceEntries)" "$volume_row"
+    printf 'EJECT_DIAG menu=%q entries=%q row=%s\n' "$(ipc contextMenuEntries | tr '\n' ';')" "$(ipc deviceEntries | tr '\n' ';')" "$volume_row"
     key -k Return >/dev/null
     settle
-    printf 'EJECT_DIAG after gio=%q ejected=%s entries=%s msg=%q\n' \
-        "$(tr '\n' ';' < "$gio_log")" "$( [ -f "$dir/ejected" ] && echo yes || echo no )" \
-        "$(ipc deviceEntries)" "$(ipc lastMessage)"
+    local _watch
+    for _watch in 1 2 3 4 5 6 7 8; do
+        printf 'EJECT_DIAG t%s ejected=%s entries=%q msg=%q\n' "$_watch" \
+            "$( [ -f "$dir/ejected" ] && echo yes || echo no )" \
+            "$(ipc deviceEntries | tr '\n' ';')" "$(ipc lastMessage)"
+        sleep 2
+    done
     wait_message "Ejected FLEASTICK, it is safe to unplug."
     printf 'EJECT really entries=%q\n' "$(ipc deviceEntries)"
     shot eject-safe
