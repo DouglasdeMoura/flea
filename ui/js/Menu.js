@@ -82,11 +82,13 @@ function listingEntries(p) {
 // opens, and Restore puts the entry back where its info file says it came from. Delete permanently
 // removes it with its info, so it carries the danger mark Move to Trash carries elsewhere.
 // Everything that would orphan an info file or plant an unrestorable entry is gone: no Cut, no
-// Copy, no Paste, no Duplicate, no Rename, no share rows. The empty-trash row lives on the
-// background menu, because it acts on the whole trash and not on the row under the cursor.
+// Paste, no Duplicate, no Rename, no share rows. Copy stays: it leaves the entry standing.
+// The empty-trash row lives on the background menu, because it acts on the whole trash and not
+// on the row under the cursor.
 function trashEntries(p) {
     var out = []
     out.push({ label: "Open", action: "open", glyph: "folder-open" })
+    out.push({ label: "Copy", action: "copy", glyph: "copy" })
     out.push({ label: "Restore", action: "restore", glyph: "history" })
     out.push({ separator: true })
     // No confirm anywhere behind this row either: the dd pair is the safety, see ui/js/Trash.js.

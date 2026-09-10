@@ -5114,9 +5114,9 @@ case_trash() {
     key m >/dev/null
     settle
     [[ "$(ipc contextMenuVisible)" == "true" ]] || fail "trash: m opened no menu over the victim row"
-    [[ "$(ipc contextMenuEntries)" == "Open|Restore|-|Delete permanently|-|Show hidden files" ]] \
+    [[ "$(ipc contextMenuEntries)" == "Open|Copy|Restore|-|Delete permanently|-|Show hidden files" ]] \
         || fail "trash: the row menu is $(ipc contextMenuEntries)"
-    [[ "$(ipc contextMenuGlyphs)" == "folder-open|history|trash" ]] \
+    [[ "$(ipc contextMenuGlyphs)" == "folder-open|copy|history|trash" ]] \
         || fail "trash: the row menu draws $(ipc contextMenuGlyphs)"
     key -k Escape >/dev/null
     settle

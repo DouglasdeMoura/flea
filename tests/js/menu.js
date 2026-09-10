@@ -229,10 +229,10 @@ function runHidden(check, full) {
 function runTrash(check) {
     var rows = Menu.trashEntries({ showHidden: false, hiddenActions: [] })
     check("the trash row menu opens, restores and deletes",
-          labels(rows), "Open|Restore|-|Delete permanently|-|Show hidden files")
+          labels(rows), "Open|Copy|Restore|-|Delete permanently|-|Show hidden files")
     check("nothing there orphans an info file or plants an unrestorable entry",
           rows.map(function (r) { return r.action || "-" }).join("|"),
-          "open|restore|-|deletePermanent|-|toggleHidden")
+          "open|copy|restore|-|deletePermanent|-|toggleHidden")
     var back = Menu.trashBackgroundEntries({ showHidden: false, hiddenActions: [] })
     check("the trash background menu empties, selects and sorts",
           labels(back), "Empty trash|-|Select all|-|Sort by|Show hidden files")
