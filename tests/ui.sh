@@ -528,6 +528,15 @@ rail_seek() {
     fail "rail_seek never reached $want, the labels are $(ipc railLabels)"
 }
 
+# The rail index of a named row. Row positions move with Trash, Favorites and this box's own
+# devices, so a case names the row it means and never writes a number.
+rail_row_of() {
+    local want="$1" index
+    index=$(ipc railEntries | jq -r --arg want "$want" 'map(.label) | index($want) // -1')
+    [[ "$index" -ge 0 ]] || fail "rail_row_of: no rail row labelled $want in $(ipc railLabels)"
+    printf '%s' "$index"
+}
+
 # The Flea window is tiled here, so a pane coordinate needs its origin added before a click.
 window_box() {
     local clients geometry pid expected wx wy width height
@@ -5149,7 +5158,8 @@ case_gvfs() {
     key g >/dev/null
     key j >/dev/null
     settle
-    [[ "$(ipc railCursor)" == "1" ]] || fail "gvfs: share row is not rail index 1"
+    [[ "$(ipc railLabel "$(ipc railCursor)")" == "share.zip" ]] \
+        || fail "gvfs: the rail cursor is on $(ipc railLabel "$(ipc railCursor)"), not the share"
     key -k Return >/dev/null
     wait_path "$local_path"
     wait_listing 2
@@ -5166,7 +5176,7 @@ case_gvfs() {
     key -k Return >/dev/null
     wait_path "$fixture_home"
 
-    click_rail_row 1 right
+    click_rail_row "$(rail_row_of share.zip)" right
     settle
     [[ "$(ipc contextMenuEntries)" == "Unmount|Rename|Remove" ]] \
         || fail "gvfs: mounted share menu is $(ipc contextMenuEntries)"
@@ -5317,7 +5327,8 @@ EOS
     key g >/dev/null
     key j >/dev/null
     settle
-    [[ "$(ipc railCursor)" == "1" ]] || fail "sharebrowser: expected the rail cursor on StubNAS, got $(ipc railCursor)"
+    [[ "$(ipc railLabel "$(ipc railCursor)")" == "StubNAS" ]] \
+        || fail "sharebrowser: expected the rail cursor on StubNAS, got $(ipc railLabel "$(ipc railCursor)")"
     key l >/dev/null
     for _attempt in $(seq 1 100); do
         [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
@@ -5347,7 +5358,7 @@ EOS
     [[ "$(ipc cursor)" == "1" ]] || fail "sharebrowser: keyboard nav is dead after Escape, cursor is $(ipc cursor)"
 
     # Pointer-opened overlay leaves list focus underneath, so l must route through the active overlay.
-    click_rail_row 1 left
+    click_rail_row "$(rail_row_of StubNAS)" left
     for _attempt in $(seq 1 100); do
         [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
         sleep 0.05
@@ -5367,7 +5378,7 @@ EOS
 
     # Pointer reopens the overlay over list focus; retained Return drives the already-mounted share.
     [[ "$(ipc focusView)" == "list" ]] || fail "sharebrowser: opening share1 moved focus to $(ipc focusView)"
-    click_rail_row 1 left
+    click_rail_row "$(rail_row_of StubNAS)" left
     for _attempt in $(seq 1 100); do
         [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
         sleep 0.05
@@ -5389,7 +5400,7 @@ EOS
     # share3 fails the same way share2 refused, and the opposite thing has to happen: the bar names
     # the failure and the pane stays where it is. Without this arm a product that read any nonzero
     # mount exit as the harmless already-mounted case would pass every assertion above.
-    click_rail_row 1 left
+    click_rail_row "$(rail_row_of StubNAS)" left
     for _attempt in $(seq 1 100); do
         [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
         sleep 0.05
@@ -5486,7 +5497,8 @@ EOS
     key g >/dev/null
     key j >/dev/null
     settle
-    [[ "$(ipc railCursor)" == "1" ]] || fail "hangshare: expected the rail cursor on hang, got $(ipc railCursor)"
+    [[ "$(ipc railLabel "$(ipc railCursor)")" == "hang" ]] \
+        || fail "hangshare: expected the rail cursor on hang, got $(ipc railLabel "$(ipc railCursor)")"
     key l >/dev/null
     wait_marker "$dir/bin/info-started" "hangshare: the hang share's gio info never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" 2>/dev/null | sort -u | tr '\n' ';')"
 
@@ -5494,7 +5506,8 @@ EOS
     # must say so rather than swallow the keypress.
     key j >/dev/null
     settle
-    [[ "$(ipc railCursor)" == "2" ]] || fail "hangshare: expected the rail cursor on good, got $(ipc railCursor)"
+    [[ "$(ipc railLabel "$(ipc railCursor)")" == "good" ]] \
+        || fail "hangshare: expected the rail cursor on good, got $(ipc railLabel "$(ipc railCursor)")"
     key l >/dev/null
     wait_message "Another network location is still opening; give it a moment."
     [[ "$(ipc path)" == "$dir" ]] || fail "hangshare: the refused open navigated to $(ipc path)"
@@ -5620,7 +5633,7 @@ EOS
     # Right click raises the menu over the row and nothing else: the release row first, then the two
     # rows the saved place itself owns, and no unmount has run. The old two-right-click arm is gone,
     # see ui/Sidebar.qml "openRailMenu" and ui/js/Mounts.js "rowMenu".
-    click_rail_row 1 right
+    click_rail_row "$(rail_row_of stubshare)" right
     settle
     printf 'UNMOUNT menu visible=%s entries=%s glyphs=%s\n' \
         "$(ipc contextMenuVisible)" "$(ipc contextMenuEntries)" "$(ipc contextMenuGlyphs)"
@@ -5639,7 +5652,7 @@ EOS
     [[ -z "$(cat "$unmount_log")" ]] || fail "unmount: Escape unmounted anyway: $(cat "$unmount_log")"
 
     # Choosing the row is what unmounts, and the row's key is what says which share, not its index.
-    click_rail_row 1 right
+    click_rail_row "$(rail_row_of stubshare)" right
     settle
     key -k Return >/dev/null
     wait_message "Unmounted stubshare."
@@ -5667,7 +5680,7 @@ EOS
 
     # PR #21's Remove row, driven at last: three of the states ui/NetworkMounts.qml "forget" answers
     # for, each with its own sentence. This home has no bookmarks file, so the live share is unsaved.
-    click_rail_row 1 right
+    click_rail_row "$(rail_row_of stubshare)" right
     settle
     [[ "$(ipc contextMenuEntries)" == "Unmount|Rename|Remove" ]] \
         || fail "unmount: the share's menu is $(ipc contextMenuEntries) before Remove"
@@ -5707,7 +5720,7 @@ EOS
     # stub keeps is the only thing that can, and it already carries the deliberate unmount above.
     local unmount_log_before
     unmount_log_before=$(cat "$unmount_log")
-    click_rail_row 1 right
+    click_rail_row "$(rail_row_of stubshare)" right
     settle
     menu_seek Remove
     key -k Return >/dev/null
@@ -5724,7 +5737,7 @@ EOS
         || fail "unmount: the live row kept a name nothing saves any more, got $(ipc networkEntries)"
 
     # Saved and nothing mounted: the line and the row both go, and no unmount clause is offered.
-    click_rail_row 2 right
+    click_rail_row "$(rail_row_of 'Ghost Place')" right
     settle
     [[ "$(ipc contextMenuEntries)" == "Rename|Remove" ]] \
         || fail "unmount: an unmounted place offers $(ipc contextMenuEntries), not Rename then Remove"
@@ -5745,7 +5758,7 @@ EOS
     before_press4=$(stat -c %y "$bookmarks")
     # The second press on the row that is still there, which is the state one sentence used to blame
     # on a file nobody had read: the file has been read, and this share is simply not in it.
-    click_rail_row 1 right
+    click_rail_row "$(rail_row_of stubshare)" right
     settle
     menu_seek Remove
     key -k Return >/dev/null
