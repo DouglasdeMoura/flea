@@ -24,7 +24,12 @@ Flea.PreviewColumn {
         var context = root.rowState === Facts.PDF ? "pdf"
             : root.rowState === Facts.VIDEO || root.rowState === Facts.AUDIO ? "media" : "preview"
         var action = Keymap.lookup(event.key, event.text, event.modifiers, context)
-        if (action === "escape" || action === "focusPreview") root.pane.listArea.forceActiveFocus()
+        if (action === "escape" || action === "focusPreview") {
+            // Escape backs out of what is on screen: the column is showing the selection, so the
+            // same press that hands the keys back ends it, exactly as it would in the listing.
+            if (action === "escape") root.pane.escapePressed()
+            root.pane.listArea.forceActiveFocus()
+        }
         else if (action === "loadPreview") root.loadSelection()
         else if (root.rowState === Facts.PDF) PreviewKeys.pdfAction(action, root)
         else if (action === "preview") {
