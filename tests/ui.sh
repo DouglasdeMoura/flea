@@ -847,11 +847,12 @@ wait_terminal() {
 wait_message() {
     local want="$1" seen="" deadline=$(( $(date +%s%3N) + 25000 ))
     while (( $(date +%s%3N) < deadline )); do
-        seen=$(timeout 1 omarchy-drive ipc -p "$flea_ui" flea lastMessage 2>/dev/null || true)
+        # 3 s, not 1: one ipc round trip costs hundreds of ms and grows under load, and a call that
+        # times out returns nothing, which spends a sample of a sentence that stands for only 4 s.
+        seen=$(timeout 3 omarchy-drive ipc -p "$flea_ui" flea lastMessage 2>/dev/null || true)
         if [[ "$seen" == "$want" ]]; then
             return 0
         fi
-        sleep 0.1
     done
     fail "the status bar never said: $want (the last thing it said was: $seen)"
 }
