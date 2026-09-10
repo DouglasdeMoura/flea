@@ -120,6 +120,10 @@ function run(check) {
           PathBar.completionDir("/etc/ap", HOME, HOME), "/etc")
     check("a line with no slash completes in the pane's own directory",
           PathBar.completionDir("Dow", HOME, HOME), HOME)
+    check("a bare name in the trash completes under home, the same base resolve uses",
+          PathBar.completionDir("Dow", "flea:trash", HOME), HOME)
+    check("and falls back to root when there is no home",
+          PathBar.completionDir("Dow", "flea:trash", ""), "/")
     check("a line ending in a slash completes inside it",
           PathBar.completionDir("/etc/apt/", HOME, HOME), "/etc/apt")
     check("a tilde head resolves before the peek", PathBar.completionDir("~/Do", HOME, HOME), HOME)

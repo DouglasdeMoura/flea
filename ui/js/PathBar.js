@@ -112,7 +112,8 @@ function split(text) {
 function completionDir(text, current, home) {
     var head = split(String(text).trim()).head
     if (head.length === 0) {
-        return current
+        // Bare names in the trash resolve against home, so Tab must complete there too.
+        return Trash.isTrash(current) ? (home.length > 0 ? home : "/") : current
     }
     return resolve(head, current, home)
 }
