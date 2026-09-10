@@ -47,8 +47,11 @@ pub fn pick(reply: &str) -> i32 {
 fn qs_command(target: PathBuf) -> Command {
     let mut cmd = Command::new("qs");
     cmd.arg("-p").arg(target);
-    if let Ok(binary) = std::env::current_exe() {
-        cmd.env("FLEA_BIN", binary);
+    // An explicit choice is the operator's, the same rule FLEA_UI and QSG_RHI_BACKEND follow here.
+    if std::env::var_os("FLEA_BIN").is_none_or(|value| value.is_empty()) {
+        if let Ok(binary) = std::env::current_exe() {
+            cmd.env("FLEA_BIN", binary);
+        }
     }
     // Empty is absent, the rule paths::has_display() applies: a wrapper's unset variable is not a choice.
     if std::env::var_os("QSG_RHI_BACKEND").is_some_and(|value| !value.is_empty()) {

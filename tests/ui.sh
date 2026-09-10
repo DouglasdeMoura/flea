@@ -1217,8 +1217,10 @@ case_open() {
 
     local saved_path="$PATH"
     export PATH="$dir/bin:$PATH"
+    flea_bin="$dir/bin/flea"
     launch "$dir"
     export PATH="$saved_path"
+    flea_bin="$real_bin"
     # Measured row order: bin, subdir, broken, linkdir, linkfile, opened.log, sample.zip, target.txt.
     wait_listing 8
 
@@ -1309,19 +1311,27 @@ case_openterminal() {
     sandbox_scratch "$dir"
     mkdir -p "$dir/bin"
     printf 'abc' > "$dir/target.txt"
-    local ran="$dir/ran.log" opened="$dir/opened.log"
+    local ran="$dir/ran.log" opened="$dir/opened.log" real_bin="$flea_bin"
     : > "$ran"
     : > "$opened"
-    # src/terminal.rs spawns xdg-terminal-exec --dir=PATH, so that is the name this stubs on PATH.
-    # A stub named flea cannot work: src/gui.rs sets FLEA_BIN from current_exe(), so the moment the
-    # stub execs the real binary for --gui the shell is handed the real path and calls it instead,
-    # which is how this case used to open a real terminal and leave its window on the display.
-    # The sleep is what makes the single-flight guard and the two-paths-at-once check observable.
+    # FLEA_BIN is the backend's binary as well as the opener's, so only --terminal is intercepted
+    # and every other mode execs the real one: a stub that swallowed --backend would leave the
+    # window with no listing to press a key in. The sleep is what makes the single-flight guard and
+    # the two-paths-at-once check observable at all.
+    {
+      printf '#!/bin/sh\n'
+      printf '[ "$1" = --terminal ] || exec %q "$@"\n' "$real_bin"
+      printf 'sleep 1\n'
+      printf 'printf "TERMINAL %%s\\n" "$2" >> %q\n' "$ran"
+      printf 'exit 0\n'
+    } > "$dir/bin/flea"
+    chmod +x "$dir/bin/flea"
+    # The real route, stubbed too: if anything ever reaches src/terminal.rs this records it instead
+    # of opening a terminal on the operator's display, which is what used to leak a window per run.
     {
       printf '#!/bin/sh\n'
       printf '# Sample input: xdg-terminal-exec --dir=/home/flea-sandbox/fixtures/openterminal\n'
-      printf 'sleep 1\n'
-      printf 'printf "TERMINAL %%s\\n" "${1#--dir=}" >> %q\n' "$ran"
+      printf 'printf "REAL-TERMINAL %%s\\n" "${1#--dir=}" >> %q\n' "$ran"
       printf 'exit 0\n'
     } > "$dir/bin/xdg-terminal-exec"
     chmod +x "$dir/bin/xdg-terminal-exec"
