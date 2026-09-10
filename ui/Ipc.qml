@@ -178,6 +178,25 @@ QtObject {
                     root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.applicationsItem)],
                 confirmation: root.confirmationState(dialog.confirmationItem)})
         }
+        // OpenWith.html's own card: the two groups it draws, the seat the cursor holds, and the
+        // geometry a matched-size check measures against the board.
+        function openWithState(): string {
+            var dialog = root.pane.menuActions.item
+            if (!dialog || dialog.action !== "openWith") return JSON.stringify({opened: false})
+            return JSON.stringify({opened: dialog.opened, busy: dialog.busy, committing: dialog.committing,
+                kind: dialog.kind, mime: dialog.mime, name: dialog.name, always: dialog.always,
+                error: dialog.errorText, search: dialog.fieldItem.text, cursor: dialog.cursor,
+                rows: dialog.rows.map(function (row) {
+                    return row.eyebrow !== undefined ? {eyebrow: row.eyebrow, rule: row.rule === true}
+                         : {id: row.id, label: row.label, icon: row.icon, isDefault: row.default === true}
+                }),
+                rect: root.fleaWindow.rectOf(dialog.cardItem),
+                listRect: root.fleaWindow.rectOf(dialog.listItem),
+                rowRect: root.fleaWindow.rectOf(dialog.applicationItem(dialog.cursor)),
+                controls: [root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.listItem),
+                    root.controlState("Always", dialog.alwaysItem), root.controlState("Cancel", dialog.closeItem),
+                    Object.assign(root.controlState("Open", dialog.submitItem), {enabled: dialog.canSubmit})]})
+        }
         function permissionsState(): string {
             var dialog = root.permissionsDialog
             if (!dialog) return JSON.stringify({opened: false})

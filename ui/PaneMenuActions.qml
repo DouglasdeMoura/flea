@@ -284,6 +284,9 @@ Loader {
     }
     Connections {
         target: root.item
+        // Two dialogs load here and only one of them creates files or deletes them, so the handlers
+        // the other never raises are absent by design rather than misspelled.
+        ignoreUnknownSignals: true
         function onRequested(message) {
             if (message.op === "openWith") root.launchingId = message.id
             root.pane.backend.send(message)
