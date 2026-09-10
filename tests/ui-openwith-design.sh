@@ -95,6 +95,8 @@ case_openwithdesign() (
     menus_expect menuState '[.entries[] | select(.action == "openWith") | .submenu[] | select(.id == "zzflea-openwith.desktop")][0].icon == "text-x-generic"' \
         "a name that index cannot place is left for the themed lookup"
     shot openwith-flyout
+    # Two: the first closes the flyout, the second the menu holding it open behind it.
+    key -k Escape >/dev/null
     key -k Escape >/dev/null
 
     # Rules 4 and 5: the Convert popup family's width, two eyebrows naming the kind, and a list that
