@@ -1,4 +1,5 @@
 import QtQuick
+import "js/Menu.js" as Menu
 import "js/Ops.js" as Ops
 
 Loader {
@@ -18,6 +19,11 @@ Loader {
     property bool pendingActivation: false
     property bool activationUsed: false
     property int launchingId: 0
+    // OpenWith.html's flyout: the registry for the cursor row, asked for as the menu opens so the
+    // submenu is populated by the time the row is reached. The flyout writes nothing; the dialog
+    // stays the only place a default is written, which is Douglas de Moura's architecture kept whole.
+    property var openWithApps: []
+    property bool openWithLoaded: false
     property var survivors: []
     property int survivorId: 0
     property string survivorFolder: ""
@@ -123,12 +129,23 @@ Loader {
         var split = action.indexOf(":")
         if (providerAction(action) && !pane.contextMenu().validateChoice(split < 0 ? action : action.substring(0, split),
                 split < 0 ? "" : action.substring(split + 1))) return
+        // OpenWith.html rule 2: the flyout is a one-off override that writes nothing, so a chosen
+        // application launches through the same registry op the dialog submits, and the tail row is
+        // the only way into the dialog, which stays the one place a default is written.
+        if (action.indexOf("openWith:") === 0) {
+            var chosen = action.substring("openWith:".length)
+            if (chosen === Menu.OPEN_WITH_OTHER) { root.show("openWith"); return }
+            root.launchingId = requestId
+            pane.backend.send({c: "menuaction", op: "openWith", id: requestId, application: chosen})
+            return
+        }
         pane.backend.send({c: "menuaction", op: "activate", id: requestId, action: action,
             dest: pane.dropboxService ? pane.dropboxService.dropboxPath : ""})
     }
     function show(action) {
         pendingAction = ""
         if (action === "rename") { Ops.startRename(pane, requestId); return }
+        if (action === "openWith") { active = true; item.open(action, requestId, folder, pane.listArea); return }
         active = true
         item.open(action, requestId, folder, pane.listArea)
     }
@@ -202,6 +219,12 @@ Loader {
                 }
             }
             if (message.id !== root.requestId) return
+            if (message.op === "applications") {
+                root.openWithApps = message.applications || []
+                root.openWithLoaded = true
+                root.pane.contextMenu().refreshProviderRows()
+                return
+            }
             if (message.op === "providerDestination") {
                 root.providerDestinationPending = false
                 if (!message.ok && root.pane.dropboxService) root.pane.dropboxService.dropboxReason = message.error
@@ -220,6 +243,8 @@ Loader {
                     if (root.pendingActivation) root.validateActivation()
                     else root.show(root.pendingAction)
                 }
+                if (root.ready && root.pane.contextMenu().opened && root.pane.contextMenu().hasRow)
+                    root.pane.backend.send({c: "menuaction", op: "applications", id: root.requestId})
                 root.finishProviders()
                 return
             }

@@ -14,9 +14,13 @@ function clamp(point, size, bounds) {
     return Math.max(0, Math.min(Math.max(0, bounds - size), start))
 }
 
+// The flyout's tail row, which is the only way into the dialog; ui/PaneMenuActions.qml reads it.
+var OPEN_WITH_OTHER = "__another__"
+
 // SettingsMenus and SettingsPlaces share one order; F=file/folder, B=background, T=Trash rail.
 var INVENTORY = [
     ["open", "Open", "folder-open", "FT", "open"],
+    ["openwith", "Open with", "external-link", "F", "open", "openWith"],
     ["newFolder", "New Folder", "folder-plus", "B", "open"],
     ["newFile", "New File", "file-plus", "B", "open"],
     ["cut", "Cut", "scissors", "F", "basic"],
@@ -33,7 +37,6 @@ var INVENTORY = [
     ["sharelink", "Copy Share Link", "network", "F", "share"],
     ["trash", "Move to Trash", "trash", "F", "trash"],
     ["delete", "Delete permanently", "trash", "F", "trash", "deletePermanently"],
-    ["openwith", "Open With", "external-link", "F", "inspect", "openWith"],
     ["openTerminal", "Open in terminal", "terminal", "FB", "inspect"],
     ["moveto", "Move to", "folder-plus", "F", "inspect", "moveTo"],
     ["copyto", "Copy to", "copy", "F", "inspect", "copyTo"],
@@ -91,7 +94,7 @@ function availableEntry(e, p, kind) {
     if (e.action === "addFavourite" && kind === "F")
         e.disabled = count !== 1 || ((Number(p.rowMode) || 0) & 0o170000) !== 0o040000
     if (e.action === "paste") e.disabled = p.clipboardAvailable !== true
-    if (["duplicate", "rename", "openWith", "properties"].indexOf(e.action) >= 0)
+    if (["duplicate", "rename", "properties"].indexOf(e.action) >= 0)
         e.disabled = count !== 1
     if (e.action === "permissions") {
         var permission = permissionsEntry(p.rowMode, count)
@@ -104,6 +107,21 @@ function availableEntry(e, p, kind) {
     }
     if (e.action === "extract" && !(p.rowIsArchive && p.canExtract === true && count === 1)) return false
     if (e.action === "convert" && !(p.rowIsImage && p.canConvert && count === 1)) return false
+    // OpenWith.html: the desktop's current default is first and carries the muted caption "default"
+    // in the hint slot, the registry order follows it, and the tail row sits under its own
+    // separator with the app-window glyph. The row self-hides when the registry names nothing.
+    if (e.action === "openWith") {
+        if (p.openWithLoaded === true && !(p.openWithApps || []).length) return false
+        var apps = p.openWithApps || []
+        var rows = apps.map(function (app) {
+            return { id: app.id, label: app.label, icon: app.icon || "",
+                     hint: app.default === true ? "default" : "" }
+        })
+        if (rows.length) rows.push({ separator: true })
+        rows.push({ id: OPEN_WITH_OTHER, label: "Another application...", glyph: "external-link" })
+        e.submenu = rows
+        e.disabled = count !== 1
+    }
     if (e.action === "taildrop") {
         if (!p.taildropInstalled) return false
         e.mark = "tailscale"

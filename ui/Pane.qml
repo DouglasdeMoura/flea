@@ -576,6 +576,8 @@ FocusScope {
             ? root.backend.extraction.sevenZip : root.backend.extraction.archive
         rowMode: root.permissionSelection() ? root.permissionSelection().p : 0
         selectionCount: Ops.targetIndices(root).length
+        openWithApps: menuActions.openWithApps
+        openWithLoaded: menuActions.openWithLoaded
         selectionIdentity: root.menuSelectionIdentity
         clipboardAvailable: root.clipboard.paths.length > 0
         onSnapshotRequested: menuActions.snapshot()

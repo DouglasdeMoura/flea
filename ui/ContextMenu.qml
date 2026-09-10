@@ -34,6 +34,9 @@ Item {
     property bool rowIsImage: false
     property int rowMode: 0
     property int selectionCount: 0
+    // OpenWith.html's flyout rows, filled by ui/PaneMenuActions.qml when the registry answers.
+    property var openWithApps: []
+    property bool openWithLoaded: false
     // The actual account directory is available only after a fresh provider status and identity check.
     property string dropboxPath: ""
     property bool dropboxInstalled: false
@@ -124,6 +127,8 @@ Item {
             canConvert: root.canConvert,
             canExtract: root.canExtract,
             clipboardAvailable: root.clipboardAvailable,
+            openWithApps: root.openWithApps,
+            openWithLoaded: root.openWithLoaded,
             rowMode: root.rowMode,
             selectionCount: root.selectionCount,
             // The Menus settings section's stored set; ui/js/Menu.js applyHidden is what reads it.
@@ -144,6 +149,17 @@ Item {
         while (i >= 0 && i < root.entries.length) {
             if (root.entries[i].separator !== true && root.entries[i].disabled !== true)
                 return i
+            i += delta
+        }
+        return from
+    }
+
+    // The same rule inside a flyout: OpenWith.html's tail row sits under its own separator, and a
+    // separator is not somewhere the cursor may rest.
+    function stepSubmenu(from, delta) {
+        var rows = root.submenuEntries, i = from + delta
+        while (i >= 0 && i < rows.length) {
+            if (rows[i].separator !== true && rows[i].disabled !== true) return i
             i += delta
         }
         return from
@@ -438,10 +454,18 @@ Item {
                     width: peers.width
                     // Which mark a whole flyout draws is ui/js/Menu.js submenuGlyph's to say, so the
                     // read-back submenuGlyphs() above and the drawn row cannot answer differently.
-                    entry: ({ label: subRow.modelData.label, action: "", disabled: subRow.modelData.disabled === true,
-                              glyph: Menu.submenuGlyph(root.entries[root.openSubmenuRow].action) })
+                    // A flyout row may carry its own mark and caption: OpenWith.html rides each
+                    // application's own Icon in the mark slot and puts "default" in the hint slot,
+                    // and its tail row sits under a separator. Every other flyout keeps one glyph.
+                    entry: ({ label: subRow.modelData.label, action: "",
+                              disabled: subRow.modelData.disabled === true,
+                              separator: subRow.modelData.separator === true,
+                              hint: subRow.modelData.hint,
+                              icon: subRow.modelData.icon,
+                              glyph: subRow.modelData.glyph !== undefined ? subRow.modelData.glyph
+                                   : Menu.submenuGlyph(root.entries[root.openSubmenuRow].action) })
                     current: root.submenuCursor === subRow.index
-                    onPointerMoved: root.submenuCursor = subRow.index
+                    onPointerMoved: if (subRow.modelData.separator !== true) root.submenuCursor = subRow.index
                     onActivated: root.chooseSub(subRow.modelData.id)
                 }
             }
@@ -470,7 +494,7 @@ Item {
             }
             if (action === "cursorDown") {
                 if (root.submenuOpen)
-                    root.submenuCursor = Math.min(root.submenuEntries.length - 1, root.submenuCursor + 1)
+                    root.submenuCursor = root.stepSubmenu(root.submenuCursor, 1)
                 else
                     root.cursor = root.stepCursor(root.cursor, 1)
                 event.accepted = true
@@ -478,7 +502,7 @@ Item {
             }
             if (action === "cursorUp") {
                 if (root.submenuOpen)
-                    root.submenuCursor = Math.max(0, root.submenuCursor - 1)
+                    root.submenuCursor = root.stepSubmenu(root.submenuCursor, -1)
                 else
                     root.cursor = root.stepCursor(root.cursor, -1)
                 event.accepted = true
