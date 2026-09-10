@@ -1988,7 +1988,7 @@ case_background() {
         settle
         printf 'BACKGROUND %s entries=%s\n' "$view" "$(ipc contextMenuEntries)"
         shot "background-$view"
-        [[ "$(ipc contextMenuEntries)" == "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings" ]] \
+        [[ "$(ipc contextMenuEntries)" == "New Folder|New File|-|Paste|Select all|-|Add to Favorites|-|Sort by|Show hidden files|-|Settings" ]] \
             || fail "background: the $view view drew $(ipc contextMenuEntries)"
         key -k Escape >/dev/null
         settle
@@ -4815,7 +4815,12 @@ EOS
         || fail "networkauth: missing-helper setup did not reach Password"
     printf '%s' "$runtime_canary" | omarchy-drive key --window flea - >/dev/null
     mv "$dir/bin/flea-gio-auth" "$dir/bin/flea-gio-auth.real"
+    printf 'NETWORKAUTH_DIAG before focus=%s pw=%s result=%s uri=%s\n' \
+        "$(ipc networkFocus)" "$(ipc networkPasswordState)" "$(ipc networkResult)" "$(ipc networkUri)"
     key -k Return >/dev/null
+    settle
+    printf 'NETWORKAUTH_DIAG after pw=%s result=%s status=%q\n' \
+        "$(ipc networkPasswordState)" "$(ipc networkResult)" "$(ipc networkStatus)"
     wait_network_result failed 5
     [[ "$(ipc dialogOpen)" == "true" \
         && "$(ipc networkStatus)" == "Connect failed: authentication helper is unavailable" \
