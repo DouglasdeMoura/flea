@@ -22,6 +22,8 @@ pub struct Info {
 pub fn parse(text: &str) -> Info {
     let mut info = Info { original: None, deleted: String::new() };
     let mut in_group = false;
+    let mut saw_path = false;
+    let mut saw_date = false;
     for raw in text.lines() {
         let line = raw.trim();
         if line.is_empty() {
@@ -35,11 +37,17 @@ pub fn parse(text: &str) -> Info {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else { continue };
-        // Last wins, the same rule the .thumbnailer parser applies to a repeated key: the file
-        // names one value per key, so a second spelling supersedes the first rather than forking it.
+        // First wins: the trash spec names one value per key and says to keep the first when
+        // either is repeated, so a later Path cannot change where restore puts the entry.
         match key.trim() {
-            "Path" => info.original = decode_path(value),
-            "DeletionDate" => info.deleted = valid_date(value),
+            "Path" if !saw_path => {
+                saw_path = true;
+                info.original = decode_path(value);
+            }
+            "DeletionDate" if !saw_date => {
+                saw_date = true;
+                info.deleted = valid_date(value);
+            }
             _ => {}
         }
     }
@@ -124,9 +132,12 @@ mod tests {
     }
 
     #[test]
-    fn a_repeated_key_resolves_last_wins() {
-        let info = parse("[Trash Info]\nPath=/tmp/first\nPath=/tmp/second\nDeletionDate=2025-08-26T21:38:03\n");
-        assert_eq!(info.original, Some(PathBuf::from("/tmp/second")));
+    fn a_repeated_key_keeps_the_first() {
+        let info = parse("[Trash Info]\nPath=/tmp/first\nPath=/tmp/second\nDeletionDate=2025-08-26T21:38:03\nDeletionDate=2025-01-01T00:00:00\n");
+        assert_eq!(info.original, Some(PathBuf::from("/tmp/first")));
+        assert_eq!(info.deleted, "2025-08-26T21:38:03");
+        let info = parse("[Trash Info]\nPath=relative/first\nPath=/tmp/second\n");
+        assert_eq!(info.original, None, "the first Path is the one the spec keeps, even when it is not an original");
     }
 
     #[test]
