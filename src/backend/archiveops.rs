@@ -300,6 +300,21 @@ mod tests {
                 "run_boxed reads the status, so the non-zero arm never reaches the predicate");
     }
 
+    // GM converted an image and was told the archive tool had failed: one jail runs both, and every
+    // failure out of it named "archive". A tool that exits non-zero with nothing on stderr is the
+    // only case that reaches this wording, which is why it went unnoticed for so long.
+    #[test]
+    fn a_silent_failure_names_the_operation_that_was_running() {
+        let d = TestDir::new("archwho");
+        let work = Work::new(d.path(), "who").expect("work directory");
+        let quiet = vec!["/usr/bin/false".to_string()];
+        let converting = run_boxed("convert", quiet.clone(), d.path(), &work.dir).unwrap_err().to_string();
+        assert!(converting.contains("convert") && !converting.contains("archive"),
+                "an image conversion says so: {}", converting);
+        let archiving = run_boxed("archive", quiet, d.path(), &work.dir).unwrap_err().to_string();
+        assert!(archiving.contains("archive"), "and an archive still says archive: {}", archiving);
+    }
+
     #[test]
     fn a_file_that_is_not_an_archive_publishes_no_destination() {
         let d = TestDir::new("archnotone");
