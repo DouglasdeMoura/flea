@@ -144,7 +144,12 @@ Item {
     Item {
         id: mutedExtension
         visible: root.extension.length > 0 && field.selectionEnd <= root.stemEnd
-        x: field.x + field.positionToRectangle(root.stemEnd).x
+        // contentWidth is read so this re-evaluates once the field has laid the new text out.
+        // positionToRectangle is a method, so nothing re-runs it on its own, and begin() assigns the
+        // text and selects the stem in one go: the boundary was measured against the layout before
+        // that text existed, came back 0, and the patch covered the stem instead of the extension.
+        // Every view drew a rename as a bare ".txt" until the first keystroke moved the selection.
+        x: field.contentWidth >= 0 ? field.x + field.positionToRectangle(root.stemEnd).x : field.x
         y: field.y
         width: Math.max(0, field.width - (x - field.x))
         height: field.height
