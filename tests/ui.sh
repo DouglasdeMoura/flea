@@ -5719,6 +5719,9 @@ EOS
     # stub keeps is the only thing that can, and it already carries the deliberate unmount above.
     local unmount_log_before
     unmount_log_before=$(cat "$unmount_log")
+    printf 'UNMOUNT_DIAG net=%s rail=%s bookmarks=%q home=%s\n' \
+        "$(ipc networkEntries | tr '\n' ',')" "$(ipc railEntries | jq -c 'map(.label)')" \
+        "$(cat "$bookmarks" 2>&1)" "$(ipc uiSettings >/dev/null 2>&1 && echo ok || echo no-ipc)"
     click_rail_row "$(rail_row_of 'Saved Share')" right
     settle
     menu_seek Remove
