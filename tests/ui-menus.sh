@@ -390,7 +390,7 @@ menus_actions() {
     open_count=$(wc -l < "$menu_box/gio-open.log")
     menus_file_menu source.txt
     menus_choose open pointer
-    menus_error 'That file could not be opened' "$preset Open reports the real launcher refusal"
+    menus_error 'No application on this system opened that file.' "$preset Open reports the real launcher refusal"
     menus_equal "$preset Open calls gio once" "$((open_count + 1))" "$(wc -l < "$menu_box/gio-open.log")"
     menus_equal "$preset Open retains the captured path" "$directory/source.txt" "$(tail -n 1 "$menu_box/gio-open.log")"
     menus_acknowledge

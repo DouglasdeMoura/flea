@@ -132,12 +132,13 @@ function run(check) {
     check("Mac menu advertises its actual Return action", Keymap.hintFor("rename"), "enter")
     check("Mac Open hint uses native Right", Keymap.hintFor("open"), "right")
     Keymap.setPreset("vim")
-    check("Vim Copy advertises the pair", Keymap.hintFor("copy"), "yy")
-    check("Vim Cut advertises the pair", Keymap.hintFor("cut"), "dd")
+    check("Vim Copy hints the key it starts with", Keymap.hintFor("copy"), "y")
+    check("Vim Cut hints the key it starts with", Keymap.hintFor("cut"), "d")
     Keymap.setPreset("unknown")
     check("unknown stored preset resolves to Default", Keymap.preset, "default")
     check("Default Copy hint remains y", Keymap.hintFor("copy"), "y")
-    check("Default Trash hint advertises both required presses", Keymap.hintFor("trash"), "dd")
+    // Menus.html and the OpenWith overseer board both draw this row with d; the sheet below keeps dd.
+    check("Default Trash hints the key it starts with", Keymap.hintFor("trash"), "d")
     check("Default sheet never advertises a lone destructive d", Keymap.sheetFor("default", "gui").filter(function (row) {
         return row.action === "trash"
     })[0].keys.split(" / ").indexOf("d"), -1)

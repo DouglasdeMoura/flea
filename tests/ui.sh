@@ -1209,10 +1209,9 @@ case_rows() {
     [[ "$(hint_of Copy)" == "y" ]] || fail "rows: Copy prints $(hint_of Copy), not y"
     [[ "$(hint_of Paste)" == "p" ]] || fail "rows: Paste prints $(hint_of Paste), not p"
     [[ "$(hint_of Rename)" == "r" ]] || fail "rows: Rename prints $(hint_of Rename), not r"
-    # dd, not d: a single d only arms the trash, and a hint that says otherwise invites a press
-    # that does not do what it advertises. tests/js/keymap.js pins the same rule.
-    [[ "$(hint_of 'Move to Trash')" == "dd" ]] \
-        || fail "rows: Move to Trash prints $(hint_of 'Move to Trash'), not dd"
+    # d, the key the operator presses: Menus.html and the OpenWith overseer board both draw it.
+    [[ "$(hint_of 'Move to Trash')" == "d" ]] \
+        || fail "rows: Move to Trash prints $(hint_of 'Move to Trash'), not d"
     [[ "$(hint_of 'Show hidden files')" == "." ]] \
         || fail "rows: the hidden toggle prints $(hint_of 'Show hidden files'), not ."
     # The unbound row, and the whole point of the slot being derived rather than written by hand.

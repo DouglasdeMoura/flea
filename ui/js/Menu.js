@@ -110,13 +110,15 @@ function availableEntry(e, p, kind) {
         delete e.glyph
         e.submenu = p.taildropPeers || []
         e.disabled = p.providersRefreshing === true || !e.submenu.length
-        if (e.disabled) e.hint = p.providersRefreshing ? "checking" : p.taildropReason || "no peers"
+        // The row says it cannot answer by being red, not by carrying the reason: a sentence here
+        // widened the menu past its own frame while the providers were still being read.
+        if (e.disabled && p.providersRefreshing !== true) e.errored = true
     }
     if (e.action === "dropbox" || e.action === "sharelink") {
         if (!p.dropboxInstalled || (e.action === "dropbox" ? p.rowInDropbox : !p.rowInDropbox)) return false
         e.disabled = p.providersRefreshing === true || !p.dropboxPath
         if (e.action === "dropbox") { e.mark = "dropbox"; delete e.glyph }
-        if (e.disabled) e.hint = p.providersRefreshing ? "Checking Dropbox" : p.dropboxReason || "Dropbox unavailable"
+        if (e.disabled && p.providersRefreshing !== true) e.errored = true
     }
     if (e.action === "sort") e.submenu = sortEntries()
     if (e.action === "toggleHidden") {

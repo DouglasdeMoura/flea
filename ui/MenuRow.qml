@@ -37,14 +37,19 @@ Item {
     readonly property bool isSubmenu: Menu.hasSubmenu(root.entry)
     // A danger row takes the theme's error role for both its mark and its label, never a hardcoded red.
     readonly property bool danger: root.entry.danger === true
+    // A provider that cannot answer reads as an error in its own row, the way Move to Trash reads as
+    // a danger: red, and no sentence beside it widening the menu. GM's ruling, 2026-09-10.
+    readonly property bool errored: root.entry.errored === true
     // The key this row's action answers to, right-aligned per Menus.html. Derived from keys.toml
     // through the generated map, so an unbound action leaves the slot empty rather than guessing.
     // Empty with the Menus section's hints row off, which takes the slot's width with it.
     readonly property string hint: root.isSeparator ? "" : root.entry.hint !== undefined ? root.entry.hint
                                  : ViewState.keyHints ? Keymap.hintFor(root.entry.action) : ""
-    readonly property color markColor: !root.available ? Theme.color.muted : root.danger ? Theme.color.error
+    readonly property color markColor: root.errored ? Theme.color.error
+                                     : !root.available ? Theme.color.muted : root.danger ? Theme.color.error
                                      : root.picked ? Theme.color.accent : Theme.color.muted
-    readonly property color labelColor: !root.available ? Theme.color.muted : root.danger ? Theme.color.error
+    readonly property color labelColor: root.errored ? Theme.color.error
+                                      : !root.available ? Theme.color.muted : root.danger ? Theme.color.error
                                       : root.entry.labelColor !== undefined ? root.entry.labelColor
                                       : root.picked ? Theme.color.accent : Theme.color.foreground
 
