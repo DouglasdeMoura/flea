@@ -342,7 +342,7 @@ Item {
         root.message(reason, true)
         // The secret the operator just typed rides back to Retry, so the reopened dialog is
         // populated exactly as 0.1.6 populated it. A call site that passes "" means it has none.
-        var attempted = password === undefined ? root._requestPassword : password
+        var attempted = password || root._requestPassword
         if (!root.finishRequest(false, reason))
             root.retryRequested(root._pendingUri, root._pendingLabel, attempted, reason, true, root._pendingOrigin)
     }

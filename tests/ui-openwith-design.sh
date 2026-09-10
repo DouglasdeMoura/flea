@@ -36,7 +36,7 @@ openwith_clear_search() {
 }
 
 case_openwithdesign() (
-    local menu_box listing config data state name frame flyout mime_before openwith_flyout_rows=0
+    local menu_box listing config data state name frame flyout mime_before menus_checks=0 openwith_flyout_rows=0
     local -a numbers
     sandbox_require "$fixture_root"
     menu_box=$(mktemp -d "$fixture_root/openwith-design.XXXXXXXX") || fail 'openwith: owned fixture creation failed'

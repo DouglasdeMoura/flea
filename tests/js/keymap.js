@@ -144,6 +144,19 @@ function run(check) {
     })[0].keys.split(" / ").indexOf("d"), -1)
     check("menu-only actions invent no shortcut", Keymap.hintFor("emptyTrash"), "")
     check("sheet is populated from effective current bindings", Keymap.SHEET.length > 30, true)
+    // One cap names one key. Joining every spelling an action answers to produced caps of 40
+    // characters on Default and 78 on Mac, wider than the card, and they drew over the next column.
+    var widestCap = 0, identifierLabel = ""
+    for (var p = 0; p < Keymap.PRESETS.length; p++) {
+        var sheet = Keymap.sheetFor(Keymap.PRESETS[p], "gui")
+        for (var r = 0; r < sheet.length; r++) {
+            if (sheet[r].keys.length > widestCap) widestCap = sheet[r].keys.length
+            if (/[a-z][A-Z]/.test(sheet[r].label)) identifierLabel = sheet[r].label
+            if (sheet[r].keys.split(" / ").length > 2) identifierLabel = "too many spellings: " + sheet[r].keys
+        }
+    }
+    check("no cap in any preset outgrows its half of the card", widestCap <= 18, true)
+    check("no row prints an action id where its wording belongs", identifierLabel, "")
     check("pointer contract remains populated", Keymap.POINTER.length > 10, true)
     var effective = Keymap.bindingRows("mac", "gui")
     check("suppressed Mac Ctrl+X never appears in sheet", effective.some(function (r) { return r.mods === "ctrl" && r.key === "X" }), false)

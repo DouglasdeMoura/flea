@@ -235,20 +235,52 @@ function bindingRows(name, frontend) {
 function hintFor(action) {
     return HINTS[action] || ""
 }
+// How wide a cap may get before a second spelling stops earning its place. The sheet draws two
+// columns of a 300 unit card, so a cap past this elides and the wording beside it has nowhere to go.
+var SHEET_CAP_BUDGET = 16
+
+// An action id is not wording. A row the base sheet does not name printed its own identifier, so the
+// pane advertised "pageDown" and "textSizeReset" beside sentences like "hidden files".
+function spelledOut(action) {
+    return String(action).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase()
+}
+
+// Which spelling speaks for an action: the preset's own before an inherited one, and a plain key
+// before a chord. setPreset ranks the menu hint the same way, so the sheet and the menus agree.
+function capRank(row, preset) {
+    return (row.preset === preset ? 0 : 2) + (row.mods === "text" ? 0 : 1)
+}
+
 function sheetFor(name, frontend, dual) {
     var result = [], groups = {}, rows = bindingRows(name, frontend || "gui")
     for (var i = 0; i < rows.length; i++) {
         var row = rows[i], action = actionGroup(row.action)
         var group = groups[action]
         if (!group) {
-            var label = row.label || action
+            var label = row.label || spelledOut(action)
             for (var j = 0; j < BASE_SHEET.length; j++)
                 if (actionGroup(BASE_SHEET[j].action) === action) label = BASE_SHEET[j].label
-            group = { action: action, label: label, keys: "", context: "listing" }
+            group = { action: action, label: label, keys: "", context: "listing", spellings: [] }
             result.push(group)
             groups[action] = group
         }
-        group.keys += (group.keys ? " / " : "") + row.keys
+        group.spellings.push(row)
+    }
+    // One cap names one key. Joining every spelling an action answers to built caps of 40 characters
+    // on the default preset and 78 on mac, wider than the whole card, so the pane drew them across
+    // the column beside it. The best spelling always shows, a second only while both still fit.
+    for (var g = 0; g < result.length; g++) {
+        var spellings = result[g].spellings.slice()
+        spellings.sort(function (left, right) { return capRank(left, name) - capRank(right, name) })
+        var keys = spellings.length ? spellings[0].keys : ""
+        for (var k = 1; k < spellings.length; k++) {
+            var both = keys + " / " + spellings[k].keys
+            if (spellings[k].keys === keys || both.length > SHEET_CAP_BUDGET) continue
+            keys = both
+            break
+        }
+        result[g].keys = keys
+        delete result[g].spellings
     }
     if (dual && groups.focusNext) {
         groups.focusNext.keys = "tab"
