@@ -1850,9 +1850,10 @@ case_background() {
     printf 'BACKGROUND sort from=%s flyout=%s glyphs=%s\n' \
         "$(ipc sortMark)" "$(ipc contextMenuSubmenuEntries)" "$(ipc contextMenuSubmenuGlyphs)"
     shot background-sort
-    [[ "$(ipc contextMenuSubmenuEntries)" == "Name|Size|Date Modified" ]] \
+    # Four orders, because src/backend/ordering.rs answers kind as well as the three in sort.rs.
+    [[ "$(ipc contextMenuSubmenuEntries)" == "Name|Size|Date Modified|Kind" ]] \
         || fail "background: the Sort by flyout is $(ipc contextMenuSubmenuEntries)"
-    [[ "$(ipc contextMenuSubmenuGlyphs)" == "sort|sort|sort" ]] \
+    [[ "$(ipc contextMenuSubmenuGlyphs)" == "sort|sort|sort|sort" ]] \
         || fail "background: the sort flyout drew $(ipc contextMenuSubmenuGlyphs)"
     key -k Down >/dev/null
     key -k Return >/dev/null
@@ -4726,8 +4727,15 @@ EOS
     [[ "$(ipc dialogOpen)" == "false" ]] || fail "networkauth: successful save left dialog open"
     [[ "$(cat "$helper_log")" == "argc=1 uri=smb://tester@slot.test/data stdin-lines=1" ]] \
         || fail "networkauth: SMB helper route is $(cat "$helper_log")"
-    [[ "$(cat "$bookmarks")" == "smb://tester@slot.test/data data" ]] \
-        || fail "networkauth: secret-free bookmark is $(cat "$bookmarks")"
+    # A save lands in Flea Favorites, never the shared GTK file, and it carries no secret.
+    local saved_favourite
+    saved_favourite=$(ipc uiSettings | jq -c '.places.favourites[-1]')
+    [[ "$saved_favourite" == '{"label":"data","path":"smb://tester@slot.test/data"}' ]] \
+        || fail "networkauth: the saved favourite is $saved_favourite"
+    [[ -z "$(cat "$bookmarks")" ]] \
+        || fail "networkauth: a save wrote the shared GTK file, it now reads: $(cat "$bookmarks")"
+    ipc uiSettings | grep -F -q -- "$runtime_canary" \
+        && fail "networkauth: the saved favourite carries the password"
 
     # An already-mounted authenticated row resolves directly and never needs the process password.
     local helper_calls
