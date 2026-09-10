@@ -232,21 +232,42 @@ Item {
     readonly property string editorText: renameLoader.item ? renameLoader.item.current : ""
     function commitEditor() { return renameLoader.item ? renameLoader.item.commit() : false }
 
+    // The span ui/ColumnRow.qml draws its name in: the mark slot to its left, the chevron to its
+    // right. The editor covers exactly that, so the row's icon and its chevron stay where they are.
+    readonly property real renameLeft: Theme.spacing.rowPaddingX + Theme.iconSize + Theme.spacing.gap
+    readonly property real renameRight: Theme.spacing.rowPaddingX + Theme.font.caption + Theme.spacing.gap
+
+    // Opaque, and painted in the row's own roles: the row underneath goes on drawing its name, and
+    // without this the two texts overprinted each other. The renaming row is always the cursor row.
+    Rectangle {
+        parent: view.contentItem
+        visible: root.renaming
+        x: root.renameLeft
+        y: root.renameViewIndex * Theme.fileRowHeight
+        width: Math.max(0, view.width - root.renameLeft - root.renameRight)
+        height: Theme.fileRowHeight
+        z: 1
+        color: Theme.color.surface
+
+        Rectangle {
+            anchors.fill: parent
+            color: Style.selectedAccentFill
+        }
+    }
+
     Loader {
         id: renameLoader
         parent: view.contentItem
         // Loaded only while a rename is open: a RenameField built beside every row reports its own
         // hide at creation, and that hide is an abandon.
         active: root.renaming
-        x: 0
+        x: root.renameLeft
         y: root.renameViewIndex * Theme.fileRowHeight
-        width: view.width
+        width: Math.max(0, view.width - root.renameLeft - root.renameRight)
         height: Theme.fileRowHeight
-        z: 1
+        z: 2
         sourceComponent: Flea.RenameField {
             anchors.fill: parent
-            anchors.leftMargin: Theme.spacing.rowPaddingX + Theme.railIconSize + Theme.spacing.gap
-            anchors.rightMargin: Theme.spacing.rowPaddingX
             pane: root.pane
             name: root.pane && root.pane.rowFor(root.pane.renamingIndex)
                   ? String(root.pane.rowFor(root.pane.renamingIndex).n).split("/").pop() : ""
