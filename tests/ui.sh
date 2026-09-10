@@ -533,7 +533,8 @@ rail_seek() {
 rail_row_of() {
     local want="$1" index
     index=$(ipc railEntries | jq -r --arg want "$want" 'map(.label) | index($want) // -1')
-    [[ "$index" -ge 0 ]] || fail "rail_row_of: no rail row labelled $want in $(ipc railLabels)"
+    [[ "$index" -ge 0 ]] \
+        || fail "rail_row_of: no rail row labelled $want; model is $(ipc railEntries | jq -c 'map(.label)'), drawn is $(ipc railLabels)"
     printf '%s' "$index"
 }
 
