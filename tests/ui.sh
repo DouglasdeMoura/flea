@@ -7084,12 +7084,21 @@ settings_display() {
 # The chord is an alias, not a second engine: keys.toml binds textSizeUp, textSizeDown and
 # textSizeReset, and each one has to move the very state the panel's own rows show.
 settings_chord_alias() {
-    local omarchy_base="$1"
+    local omarchy_base="$1" start="$1"
+    # The stops top out at 20, so a box whose own base-size is already there has no room to grow and
+    # the chord has nothing it can prove. Step down first, and the pair is measured from that stop.
+    if (( omarchy_base >= 20 )); then
+        key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
+        settle
+        start=$(token_of baseSize)
+        (( start < omarchy_base )) \
+            || fail "settings: Ctrl+Shift+Minus did not step down from $omarchy_base"
+    fi
     key -M ctrl -M shift -k equal -m shift -m ctrl >/dev/null
     settle
     local grown
     grown=$(token_of baseSize)
-    (( grown > omarchy_base )) \
+    (( grown > start )) \
         || fail "settings: Ctrl+Shift+Plus did not grow the text size, still $grown"
     [[ "$(ipc lastMessage)" == "Text size ${grown}px. Ctrl+Shift+0 follows Omarchy again." ]] \
         || fail "settings: the chord did not announce its stop, got $(ipc lastMessage)"
@@ -7101,8 +7110,8 @@ settings_chord_alias() {
     settle
     key -M ctrl -M shift -k minus -m shift -m ctrl >/dev/null
     settle
-    [[ "$(token_of baseSize)" == "$omarchy_base" ]] \
-        || fail "settings: Ctrl+Shift+Minus did not step back one stop"
+    [[ "$(token_of baseSize)" == "$start" ]] \
+        || fail "settings: Ctrl+Shift+Minus did not step back one stop to $start"
     key -M ctrl -M shift -k 0 -m shift -m ctrl >/dev/null
     settle
     [[ "$(ipc lastMessage)" == "Text size follows Omarchy, ${omarchy_base}px." ]] \
