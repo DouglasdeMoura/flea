@@ -60,7 +60,7 @@ var PRESET_LABELS = { "default": "Default", vim: "Vim", mac: "Mac", windows: "Wi
 var GLYPHS = {
     cut: "scissors", copy: "copy", paste: "clipboard", duplicate: "file-plus", rename: "rename",
     trash: "trash", openTerminal: "terminal", copypath: "file-text", permissions: "lock", compress: "archive",
-    delete: "trash", openwith: "external-link", moveto: "folder-plus", copyto: "copy", properties: "info",
+    delete: "trash", openwith: "app-window", moveto: "folder-plus", copyto: "copy", properties: "info",
     extract: "archive-out",
     convert: "sliders", sharelink: "network", open: "folder-open", toggleHidden: "eye"
 }
