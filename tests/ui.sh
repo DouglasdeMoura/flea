@@ -92,6 +92,14 @@ expected_warnings="$run_root/expected-warnings"
 : > "$expected_warnings"
 printf 'NATIVE_EVIDENCE_ROOT=%s\n' "$run_root"
 
+# Every window this suite launches writes its settings back, so without a state home of its own the
+# run edits the operator's real ui.json: case_views left "view":"columns" in it and case_cursor,
+# which seeds nothing, then opened the 100k listing in the columns view and could not scroll a list.
+# A case that wants particular settings still seeds its own through seed_ui_state.
+suite_state="$run_root/state"
+mkdir -p "$suite_state" || fail "the suite state home could not be created at $suite_state"
+export XDG_STATE_HOME="$suite_state"
+
 # Ten bursts of twelve clicks moved the 100k viewport about eleven rows when measured.
 scroll_bursts=10
 wheel_clicks=12
