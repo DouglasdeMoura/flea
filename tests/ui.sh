@@ -525,7 +525,7 @@ rail_seek() {
         key j >/dev/null
         settle
     done
-    fail "rail_seek never reached $want, the labels are $(ipc railLabels)"
+    fail "rail_seek never reached $want; model is $(ipc railEntries | jq -c 'map(.label)'), drawn is $(ipc railLabels)"
 }
 
 # The rail index of a named row. Row positions move with Trash, Favorites and this box's own
@@ -1935,7 +1935,7 @@ case_background() {
     # The empty listing is also the strongest case for this menu, and it has no row to aim from.
     click_background
     settle
-    [[ "$(ipc contextMenuEntries)" == "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings" ]] \
+    [[ "$(ipc contextMenuEntries)" == "New Folder|New File|-|Paste|Select all|-|Add to Favorites|-|Sort by|Show hidden files|-|Settings" ]] \
         || fail "background: an empty directory drew $(ipc contextMenuEntries)"
     shot background-empty
     key -k Escape >/dev/null
@@ -4765,7 +4765,8 @@ EOS
     wait_network_entry_state true
     key -k Tab >/dev/null
     key g >/dev/null
-    key j >/dev/null
+    settle
+    rail_seek data
     key -k Return >/dev/null
     wait_network_result mounted
     [[ "$(ipc dialogOpen)" == "false" ]] \
@@ -4782,7 +4783,8 @@ EOS
     wait_network_entry_state false
     key -k Tab >/dev/null
     key g >/dev/null
-    key j >/dev/null
+    settle
+    rail_seek data
     key -k Return >/dev/null
     settle
     [[ "$(ipc dialogOpen)" == "true" && "$(ipc networkUri)" == "smb://tester@slot.test/data" ]] \
@@ -4848,7 +4850,8 @@ EOS
     wait_network_entry_state false
     key -k Tab >/dev/null
     key g >/dev/null
-    key j >/dev/null
+    settle
+    rail_seek data
     key -k Return >/dev/null
     settle
     helper_calls=$(wc -l < "$helper_log")
@@ -5301,8 +5304,8 @@ EOS
         key -k Tab >/dev/null
         settle
         key g >/dev/null
-        key j >/dev/null
         settle
+        rail_seek StubNAS
         key l >/dev/null
         for _attempt in $(seq 1 100); do
             [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
@@ -5324,10 +5327,8 @@ EOS
     settle
     [[ "$(ipc focusView)" == "rail" ]] || fail "sharebrowser: Tab did not reach the rail"
     key g >/dev/null
-    key j >/dev/null
     settle
-    [[ "$(ipc railLabel "$(ipc railCursor)")" == "StubNAS" ]] \
-        || fail "sharebrowser: expected the rail cursor on StubNAS, got $(ipc railLabel "$(ipc railCursor)")"
+    rail_seek StubNAS
     key l >/dev/null
     for _attempt in $(seq 1 100); do
         [[ "$(ipc shareBrowserOpen)" == "true" ]] && break
@@ -5494,10 +5495,9 @@ EOS
     settle
     [[ "$(ipc focusView)" == "rail" ]] || fail "hangshare: Tab did not reach the rail"
     key g >/dev/null
-    key j >/dev/null
     settle
-    [[ "$(ipc railLabel "$(ipc railCursor)")" == "hang" ]] \
-        || fail "hangshare: expected the rail cursor on hang, got $(ipc railLabel "$(ipc railCursor)")"
+    rail_seek hang
+    settle
     key l >/dev/null
     wait_marker "$dir/bin/info-started" "hangshare: the hang share's gio info never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" 2>/dev/null | sort -u | tr '\n' ';')"
 
@@ -5548,11 +5548,9 @@ EOS
     # Home(0), hang(1), good(2), StubRoot(3).
     rail_focus
     key g >/dev/null
-    key j >/dev/null
-    key j >/dev/null
-    key j >/dev/null
     settle
-    [[ "$(ipc railCursor)" == "3" ]] || fail "hangshare: expected the rail cursor on StubRoot, got $(ipc railCursor)"
+    rail_seek StubRoot
+    settle
     key l >/dev/null
     wait_marker "$dir/bin/list-started" "hangshare: the bare root's gio list never started, the stub saw: $(grep -v '^mount -l$' "$dir/bin/calls" 2>/dev/null | sort -u | tr '\n' ';')"
     wait_message "Connect failed: host did not respond"
@@ -8054,6 +8052,9 @@ vaapi_warning="VAAPITextureConverter: No rhi or non openGL based RHI"
 # case_formats and case_previewviews open a file with no permission bits on purpose; Qt names it, and this run's fixture path is the whole match.
 unreadable_warning="$fixture_root/formats/shut.jpg"
 unreadable_warning2="$fixture_root/previewviews/shut.jpg"
+# case_settings and case_networkauth chmod 000 a fixture ui.json on purpose, so Quickshell reports
+# that it cannot watch it. How many times it says so is the watch's business, not this suite's.
+unreadable_state_warning="/flea/ui.json) failed: (Permission denied)"
 while IFS= read -r warning; do
     count=$(grep -F -c -- "$warning" "$run_log" || true)
     if [[ "$count" != 1 ]]; then
@@ -8061,7 +8062,8 @@ while IFS= read -r warning; do
         failures=$((failures + 1))
     fi
 done < "$expected_warnings"
-if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" "$run_log" \
+if grep -F -v -e "$expected_warning" -e "$vaapi_warning" -e "$unreadable_warning" -e "$unreadable_warning2" \
+    -e "$unreadable_state_warning" "$run_log" \
     | grep -F -v -f "$expected_warnings" | grep -E 'WARN|ERROR|TypeError|ReferenceError|Cannot open'; then
     printf 'FAIL log\n'
     failures=$((failures + 1))
