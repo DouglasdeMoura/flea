@@ -129,13 +129,10 @@ function newFolder(pane) {
     pane.backend.mkdir(pane.path)
 }
 
-// The list and the grid draw the same inline editor; the columns view cannot, see ui/ColumnPane.qml.
+// Every view draws the same inline editor: the list and the grid inside the row, the columns view
+// over its active column, see ui/ColumnPane.qml's own corner.
 function startRename(pane, menuId) {
     if (pane.renamePending) return
-    if (pane.viewMode === "columns") {
-        pane.message("Rename needs the list or grid view.", false)
-        return
-    }
     var row = pane.rowFor(pane.cursorIndex)
     if (row) {
         pane.setCursor(pane.cursorIndex)

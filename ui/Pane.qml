@@ -349,6 +349,9 @@ FocusScope {
     // The live editor or null: a set renamingIndex is not evidence one exists, see ui/RenameField.qml.
     function renameEditor() {
         if (root.renamingIndex < 0) return null
+        // The columns view draws one editor over its active column rather than one inside each row.
+        if (root.viewMode === "columns")
+            return root.columnsArea && root.columnsArea.activeColumn().renaming ? root.columnsArea.activeColumn() : null
         var item = root.visibleItemFor(root.renamingIndex)
         return item && item.renaming ? item : null
     }

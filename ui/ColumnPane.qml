@@ -176,12 +176,6 @@ Item {
             cursor: root.selectedIndex >= 0 && listingIndex === root.selectedIndex
             // The list and the grid both mark a selection member apart from the cursor; so does this.
             selected: root.pane !== null && root.pane.isSelected(listingIndex)
-            // corner: no inline rename in this view. A delegate binding that follows the pane's
-            // renamingIndex costs this column its keys: the comma that opens Settings never reached
-            // ui/js/Focus.js at all, which case_overlays catches and 833d4f8 passes. Measured on the
-            // box: a binding that never follows the pane keeps the keys, every one that does loses
-            // them. ui/js/Ops.js refuses the rename here so no row ever offers an editor it cannot open.
-            renaming: false
             dropTarget: dragSession.dropIndex >= 0 && listingIndex === dragSession.dropIndex
             dropCopying: dragSession.dragCopy
             // Read off the normalised row above: subscripting rows again hands a shrunk listing's undefined to a bool.
@@ -224,6 +218,41 @@ Item {
         listingState: root.lockedMode >= 0 ? "locked" : "ready"
         lockedMode: root.lockedMode
         total: root.rows.length
+    }
+
+    // corner: one editor for this column, never one inside each row. A delegate binding that follows
+    // the pane's renamingIndex costs this column its keys, measured on the box: the comma that opens
+    // Settings stopped reaching ui/js/Focus.js, which case_overlays catches. An overlay follows no
+    // delegate, so the keys are safe by construction and only the active column ever draws one.
+    readonly property int renameViewIndex: root.pane !== null && root.pane.renamingIndex >= 0
+                                           ? Filter.viewOf(root.pane.shown, root.pane.renamingIndex) : -1
+    readonly property bool renaming: root.renameViewIndex >= 0
+    // What ui/Pane.qml's renameEditor() hands ui/Ipc.qml, the shape a list delegate hands it.
+    readonly property Item editorField: renameLoader.item
+    readonly property string editorText: renameLoader.item ? renameLoader.item.current : ""
+    function commitEditor() { return renameLoader.item ? renameLoader.item.commit() : false }
+
+    Loader {
+        id: renameLoader
+        parent: view.contentItem
+        // Loaded only while a rename is open: a RenameField built beside every row reports its own
+        // hide at creation, and that hide is an abandon.
+        active: root.renaming
+        x: 0
+        y: root.renameViewIndex * Theme.fileRowHeight
+        width: view.width
+        height: Theme.fileRowHeight
+        z: 1
+        sourceComponent: Flea.RenameField {
+            anchors.fill: parent
+            anchors.leftMargin: Theme.spacing.rowPaddingX + Theme.railIconSize + Theme.spacing.gap
+            anchors.rightMargin: Theme.spacing.rowPaddingX
+            pane: root.pane
+            name: root.pane && root.pane.rowFor(root.pane.renamingIndex)
+                  ? String(root.pane.rowFor(root.pane.renamingIndex).n).split("/").pop() : ""
+            onCommitted: function (newName) { root.pane.commitRename(newName) }
+            onAbandoned: root.pane.renamingIndex = -1
+        }
     }
 
     // For ui/Ipc.qml's columnChildEmpty readers: the tile's state and its mark's box.
