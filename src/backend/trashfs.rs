@@ -102,10 +102,11 @@ fn delete_in(paths: &[PathBuf], roots: &[PathBuf]) -> (usize, usize) {
             continue;
         };
         let gone = match std::fs::symlink_metadata(p) {
-            Err(_) => true,
+            Err(e) if e.kind() == ErrorKind::NotFound => true,
+            Err(_) => false,
             Ok(m) if m.is_dir() => std::fs::remove_dir_all(p).is_ok(),
             Ok(_) => std::fs::remove_file(p).is_ok(),
-        } && std::fs::symlink_metadata(p).is_err();
+        } && matches!(std::fs::symlink_metadata(p), Err(e) if e.kind() == ErrorKind::NotFound);
         if gone {
             let _ = std::fs::remove_file(trash.join("info").join(format!("{leaf}.trashinfo")));
             ok += 1;
