@@ -94,9 +94,10 @@ ListView {
         DragHandler {
             id: lift
             target: null
+            enabled: !cell.inTrash
             // The list is a Flickable and would take the grab past its own threshold; without ApprovesTakeOverByItems it cannot.
             grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfDifferentType | PointerHandler.ApprovesTakeOverByHandlersOfSameType
-            onActiveChanged: if (active && !cell.inTrash) root.liftBegan(cell.listingIndex, ghost, lift.centroid)
+            onActiveChanged: if (active) root.liftBegan(cell.listingIndex, ghost, lift.centroid)
             onCentroidChanged: if (active) root.liftMoved(lift.centroid)
             onGrabChanged: function (transition, point) {
                 if (transition === PointerDevice.UngrabExclusive || transition === PointerDevice.CancelGrabExclusive)

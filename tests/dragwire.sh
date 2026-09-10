@@ -52,5 +52,13 @@ else
     printf '%s\n' "$side" | sed 's/^/     /'
 fi
 
+# A DragHandler that stays enabled in the trash can take the ListView's grab even when liftBegan
+# is gated, so a press-and-move on a trash row blocks scrolling.
+if code_of ui/List.qml | grep -q 'enabled: !cell.inTrash'; then
+    ok "the list drag is disabled on a trash row"
+else
+    bad "DragHandler must be disabled in the trash, or it still takes the list's pointer grab"
+fi
+
 printf 'dragwire: %s check(s), %s failed\n' "$((pass + fail))" "$fail"
 [ "$fail" -eq 0 ]
