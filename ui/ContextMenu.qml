@@ -205,9 +205,14 @@ Item {
                              frame.height, Math.max(0, root.workArea.height - 2 * root.workAreaInset))
     }
 
+    // Where any row last saw the pointer, so a row can tell a pointer moving onto it from a row
+    // arriving under a pointer that is standing still. Forgotten each time the menu is placed.
+    property point pointerGlobal: Qt.point(-1, -1)
+
     function place(scenePoint) {
         if (!root.opened)
             root.focusHolder = root.Window.window ? root.Window.window.activeFocusItem : null
+        root.pointerGlobal = Qt.point(-1, -1)
         var point = root.mapFromItem(null, scenePoint)
         root.placeX = point.x
         root.placeY = point.y
@@ -357,6 +362,8 @@ Item {
                     entry: row.modelData
                     compact: root.forRail && root.railKey !== "trash" && root.railKey !== "trashSelection"
                     current: !root.submenuOpen && root.cursor === row.index
+                    lastPointerGlobal: root.pointerGlobal
+                    onPointerSeen: function (at) { root.pointerGlobal = at }
                     onPointerMoved: {
                         root.cursor = row.index
                         if (Menu.hasSubmenu(row.modelData)) root.openSubmenu(row.index)

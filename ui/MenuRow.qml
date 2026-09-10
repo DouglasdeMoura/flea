@@ -26,6 +26,10 @@ Item {
     readonly property bool hovered: pointer.hovered
     // For ui/Ipc.qml's contextMenuRowProbe: whether the pointer is over this row and where, before a test judges a move.
     function probe() { return pointer.hovered + " " + Math.round(pointer.point.position.x) + " " + Math.round(pointer.point.position.y) + " " + Math.round(pointer.restingAt.x) + " " + Math.round(pointer.restingAt.y) }
+    // Where any row of this menu last saw the pointer, so a row can tell a pointer that moved onto
+    // it from a row that scrolled under a pointer standing still. ui/ContextMenu.qml owns the value.
+    property point lastPointerGlobal: Qt.point(-1, -1)
+    signal pointerSeen(point at)
 
     readonly property bool available: root.entry.disabled !== true
     readonly property bool isSeparator: root.entry.separator === true
@@ -174,7 +178,23 @@ Item {
         // Global coordinates distinguish actual motion from a row moving beneath the resting pointer.
         property bool armed: false
         property point restingAt
-        onHoveredChanged: pointer.armed = false
+        // A menu that opens under a pointer standing still delivers no hover at all here, measured on
+        // this box, so the hover that does arrive was caused by the pointer moving and must light the
+        // row. The one exception is a row arriving under a pointer that has not moved, which reports
+        // the position the menu last saw; that one only records where the pointer is.
+        onHoveredChanged: {
+            if (!pointer.hovered) {
+                pointer.armed = false
+                return
+            }
+            var position = root.mapToGlobal(pointer.point.position)
+            pointer.armed = true
+            pointer.restingAt = position
+            var known = root.lastPointerGlobal
+            root.pointerSeen(position)
+            if (known.x < 0 || position.x !== known.x || position.y !== known.y)
+                root.pointerMoved()
+        }
         onPointChanged: {
             if (!pointer.hovered)
                 return
@@ -182,10 +202,12 @@ Item {
             if (!pointer.armed) {
                 pointer.armed = true
                 pointer.restingAt = position
+                root.pointerSeen(position)
                 return
             }
             var moved = position.x !== pointer.restingAt.x || position.y !== pointer.restingAt.y
             pointer.restingAt = position
+            root.pointerSeen(position)
             if (moved)
                 root.pointerMoved()
         }
