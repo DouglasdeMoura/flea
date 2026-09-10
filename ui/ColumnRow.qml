@@ -31,11 +31,11 @@ Item {
     property bool dropCopying: false
     property bool renaming: false
     property var renamePane: null
-    readonly property string editorText: editorLoader.item ? editorLoader.item.current : ""
-    readonly property Item editorField: editorLoader.item
+    readonly property string editorText: editor.current
+    readonly property Item editorField: editor
     signal renameCommitted(string newName)
     signal renameAbandoned()
-    function commitEditor() { return editorLoader.item ? editorLoader.item.commit() : false }
+    function commitEditor() { return editor.commit() }
 
     // Truthiness, like the two readers below: ui/ColumnPane.qml hands this rows[index] raw, so a
     // listing that shrank leaves a surviving delegate holding undefined, which is not null.
@@ -44,9 +44,7 @@ Item {
                                 : root.dim ? Theme.color.muted
                                 : Theme.color.foreground
 
-    implicitHeight: root.renaming && editorLoader.item
-        ? Math.max(Theme.fileRowHeight, editorLoader.item.implicitHeight + 2 * Theme.spacing.rowPaddingY)
-        : Theme.fileRowHeight
+    implicitHeight: root.renaming ? Math.max(Theme.fileRowHeight, editor.implicitHeight + 2 * Theme.spacing.rowPaddingY) : Theme.fileRowHeight
 
     Rectangle {
         anchors.fill: parent
@@ -119,23 +117,17 @@ Item {
         elide: Text.ElideRight
     }
 
-    // A Loader, not a hidden editor: a TextInput that merely exists in every column delegate takes
-    // this column's keys away from the pane, and the comma that opens Settings never arrived.
-    Loader {
-        id: editorLoader
-        active: root.renaming
+    Flea.RenameField {
+        id: editor
         visible: root.renaming
         anchors { left: markSlot.right; right: chevronSlot.left; verticalCenter: parent.verticalCenter }
         anchors.leftMargin: Theme.spacing.gap
         anchors.rightMargin: Theme.spacing.gap
-        height: item ? item.implicitHeight : 0
-        sourceComponent: Flea.RenameField {
-            pane: root.renamePane
-            name: root.row ? root.row.n.split("/").pop() : ""
-            width: editorLoader.width
-            onCommitted: function(newName) { root.renameCommitted(newName) }
-            onAbandoned: root.renameAbandoned()
-        }
+        height: implicitHeight
+        pane: root.renamePane
+        name: root.row ? root.row.n.split("/").pop() : ""
+        onCommitted: function(newName) { root.renameCommitted(newName) }
+        onAbandoned: root.renameAbandoned()
     }
 
     // Only a chosen directory carries it: it says the column to the right is showing what is inside.
