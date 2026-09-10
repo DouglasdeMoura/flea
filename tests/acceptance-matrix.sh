@@ -70,7 +70,7 @@ assert len(rows) == len({(row[0], row[3]) for row in rows})
 assert len({row[0] for row in rows if row[3] != 'header'}) == 29
 assert ['delete', 'deletePermanently', 'Delete permanently', 'file'] in rows
 assert ['moveto', 'moveTo', 'Move to', 'file'] in rows
-assert ['openwith', 'openWith', 'Open With', 'file'] in rows
+assert ['openwith', 'openWith', 'Open with', 'file'] in rows
 assert {row[3] for row in rows if row[0] == 'open'} == {'file', 'trash'}
 assert {row[3] for row in rows if row[0] == 'paste'} == {'file', 'background'}
 assert {row[0] for row in rows if row[3] == 'header'} == {'col:mode', 'col:size', 'col:date', 'col:kind'}

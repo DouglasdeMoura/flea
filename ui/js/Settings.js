@@ -44,7 +44,7 @@ var LOCKED = ["open", "toggleHidden"]
 var LABELS = {
     cut: "Cut", copy: "Copy", paste: "Paste", duplicate: "Duplicate", rename: "Rename",
     trash: "Move to Trash", openTerminal: "Open in terminal", copypath: "Copy path", permissions: "Permissions",
-    delete: "Delete permanently", openwith: "Open With", moveto: "Move to", copyto: "Copy to", properties: "Properties",
+    delete: "Delete permanently", openwith: "Open with", moveto: "Move to", copyto: "Copy to", properties: "Properties",
     compress: "Compress", extract: "Extract",
     convert: "Convert", taildrop: "Send with Taildrop", dropbox: "Move to Dropbox",
     sharelink: "Copy Share Link", open: "Open", toggleHidden: "Show hidden files"
