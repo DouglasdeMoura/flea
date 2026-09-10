@@ -40,16 +40,16 @@ function run(check) {
     check("byId misses cleanly", Taildrop.byId(peers, "nope"), null)
     check("JSON null is not a peer list", Taildrop.parsePeers("null").length, 0)
     check("failed status keeps its diagnostic", Taildrop.status("", 1, "Permission denied").reason, "Permission denied")
-    check("malformed status is distinct from no peers", Taildrop.status("not json", 0, "").reason, "Tailscale returned invalid status.")
-    check("signed out is retained as a reason", Taildrop.status('{"BackendState":"NeedsLogin"}', 0, "").reason, "Tailscale is signed out")
-    check("stopped is retained as a reason", Taildrop.status('{"BackendState":"Stopped"}', 0, "").reason, "Tailscale is Stopped")
+    check("malformed status is distinct from no peers", Taildrop.status("not json", 0, "").reason, "invalid status")
+    check("signed out is retained as a reason", Taildrop.status('{"BackendState":"NeedsLogin"}', 0, "").reason, "signed out")
+    check("stopped is retained as a reason", Taildrop.status('{"BackendState":"Stopped"}', 0, "").reason, "stopped")
     check("running without file sharing cannot send", Taildrop.status('{"BackendState":"Running","Self":{}}', 0, "").peers.length, 0)
     var ready = JSON.parse(status)
     ready.BackendState = "Running"
     ready.Self.Capabilities = ["https://tailscale.com/cap/file-sharing"]
     check("ready status carries real eligible targets", Taildrop.status(JSON.stringify(ready), 0, "").peers.length, 2)
     ready.Peer = {}
-    check("empty installed provider names the empty state", Taildrop.status(JSON.stringify(ready), 0, "").reason, "No peers reachable")
+    check("empty installed provider names the empty state", Taildrop.status(JSON.stringify(ready), 0, "").reason, "no peers")
     check("missing Dropbox account is signed out", Dropbox.account("", "").reason, "Dropbox is signed out")
     check("Dropbox account read errors are preserved", Dropbox.account("", "Permission denied").reason, "Permission denied")
     check("invalid account JSON is an explicit error", Dropbox.account("{", "").reason, "Dropbox account metadata is invalid")

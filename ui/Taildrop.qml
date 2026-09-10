@@ -9,7 +9,7 @@ Item {
     id: root
 
     property var peers: []
-    property string reason: "Checking Tailscale"
+    property string reason: "checking"
     property string sendCommand: ""
     property bool checking: false
     property bool _awaitingStart: false
@@ -25,7 +25,7 @@ Item {
         peers = []
         var provider = facts.taildrop || {}, sender = facts.taildropSend || {}
         sendCommand = sender.command || ""
-        reason = provider.reason || sender.reason || "Checking Tailscale"
+        reason = provider.reason || sender.reason || "checking"
         if (!provider.command || !sendCommand) return true
         checking = true
         _awaitingStart = true

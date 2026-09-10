@@ -110,7 +110,7 @@ function availableEntry(e, p, kind) {
         delete e.glyph
         e.submenu = p.taildropPeers || []
         e.disabled = p.providersRefreshing === true || !e.submenu.length
-        if (e.disabled) e.hint = p.providersRefreshing ? "Checking Tailscale" : p.taildropReason || "No peers reachable"
+        if (e.disabled) e.hint = p.providersRefreshing ? "checking" : p.taildropReason || "no peers"
     }
     if (e.action === "dropbox" || e.action === "sharelink") {
         if (!p.dropboxInstalled || (e.action === "dropbox" ? p.rowInDropbox : !p.rowInDropbox)) return false

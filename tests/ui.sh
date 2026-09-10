@@ -1824,9 +1824,10 @@ case_background() {
     printf 'BACKGROUND_OCR_END\n'
     [[ "$(ipc contextMenuVisible)" == "true" ]] \
         || fail "background: a right click on empty space opened no menu"
-    [[ "$(ipc contextMenuEntries)" == "New folder|-|Paste|Select all|-|Sort by|Show hidden files|-|Settings" ]] \
+    # Menus.html's background column: New Folder and New File lead it, and GM ruled Add to Favorites stays.
+    [[ "$(ipc contextMenuEntries)" == "New Folder|New File|-|Paste|Select all|-|Add to Favorites|-|Sort by|Show hidden files|-|Settings" ]] \
         || fail "background: the menu is not the board's column, it is $(ipc contextMenuEntries)"
-    [[ "$(ipc contextMenuGlyphs)" == "folder-plus|-|clipboard|check|-|sort|eye|-|sliders" ]] \
+    [[ "$(ipc contextMenuGlyphs)" == "folder-plus|file-plus|-|clipboard|check|-|star|-|sort|eye|-|sliders" ]] \
         || fail "background: a row lost its mark, the set is $(ipc contextMenuGlyphs)"
     # A right click ON a row still gets that row's own menu: the two entrances share one instance,
     # so a hasRow left standing from the last open would be the defect this asserts against.
@@ -4162,7 +4163,11 @@ EOS
     legacy_index=$(ipc railEntries | jq -r 'map(.label) | index("Legacy share")')
     click_rail_row "$legacy_index" right
     settle
-    [[ "$(ipc contextMenuVisible)" == false ]] || fail "network: a legacy GTK row offered a write action"
+    # The rail menu is offered, the same as 0.1.6: opening it writes nothing, only activating a row does.
+    [[ "$(ipc contextMenuVisible)" == true ]] || fail "network: a legacy GTK row offered no rail menu"
+    printf 'NETWORK legacy-rail-menu=%s\n' "$(ipc contextMenuEntries)"
+    key -k Escape >/dev/null
+    settle
     [[ "$(cat "$bookmarks")" == "$legacy_before" ]] || fail "network: legacy GTK bytes changed"
     printf 'NETWORK restart=favourites-and-legacy gtk=unchanged\n'
 
@@ -4513,7 +4518,9 @@ case_networkauth() {
             "$evidence_dir" "$flea_log" "$run_log" "$case_log" \
             "$repo/.superpowers/flea/release-014-20260904/reports/baseline-authenticated-ui.md"; do
             [[ -e "$surface" ]] || continue
-            ! printf '%s\n' "$runtime_canary" | grep -R -a -F -q -f - "$surface" 2>/dev/null \
+            # -D skip and -r, not -R: case_network leaves FIFOs in its fixture, and a recursive read
+            # of one blocks in the kernel forever waiting for a writer that never comes.
+            ! printf '%s\n' "$runtime_canary" | grep -r -D skip -a -F -q -f - "$surface" 2>/dev/null \
                 || fail "networkauth: runtime canary reached byte-addressable surface"
         done
         for method in themeForeground selectedFill palette metrics tokens selectedIndices focusView \

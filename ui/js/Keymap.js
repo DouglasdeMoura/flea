@@ -266,7 +266,8 @@ function setPreset(name) {
         if (row.mods !== "text" && row.mods !== "none") continue
         var action = actionGroup(row.action), rank = (row.preset === preset ? 0 : 2) + (row.mods === "text" ? 0 : 1)
         if (ranks[action] !== undefined && ranks[action] <= rank) continue
-        HINTS[action] = row.keys
+        // A menu hint is the key the operator presses, so an armed chord like dd prints its first d.
+        HINTS[action] = row.mods === "text" ? row.key : row.keys
         ranks[action] = rank
     }
 }

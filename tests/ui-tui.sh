@@ -638,9 +638,9 @@ class Native:
         for scenario, backend, peer, status_exit, capability, reason in [
             ("status-missing", "Running", "Alpha", 0, True, "Taildrop unavailable: tailscale could not start"),
             ("status-failed", "Running", "Alpha", 7, True, "Taildrop status failed"),
-            ("signed-out-stale-peer", "NeedsLogin", "Alpha", 0, True, "Tailscale is signed out"),
-            ("account-disabled-stale-peer", "Running", "Alpha", 0, False, "Taildrop is disabled for this account"),
-            ("empty", "Running", None, 0, True, "No peers reachable"),
+            ("signed-out-stale-peer", "NeedsLogin", "Alpha", 0, True, "signed out"),
+            ("account-disabled-stale-peer", "Running", "Alpha", 0, False, "disabled for this account"),
+            ("empty", "Running", None, 0, True, "no peers"),
         ]:
             status(scenario, peer, backend, status_exit, capability=capability)
             if scenario == "status-missing":
@@ -665,9 +665,9 @@ class Native:
         for scenario, changed, reason in [
             ("changed-node", {"node": "replacement-node"}, "Selected Taildrop device changed or is no longer reachable"),
             ("changed-address", {"address": "beta.fixture.invalid."}, "Selected Taildrop device changed or is no longer reachable"),
-            ("peer-offline", {"online": False}, "No peers reachable"),
-            ("signed-out-on-activate", {"backend": "NeedsLogin"}, "Tailscale is signed out"),
-            ("account-disabled-on-activate", {"capability": False}, "Taildrop is disabled for this account"),
+            ("peer-offline", {"online": False}, "no peers"),
+            ("signed-out-on-activate", {"backend": "NeedsLogin"}, "signed out"),
+            ("account-disabled-on-activate", {"capability": False}, "disabled for this account"),
         ]:
             status(scenario + "-before")
             peer_menu("provider-" + scenario)
