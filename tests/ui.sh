@@ -7526,8 +7526,11 @@ case_overlays() {
         [[ "$(ipc contextMenuVisible)" == "false" && "$(ipc cursor)" == "2" ]] || fail "$mode: the click outside the menu left it $(ipc contextMenuVisible) and moved the cursor to $(ipc cursor)"
         key -k Home >/dev/null
         settle
+        printf 'OVERLAYS_DIAG %s before view=%s focus=%s settings=%s menu=%s path=%s\n' \
+            "$mode" "$(ipc viewMode)" "$(ipc focusView)" "$(ipc settingsOpen)" "$(ipc contextMenuVisible)" "$(ipc path)"
         key , >/dev/null
         settle
+        printf 'OVERLAYS_DIAG %s after settings=%s focus=%s\n' "$mode" "$(ipc settingsOpen)" "$(ipc focusView)"
         [[ "$(ipc settingsOpen)" == "true" ]] || fail "$mode: the comma key did not open settings"
         hover_row "$n"
         settle
