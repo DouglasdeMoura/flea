@@ -184,7 +184,7 @@ Item {
     // corner: a filename is arbitrary text, so PlainText everywhere; MatchText draws its runs the same way.
     MatchText {
         id: name
-        visible: !root.searching && !root.renaming
+        visible: !root.searching && !root.inTrash && !root.renaming
         anchors.left: icon.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: mode.left
@@ -200,7 +200,7 @@ Item {
     // The search column set: the name shrinks to its content so the location beside it has room.
     MatchText {
         id: searchName
-        visible: root.searching
+        visible: root.searching || root.inTrash
         anchors.left: icon.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.verticalCenter: parent.verticalCenter
@@ -214,7 +214,7 @@ Item {
 
     Text {
         id: location
-        visible: root.searching
+        visible: root.searching || root.inTrash
         anchors.left: searchName.right
         anchors.leftMargin: Theme.spacing.gap
         anchors.right: size.left
