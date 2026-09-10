@@ -15,7 +15,7 @@ use crate::backend::trashinfo;
 use crate::error::FleaError;
 use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -73,17 +73,23 @@ pub fn search_scope(path: &str) -> Result<String, FleaError> {
 // One candidate per mount, in mountinfo order; list() skips whatever is not a readable dir, so
 // /proc, /sys and every unmounted name on the list cost one failed read_dir each and nothing else.
 pub fn top_trashes(mounts: &[PathBuf], uid: u32) -> Vec<PathBuf> {
-    mounts.iter().map(|m| top_trash(m, uid)).collect()
+    mounts.iter().filter_map(|m| top_trash(m, uid)).collect()
 }
 
-// One root per mount: $topdir/.Trash/$uid when .Trash is a non-symlink, world-writable,
-// sticky directory; otherwise $topdir/.Trash-$uid. Never both, so one entry cannot appear twice.
-fn top_trash(mount: &Path, uid: u32) -> PathBuf {
+// One root per mount: $topdir/.Trash/$uid when .Trash is a non-symlink, sticky,
+// world-writable directory; otherwise $topdir/.Trash-$uid. Never both.
+// A per-user root that already exists must be ours and not group/other-writable,
+// or a neighbour can plant files and .trashinfo that list() would restore from.
+fn top_trash(mount: &Path, uid: u32) -> Option<PathBuf> {
     let shared = mount.join(".Trash");
     if is_valid_shared_trash(&shared) {
-        return shared.join(uid.to_string());
+        let user = shared.join(uid.to_string());
+        if accept_user_trash(&user, uid) {
+            return Some(user);
+        }
     }
-    mount.join(format!(".Trash-{uid}"))
+    let fallback = mount.join(format!(".Trash-{uid}"));
+    accept_user_trash(&fallback, uid).then_some(fallback)
 }
 
 fn is_valid_shared_trash(dir: &Path) -> bool {
@@ -94,7 +100,19 @@ fn is_valid_shared_trash(dir: &Path) -> bool {
         return false;
     }
     let mode = meta.permissions().mode();
-    (mode & 0o1002) == 0o1002
+    (mode & 0o1000) != 0 && (mode & 0o0002) != 0
+}
+
+fn accept_user_trash(dir: &Path, uid: u32) -> bool {
+    match std::fs::symlink_metadata(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+        Ok(meta) => is_valid_user_trash(&meta, uid),
+    }
+}
+
+fn is_valid_user_trash(meta: &std::fs::Metadata, uid: u32) -> bool {
+    !meta.file_type().is_symlink() && meta.is_dir() && meta.uid() == uid && (meta.permissions().mode() & 0o0022) == 0
 }
 
 // The $topdir a relative Path= in this trash is resolved against. Home trash has none.
@@ -281,12 +299,13 @@ mod tests {
     #[test]
     fn a_top_trash_lists_beside_the_home_one() {
         let t = TestDir::new("trashlist-top");
-        t.dir("mnt/.Trash-7/files");
-        t.file("mnt/.Trash-7/files/u.txt", "u");
-        t.dir("mnt/.Trash-7/info");
-        t.file("mnt/.Trash-7/info/u.txt.trashinfo", "[Trash Info]\nPath=/mnt/u.txt\nDeletionDate=2025-08-26T21:38:05\n");
-        let tops = top_trashes(&[t.join("mnt"), t.join("unmounted")], 7);
-        assert_eq!(tops, vec![t.join("mnt/.Trash-7"), t.join("unmounted/.Trash-7")]);
+        let uid = euid();
+        t.dir(&format!("mnt/.Trash-{uid}/files"));
+        t.file(&format!("mnt/.Trash-{uid}/files/u.txt"), "u");
+        t.dir(&format!("mnt/.Trash-{uid}/info"));
+        t.file(&format!("mnt/.Trash-{uid}/info/u.txt.trashinfo"), "[Trash Info]\nPath=/mnt/u.txt\nDeletionDate=2025-08-26T21:38:05\n");
+        let tops = top_trashes(&[t.join("mnt"), t.join("unmounted")], uid);
+        assert_eq!(tops, vec![t.join(&format!("mnt/.Trash-{uid}")), t.join(&format!("unmounted/.Trash-{uid}"))]);
         // The unreadable candidate costs nothing: it simply contributes no rows.
         let got = list(None, &tops);
         assert_eq!(got.len(), 1);
@@ -321,6 +340,30 @@ mod tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&other, perms).unwrap();
         assert_eq!(top_trashes(&[t.join("other")], uid), vec![t.join("other/.Trash-7")]);
+    }
+
+    #[test]
+    fn a_per_user_root_that_others_can_write_is_not_used() {
+        let t = TestDir::new("trashlist-planted");
+        let uid = euid();
+        let shared = t.dir("mnt/.Trash");
+        let mut perms = std::fs::metadata(&shared).unwrap().permissions();
+        perms.set_mode(0o1777);
+        std::fs::set_permissions(&shared, perms).unwrap();
+        let planted = t.dir(&format!("mnt/.Trash/{uid}"));
+        let mut perms = std::fs::metadata(&planted).unwrap().permissions();
+        perms.set_mode(0o0777);
+        std::fs::set_permissions(&planted, perms).unwrap();
+        assert_eq!(
+            top_trashes(&[t.join("mnt")], uid),
+            vec![t.join(&format!("mnt/.Trash-{uid}"))],
+            "a world-writable uid dir is not a trash root"
+        );
+        let open = t.dir(&format!("other/.Trash-{uid}"));
+        let mut perms = std::fs::metadata(&open).unwrap().permissions();
+        perms.set_mode(0o0777);
+        std::fs::set_permissions(&open, perms).unwrap();
+        assert!(top_trashes(&[t.join("other")], uid).is_empty(), "a world-writable .Trash-uid is skipped");
     }
 
     #[test]
