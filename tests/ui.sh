@@ -6431,7 +6431,7 @@ case_dualsort() {
     menus_expect listContentY '. > 0' 'primary scrolls to its marked cursor'
     left=$(ipc dualState | jq -c '.panes[0] | del(.focused)')
     left_scroll=$(ipc listContentY)
-    key -k Tab >/dev/null; key -M shift -k s -m shift >/dev/null
+    key -k Tab >/dev/null; key S >/dev/null
     dual_sort_wait name:desc file-79.txt
     menus_expect dualState ".focused == 1 and ((.panes[0] | del(.focused)) == $left)" 'secondary reverse leaves primary listing, marks and requests unchanged'
     settings_wait_value '.sort.key == "name" and .sort.reverse == false'
@@ -6447,7 +6447,7 @@ case_dualsort() {
     menus_expect listContentY '. > 0' 'secondary scrolls to its marked cursor'
     right=$(ipc dualState | jq -c '.panes[1] | del(.focused)')
     right_scroll=$(ipc listContentY)
-    key -k Tab >/dev/null; key -M shift -k s -m shift >/dev/null
+    key -k Tab >/dev/null; key S >/dev/null
     dual_sort_wait size:desc file-79.txt
     menus_expect dualState ".focused == 0 and ((.panes[1] | del(.focused)) == $right)" 'primary reverse leaves secondary listing, marks and requests unchanged'
     shot dual-sort-independent
@@ -6477,7 +6477,7 @@ case_dualsort() {
     dual_sort_wait kind:asc file-00.txt
     key -k Tab >/dev/null
     dual_sort_wait kind:asc file-00.txt
-    key -k Tab >/dev/null; key -M shift -k s -m shift >/dev/null
+    key -k Tab >/dev/null; key S >/dev/null
     dual_sort_wait kind:desc file-79.txt
     settings_wait_value '.sort.key == "kind" and .sort.reverse == false'
     shot dual-sort-settings
@@ -6485,7 +6485,7 @@ case_dualsort() {
     for mode in typing results; do
         dual_sort_header size
         dual_sort_wait size:asc file-00.txt
-        key -M shift -k s -m shift >/dev/null
+        key S >/dev/null
         dual_sort_wait size:desc file-79.txt
         key f >/dev/null
         menus_expect keyDeliveryState '.searchMode == "typing"' "dual Search $mode starts through native key"
