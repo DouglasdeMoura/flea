@@ -137,6 +137,18 @@ menus_choose() {
     fi
 }
 
+# OpenWith.html rule 3: the dialog's door is the flyout's tail row, under its own separator, so a
+# plain Return on the parent row opens the flyout rather than the card.
+menus_open_with_dialog() {
+    local rows index
+    menus_seek openWith
+    key -k Right >/dev/null
+    rows=$(ipc menuState | jq -r '[.entries[] | select(.action == "openWith") | .submenu[]] | length')
+    [[ "$rows" -gt 0 ]] || fail "menus: the Open with flyout named nothing"
+    for ((index = 1; index < rows; index++)); do key -k Down >/dev/null; done
+    key -k Return >/dev/null
+}
+
 menus_file_menu() {
     local name="$1" input="${2:-pointer}" index
     index=$(row_index_of "$name")
@@ -276,7 +288,7 @@ SH
 menus_open_with() {
     local state target cursor count step pid deadline
     menus_file_menu a.txt
-    menus_choose openWith
+    menus_open_with_dialog
     menus_expect menuDialogState '.opened and (.busy | not) and any(.applications[]; .id == "flea-menu-fixture.desktop")' "Open With queries the real fixture registry"
     state=$(ipc menuDialogState)
     target=$(jq -r '.applications | to_entries[] | select(.value.id == "flea-menu-fixture.desktop") | .key' <<< "$state")
@@ -294,7 +306,7 @@ menus_open_with() {
     rm -f -- "$menu_box/launcher.pid"
     printf 'block\n' > "$menu_box/launcher-mode"
     menus_file_menu a.txt
-    menus_choose openWith
+    menus_open_with_dialog
     menus_expect menuDialogState '.opened and (.busy | not) and .applications[0].id == "flea-menu-fixture.desktop"' "fixture viewer retains registry priority"
     key -k Return >/dev/null
     menus_expect menuDialogState '.busy and .committing and any(.controls[]; .name == "Cancel" and .enabled)' "Cancel remains available while launcher waits"
@@ -314,18 +326,28 @@ menus_dialog_keys() {
     before=$(stat -c '%d:%i:%u:%g:%a:%s:%Y' "$menu_dir/a.txt")
     for action in moveTo copyTo openWith; do
         first=Field
-        [[ "$action" == openWith ]] && first=Applications
+        forward=(Cancel Submit)
+        probe=menuDialogState
+        # OpenWith.html rule 8 gives its own card a wider cycle: search, list, always box, buttons.
+        if [[ "$action" == openWith ]]; then
+            first=Applications
+            forward=(Always Cancel Open Field)
+            probe=openWithState
+        fi
         menus_file_menu a.txt key
-        menus_choose "$action"
-        menus_expect menuDialogState ".opened and (.busy | not) and .action == \"$action\" and any(.controls[]; .name == \"$first\" and .focused)" "$preset $action initial focus"
-        for name in Cancel Submit "$first"; do
+        if [[ "$action" == openWith ]]; then menus_open_with_dialog; else menus_choose "$action"; fi
+        menus_expect menuDialogState ".opened and (.busy | not) and .action == \"$action\"" "$preset $action opens"
+        menus_expect "$probe" "any(.controls[]; .name == \"$first\" and .focused)" "$preset $action initial focus"
+        for name in "${forward[@]}" "$first"; do
             key -k Tab >/dev/null
-            menus_expect menuDialogState "any(.controls[]; .name == \"$name\" and .focused and .visible and .enabled)" "$preset $action Tab focuses $name"
+            menus_expect "$probe" "any(.controls[]; .name == \"$name\" and .focused and .visible)" "$preset $action Tab focuses $name"
         done
-        for name in Submit Cancel "$first"; do
+        for ((back = ${#forward[@]} - 1; back >= 0; back--)); do
             key -M shift -k Tab -m shift >/dev/null
-            menus_expect menuDialogState "any(.controls[]; .name == \"$name\" and .focused and .visible and .enabled)" "$preset $action Shift+Tab focuses $name"
+            menus_expect "$probe" "any(.controls[]; .name == \"${forward[back]}\" and .focused and .visible)" "$preset $action Shift+Tab focuses ${forward[back]}"
         done
+        key -M shift -k Tab -m shift >/dev/null
+        menus_expect "$probe" "any(.controls[]; .name == \"$first\" and .focused and .visible)" "$preset $action Shift+Tab returns to $first"
         key -k Escape >/dev/null
         menus_expect menuDialogState '.opened | not' "$preset $action traversal dismisses without submitting"
         menus_equal "$preset $action restores listing focus" list "$(ipc focusView)"

@@ -2,7 +2,6 @@ import QtQuick
 import qs.Commons
 import "." as Flea
 import "js/Format.js" as Format
-import "js/Keymap.js" as Keymap
 
 // Menu-only actions share the existing card, field and button language.
 FocusScope {
@@ -14,8 +13,6 @@ FocusScope {
     property int requestId: 0
     property string folder: ""
     property var facts: ({})
-    property var applications: []
-    property int cursor: 0
     property string errorText: ""
     property bool busy: false
     property bool committing: false
@@ -23,15 +20,13 @@ FocusScope {
     property Item focusHolder: null
     readonly property bool inputAction: action === "newFile" || action === "moveTo" || action === "copyTo"
     readonly property bool deletionActive: action === "deletePermanently" && committing
-    readonly property bool canSubmit: !busy && (action === "openWith" ? applications.length > 0
-                                                 : inputAction && field.text.length > 0)
-    readonly property string title: ({openWith: "Open With", moveTo: "Move to", copyTo: "Copy to", properties: "Properties", newFile: "New File", deletePermanently: "Delete permanently"})[action] || ""
+    readonly property bool canSubmit: !busy && inputAction && field.text.length > 0
+    readonly property string title: ({moveTo: "Move to", copyTo: "Copy to", properties: "Properties", newFile: "New File", deletePermanently: "Delete permanently"})[action] || ""
     readonly property var cardItem: card
     readonly property var confirmationItem: confirmation
     readonly property var closeItem: closeFocus
     readonly property var submitItem: submitFocus
     readonly property var fieldItem: field
-    readonly property var applicationsItem: appList
     signal requested(var message)
     signal approved(var message)
     signal created(string path)
@@ -44,19 +39,17 @@ FocusScope {
         folder = parentPath
         focusHolder = holder
         facts = ({})
-        applications = []
-        cursor = 0
         errorText = ""
         checkPending = false
         confirmation.close()
         field.text = operation === "newFile" ? "New File" : parentPath
-        busy = operation === "properties" || operation === "openWith" || operation === "deletePermanently"
+        busy = operation === "properties" || operation === "deletePermanently"
         committing = false
         opened = true
         body.contentY = 0
         if (inputAction) { field.forceActiveFocus(); field.selectAll() }
         else closeFocus.forceActiveFocus()
-        if (busy) requested({c: "menuaction", op: operation === "openWith" ? "applications" : operation === "deletePermanently" ? "prepareDelete" : "properties", id: requestId})
+        if (busy) requested({c: "menuaction", op: operation === "deletePermanently" ? "prepareDelete" : "properties", id: requestId})
     }
     function receive(message) {
         if ((!opened && !deletionActive) || message.id !== requestId || message.op === "close") return
@@ -82,11 +75,6 @@ FocusScope {
             return
         }
         if (message.op === "delete") { deleted(Object.assign({count: facts.count}, message)); finish(); return }
-        if (message.op === "applications") {
-            applications = message.applications || []
-            if (applications.length) appList.forceActiveFocus()
-            return
-        }
         if (message.op === "properties") { facts = message; return }
         if (message.op === "validate") { approved(message); close(); return }
         if (message.op === "newFile") created(message.path)
@@ -125,7 +113,7 @@ FocusScope {
     }
     function submit() {
         if (!canSubmit) return
-        if (action !== "openWith" && action !== "newFile" && field.text.charAt(0) !== "/") {
+        if (action !== "newFile" && field.text.charAt(0) !== "/") {
             errorText = "Enter an absolute destination folder."
             return
         }
@@ -139,12 +127,11 @@ FocusScope {
         committing = true
         errorText = ""
         if (action === "newFile") requested({c: "newfile", op: "newFile", id: requestId, path: folder, name: field.text})
-        else if (action === "openWith") requested({c: "menuaction", op: "openWith", id: requestId, application: applications[cursor].id})
         else requested({c: "menuaction", op: "validate", id: requestId, action: action, dest: field.text})
     }
     // Each focusable child routes Tab here before Qt can move focus outside the card.
     function stepFocus(back) {
-        var items = [field, appList, closeFocus, submitFocus].filter(function(item) {
+        var items = [field, closeFocus, submitFocus].filter(function(item) {
             return item.visible && item.enabled && item.activeFocusOnTab
         })
         if (!items.length) return
@@ -236,41 +223,6 @@ FocusScope {
                         Keys.onEnterPressed: root.submit()
                     }
                 }
-                FocusScope {
-                    id: appList
-                    visible: root.action === "openWith"
-                    width: parent.width
-                    height: appsColumn.implicitHeight
-                    activeFocusOnTab: root.applications.length > 0 && !root.busy
-                    Keys.onTabPressed: function(event) { root.stepFocus((event.modifiers & Qt.ShiftModifier) !== 0) }
-                    Keys.onBacktabPressed: root.stepFocus(true)
-                    Keys.onPressed: function(event) {
-                        var action = Keymap.lookup(event.key, event.text, event.modifiers, "menu")
-                        if (action === "cursorDown") root.cursor = Math.min(root.applications.length - 1, root.cursor + 1)
-                        else if (action === "cursorUp") root.cursor = Math.max(0, root.cursor - 1)
-                        else if (action === "open" || action === "preview") root.submit()
-                        else { event.accepted = false; return }
-                        body.reveal(appRows.itemAt(root.cursor))
-                        event.accepted = true
-                    }
-                    Column {
-                        id: appsColumn
-                        width: parent.width
-                        Repeater {
-                            id: appRows
-                            model: root.applications
-                            Flea.MenuRow {
-                                required property var modelData
-                                required property int index
-                                width: appsColumn.width
-                                entry: ({label: modelData.label, action: "openWith", glyph: "external-link", disabled: root.busy})
-                                current: root.cursor === index && appList.activeFocus
-                                onPointerMoved: { root.cursor = index; appList.forceActiveFocus() }
-                                onActivated: { root.cursor = index; root.submit() }
-                            }
-                        }
-                    }
-                }
                 Repeater {
                     model: root.action === "properties" && root.facts.ok ? [
                         ["Path", root.facts.path],
@@ -291,7 +243,7 @@ FocusScope {
                 Text {
                     width: parent.width
                     visible: text.length > 0
-                    text: root.errorText || (root.busy ? "Working..." : root.action === "openWith" && !root.applications.length ? "No applications are registered for this item." : "")
+                    text: root.errorText || (root.busy ? "Working..." : "")
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
                     color: root.errorText ? Theme.color.error : Theme.color.muted
@@ -321,7 +273,7 @@ FocusScope {
                         Keys.onBacktabPressed: root.stepFocus(true)
                         Keys.onReturnPressed: root.submit()
                         Keys.onSpacePressed: root.submit()
-                        Flea.DialogButton { id: submitButton; label: root.action === "newFile" ? "Create" : root.action === "openWith" ? "Open" : root.action === "moveTo" ? "Move" : "Copy"; primary: parent.activeFocus; available: root.canSubmit; onActivated: root.submit() }
+                        Flea.DialogButton { id: submitButton; label: root.action === "newFile" ? "Create" : root.action === "moveTo" ? "Move" : "Copy"; primary: parent.activeFocus; available: root.canSubmit; onActivated: root.submit() }
                     }
                 }
             }

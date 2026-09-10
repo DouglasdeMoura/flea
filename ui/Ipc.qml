@@ -170,9 +170,12 @@ QtObject {
         function menuDialogState(): string {
             var dialog = root.pane.menuActions.item
             if (!dialog) return JSON.stringify({opened: false})
+            // Two dialogs load into that one Loader, and the application rows belong to Open with alone.
+            var applications = dialog.applications !== undefined ? dialog.applications : []
+            var cursor = dialog.cursor !== undefined ? dialog.cursor : 0
             return JSON.stringify({opened: dialog.opened, action: dialog.action, busy: dialog.busy,
                 committing: dialog.committing, error: dialog.errorText, facts: dialog.facts,
-                applications: dialog.applications, cursor: dialog.cursor, rect: root.fleaWindow.rectOf(dialog.cardItem),
+                applications: applications, cursor: cursor, rect: root.fleaWindow.rectOf(dialog.cardItem),
                 controls: [Object.assign(root.controlState("Cancel", dialog.closeItem), {enabled: dialog.closeItem.activeFocusOnTab}),
                     Object.assign(root.controlState("Submit", dialog.submitItem), {enabled: dialog.canSubmit}),
                     root.controlState("Field", dialog.fieldItem), root.controlState("Applications", dialog.applicationsItem)],
