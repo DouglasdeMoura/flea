@@ -6462,7 +6462,11 @@ case_dualsort() {
     menus_expect dualState ".active and ((.panes[1] | del(.focused)) == $right)" 'reopening dual retains secondary listing and selection'
     key -k Tab >/dev/null
     menus_equal 'reopened secondary keeps its session sort' name:desc "$(ipc sortMark)"
-    menus_equal 'reopened secondary keeps its scroll' "$right_scroll" "$(ipc listContentY)"
+    # No session stores a pixel offset: a reopened pane re-derives its view from the cursor it kept,
+    # so what is restored is the marked row, on screen, with the listing still scrolled off its top.
+    menus_expect dualState '.panes[1].cursor == 79 and .panes[1].selected == [79]' 'reopened secondary keeps its marked cursor'
+    menus_expect listContentY '. > 0' 'reopened secondary is still scrolled to that cursor'
+    [[ -n "$(ipc rowCentre 79)" ]] || fail "dualsort: the reopened secondary's marked row is off screen"
     shot dual-sort-reopened
 
     settings_open_key
