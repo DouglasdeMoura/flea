@@ -331,8 +331,13 @@ Item {
         root._pendingPassword = ""
         root.result = "failed"
         root.message(reason, true)
+        // The secret the operator just typed stays in process memory so Retry opens populated: a
+        // connect failure is what Retry exists for, and 0.1.6 carried it back through the reopen.
+        // Only the helper's own refusals reach here; a rejected password clears it below.
+        var attempted = password || root._requestPassword
+        if (attempted.length > 0) root.remember(root._pendingUri, attempted)
         if (!root.finishRequest(false, reason))
-            root.retryRequested(root._pendingUri, root._pendingLabel, password || "", reason, true, root._pendingOrigin)
+            root.retryRequested(root._pendingUri, root._pendingLabel, attempted, reason, true, root._pendingOrigin)
     }
 
     function finishRequest(success, reason) {
