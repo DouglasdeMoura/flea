@@ -4970,7 +4970,7 @@ EOS
     [[ "$(ipc rowAt 0)" == "alpha.txt|"* ]] \
         || fail "networkauth: corrected Retry browsed stale child"
     [[ "$(ipc dialogOpen)" == "false" && "$(ipc shareBrowserOpen)" == "false" ]] \
-        || fail "networkauth: corrected Retry left stale failure UI"
+        || fail "networkauth: corrected Retry left stale failure UI (dialog $(ipc dialogOpen), shares $(ipc shareBrowserOpen), status $(ipc networkStatus), result $(ipc networkResult))"
     assert_runtime_canary_absent
     sleep "$transient_clear_s"
     [[ -z "$(ipc lastMessage)" ]] \
