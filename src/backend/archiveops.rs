@@ -308,11 +308,12 @@ mod tests {
         let d = TestDir::new("archwho");
         let work = Work::new(d.path(), "who").expect("work directory");
         let quiet = vec!["/usr/bin/false".to_string()];
-        let converting = run_boxed("convert", quiet.clone(), d.path(), &work.dir).unwrap_err().to_string();
-        assert!(converting.contains("convert") && !converting.contains("archive"),
-                "an image conversion says so: {}", converting);
-        let archiving = run_boxed("archive", quiet, d.path(), &work.dir).unwrap_err().to_string();
-        assert!(archiving.contains("archive"), "and an archive still says archive: {}", archiving);
+        let converting = run_boxed("convert", quiet.clone(), d.path(), &work.dir).unwrap_err();
+        assert_eq!(converting.where_, "convert", "an image conversion says so");
+        assert!(converting.msg.contains("convert") && !converting.msg.contains("archive"),
+                "and its wording does too: {}", converting.msg);
+        let archiving = run_boxed("archive", quiet, d.path(), &work.dir).unwrap_err();
+        assert_eq!(archiving.where_, "archive", "and an archive still says archive");
     }
 
     #[test]
