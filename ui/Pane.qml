@@ -154,17 +154,18 @@ FocusScope {
     // chooseView (the chrome's buttons and ctrl-1/2/3) writes the same key, so a restart opens on
     // it. Dual and a word this build cannot draw both land on the list, via ViewState.view.
     property string viewMode: "list"
+    // A tab restore holds this so the preferences timer cannot assign ViewState.view over the
+    // snapshot; chooseView clears it, because that is an explicit view change.
+    property bool holdView: false
     property bool preferencesReady: false
     Component.onCompleted: {
         root.viewMode = root.listOnly ? "list" : ViewState.view
         root.preferencesReady = true
     }
-    // Only the list view draws a filter, so leaving it takes the filter with it.
-    onViewModeChanged: {
-        Filter.close(root)
-        if (root.preferencesReady && !root.listOnly && (!root.dualMode || root.viewMode !== "list") && ViewState.state.view !== root.viewMode)
-            ViewState.changeKey("view", root.viewMode)
-    }
+    // Only the list view draws a filter, so leaving it takes the filter with it. Persistence is
+    // chooseView's, not this handler's: Tabs.apply assigns viewMode, and writing that would replace
+    // the stored restart view with a tab snapshot.
+    onViewModeChanged: Filter.close(root)
     readonly property string listingPreferences: JSON.stringify([ViewState.state.hidden, ViewState.state.sort,
         ViewState.state.foldersFirst, ViewState.state.groupByKind])
     property string appliedListingPreferences: ""
@@ -184,8 +185,10 @@ FocusScope {
         id: preferences
         interval: 0
         onTriggered: {
-            var desired = root.listOnly ? "list" : ViewState.view
-            if (root.viewMode !== desired) root.viewMode = desired
+            if (!root.holdView) {
+                var desired = root.listOnly ? "list" : ViewState.view
+                if (root.viewMode !== desired) root.viewMode = desired
+            }
             if (!root.visible || !root.path || root.listInFlight || root.searchMode.length > 0
                     || root.appliedListingPreferences === root.listingPreferences) return
             root.openWithoutHistory(root.path)
@@ -520,7 +523,7 @@ FocusScope {
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.loadSelection()
     }
     function togglePreviewColumn() { ViewState.changeLeaf("preview", { column: !ViewState.previewColumn }) }
-    function chooseView(mode) { ViewState.setView(mode) }
+    function chooseView(mode) { root.holdView = false; ViewState.setView(mode) }
     function focusPreviewColumn() {
         if (!ViewState.previewColumn || root.dualMode) return
         if (root.viewMode === "columns" && columnsLoader.item) columnsLoader.item.focusPreview()
